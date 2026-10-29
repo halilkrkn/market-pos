@@ -1,0 +1,109 @@
+# ==============================================================================
+# Market POS - .gitignore
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Flutter & Dart Çıktıları
+# ------------------------------------------------------------------------------
+.dart_tool/
+.packages
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# ------------------------------------------------------------------------------
+# 2. İşletim Sistemi ve Geçici Dosyalar
+# ------------------------------------------------------------------------------
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Linux
+*~
+
+# ------------------------------------------------------------------------------
+# 3. Geliştirme Araçları & Editörler (IDE)
+# ------------------------------------------------------------------------------
+# JetBrains (Android Studio, IntelliJ)
+.idea/
+*.iml
+*.iws
+*.ipr
+out/
+
+# VS Code & Antigravity IDE yerel ayarları
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.code-workspace
+.history/
+
+# ------------------------------------------------------------------------------
+# 4. Platform Özel Derleme Çıktıları
+# ------------------------------------------------------------------------------
+# Android
+**/android/app/release/
+**/android/app/debug/
+**/android/.gradle/
+**/android/captures/
+**/android/gradlew
+**/android/gradlew.bat
+**/android/local.properties
+**/android/**/GeneratedPluginRegistrant.java
+
+# iOS
+**/ios/**/Pods/
+**/ios/.symlinks/
+**/ios/Flutter/Flutter.framework
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/app.framework
+**/ios/**/GeneratedPluginRegistrant.h
+**/ios/**/GeneratedPluginRegistrant.m
+
+# Windows Masaüstü
+**/windows/flutter/ephemeral/
+**/windows/**/GeneratedPluginRegistrant.cc
+**/windows/**/GeneratedPluginRegistrant.h
+
+# Web
+**/web/build/
+
+# ------------------------------------------------------------------------------
+# 5. Hassas Bilgiler, Güvenlik ve Gizli Dosyalar
+# ------------------------------------------------------------------------------
+*.env
+*.env.*
+*.key
+*.keystore
+*.jks
+*.p12
+*.pem
+google-services.json
+GoogleService-Info.plist
+firebase_options.dart.bak
+
+# ------------------------------------------------------------------------------
+# 6. Veritabanı, Günlükler ve Çökme Raporları
+# ------------------------------------------------------------------------------
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
