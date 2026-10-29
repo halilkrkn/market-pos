@@ -19,7 +19,7 @@
   - v1.1 belgesi: [`docs/archive/MARKET_POS_AI_STUDIO_BUILD_PLANI_v1.1.md`](./archive/MARKET_POS_AI_STUDIO_BUILD_PLANI_v1.1.md)
 - **Çoklu Cihaz Yaklaşımı:** Windows bilgisayar ve mobil telefonlar aynı temel market yönetim işlevlerine (ürün, satış, stok, dashboard, raporlama) sahiptir. Barkod girişi PC'de USB HID, mobilde kamera ile sağlanır.
 - **Banka POS Kapsamı:** Banka POS terminali entegrasyonu ilk sürümün kapsamı dışındadır.
-- **Git Altyapısı:** Depo `main` dalında başlatılmış, `.gitignore` devrededir; henüz `git add` veya `git commit` **yapılmamıştır**.
+- **Git Altyapısı:** Depo `main` dalında başlatılmış, ilk commit atılmış (`0d1c0af`), `.gitignore` devrededir.
 - **Kaynak Kodu:** **Henüz hiçbir Flutter/Dart uygulama kodu yazılmamıştır.**
 - **Proje İskeleti:** Henüz `flutter create` çalıştırılmamıştır.
 

@@ -6,7 +6,7 @@ Bu belge, **Market POS** projesinin geliştirilmesinde izlenecek felsefi ve yön
 
 ## 1. Ana Dokümanın Bağlayıcılığı
 
-Projenin tek ve nihai gerçeği [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../../../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) (v1.1) belgesidir. 
+Projenin tek ve nihai gerçeği [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../../../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) (v1.2) belgesidir. 
 - Yapay zekâ asistanları veya geliştiriciler ana belgede bulunmayan özellikleri projeye kendiliğinden ekleyemez.
 - İhtiyaç duyulan değişiklikler önce ana belgede tartışılır ve onaylanır.
 

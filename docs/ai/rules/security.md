@@ -19,8 +19,10 @@ Bu belge, **Market POS** projesinin veri izolasyonu, kimlik doğrulama, yetkilen
 
 ## 2. Kimlik Doğrulama ve Yetkilendirme
 
-- Kullanıcı kimlik doğrulama altyapısı olarak **Supabase Auth** kullanılır.
-- Kullanıcıların şubelerdeki rolleri (`Owner`, `Manager`, `Cashier`) iş kuralları ve veri erişim sınırlarıyla güvenceye alınır. Sadece arayüzde buton gizlemek yetkilendirme sayılmaz.
+- Kullanıcı kimlik doğrulama altyapısı olarak **Supabase Auth** kullanılır (`CONFIRMED`).
+- **Kullanıcı Rolleri ve Yetki Durumu (`OPEN`):** `Owner`, `Manager`, `Cashier` gibi unvanlar yalnızca olası örneklerdir; henüz kesinleşmiş onaylı roller değildir.
+  - Market sahibi dışında personelin sistemi kullanıp kullanmayacağı, kullanıcı sayısı, hangi rollerin ürün fiyatı değiştirme, stok düzeltme veya satış iptali yapabileceği ve işlem geçmişinde kullanıcı kimliği tutulma zorunluluğu Faz 0 kapsamında kullanıcı kararı bekleyen açık gereksinimlerdir (`OPEN`).
+  - Rol ve yetki sınırları netleştiğinde yetkilendirme sadece arayüzde buton gizlemekle sınırlı kalmayacak, iş kuralları ve RLS seviyesinde güvenceye alınacaktır.
 
 ---
 

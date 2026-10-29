@@ -91,7 +91,7 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 - Satış tamamlandığında atomik transaction ile satış kaydı, sepet detayları ve stok hareketinin oluşturulması.
 - Satış geçmişini anlık ve geriye dönük görüntüleme.
 - Çevrimdışı satışların yerel olarak kaydedilmesi ve bağlantı kurulduğunda senkronizasyonu.
-- **Ödeme Sınırı:** İlk sürümde nakit, kart veya karma ödeme türü kullanıcı tarafından arayüzde seçilerek kaydedilir.
+- **Ödeme İşlemleri Durumu:** Satış ekranında nakit, kart veya karma ödeme türlerinin kaydedilmesi birer değerlendirme önerisidir (`PROPOSED`). Parçalı/karma ödeme mantığı, para üstü hesabı, ödeme yöntemlerinin yerel kaydı ve ödeme iptal/iade davranışları henüz kesinleşmemiş olup, Faz 0 kapsamında kullanıcı kararı bekleyen açık konulardır (`OPEN`). Kullanıcı onayı olmadan kesin bir ödeme işleyişi tasarlanamaz.
 
 > [!IMPORTANT]
 > **Banka POS Terminali Entegrasyonu Kapsam Dışıdır:**  
@@ -141,8 +141,8 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 
 - **Tenant:** Sisteme müşteri olarak kaydolan işletme veya market grubu.
 - **Store:** Tenant'a bağlı fiziksel market, mağaza veya şube.
-- **User:** Sisteme giriş yapan işletme sahibi, yönetici veya kasiyer.
-- **Membership:** Kullanıcının hangi tenant veya şubede hangi rollere sahip olduğunu belirleyen ilişki.
+- **User:** Sisteme giriş yapan kullanıcı (örnek roller: işletme sahibi, yönetici, çalışan veya kasiyer).
+- **Membership:** Kullanıcının hangi tenant veya şubede hangi yetkilere sahip olduğunu belirleyen ilişki. (Yetkilendirme kapsamı, çalışan sayısı ve rol sınırları `OPEN` durumundadır).
 - **Device:** Kasadaki Windows masaüstü bilgisayar veya personelin elindeki telefon/tablet.
 
 Her iş kaydı mutlaka doğru `tenant_id` ve gerektiğinde `store_id` ile ilişkilendirilir.

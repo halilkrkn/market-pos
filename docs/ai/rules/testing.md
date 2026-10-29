@@ -9,8 +9,9 @@ Bu belge, **Market POS** projesinde kalite güvencesi, test seviyeleri ve test e
 Sabit ve yapay bir "yüzde X test kapsamı" kuralı yerine, projenin en kritik ve finansal risk taşıyan alanlarına odaklanan risk temelli bir test stratejisi uygulanır.
 
 Öncelikli test alanları:
-1. **Finansal Doğruluk:** Para hesaplamaları, sepet ara toplamı, indirim, vergi ve genel toplam hesapları.
-2. **Atomik Veri Yazımı:** Satış, stok düşümü ve senkronizasyon kuyruğu yazımının aynı transaction içinde tamamlanması.
+1. **Finansal Doğruluk (`CONFIRMED`):** Para hesaplamaları, sepet ara toplamı, miktar ve genel satış toplamı hesaplarının kesinlik kaybı olmadan doğrulanması.
+   - *Not:* Vergi (KDV), indirim, kampanya ve benzeri finansal kurallar henüz onaylanmış MVP gereksinimi değildir; bu tür ek hesaplamalar onaylandığı takdirde test kapsamına alınacak açık/öneri (`OPEN`/`PROPOSED`) konularıdır. Henüz onaylanmamış özellikler için zorunlu test kuralı işletilemez.
+2. **Atomik Veri Yazımı (`CONFIRMED`):** Satış, stok düşümü ve senkronizasyon kuyruğu yazımının aynı transaction içinde tamamlanması.
 3. **Senkronizasyon ve Idempotency:** Tekrarlanan isteklerin mükerrer satış oluşturmaması, ağ kesintisi sonrası veri tutarlılığı.
 4. **Çoklu Kiracı İzolasyonu:** Supabase RLS politikalarının farklı marketlerin verisini kesin olarak izole ettiğinin doğrulanması.
 
