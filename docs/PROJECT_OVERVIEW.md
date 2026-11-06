@@ -2,7 +2,7 @@
 
 **Belge Sürümü:** v1.0  
 **Tarih:** 4 Kasım 2026  
-**Aşama:** Faz 0 — Planlama ve Mimari Kararlar  
+**Aşama:** Faz 1 — MVP Uygulama ve Doğrulama (Faz 1.1 Kabul Edildi)  
 **Kanonik Referans:** [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../MARKET_POS_AI_STUDIO_BUILD_PLANI.md)  
 **Kök Kurallar:** [`AGENTS.md`](../AGENTS.md)
 
@@ -31,7 +31,7 @@ MMS, perakende operasyonunu 10 entegre modül üzerinden yürütür:
 7. **Çoklu Cihaz ve Senkronizasyon:** Windows bilgisayar kapalıyken bile mobil cihazlarda yerel satış; Windows açıldığında LAN üzerinden deterministik FIFO Outbox senkronizasyonu.
 8. **Dashboard ve Finansal Doğruluk:** Günlük ciro, brüt kâr (maliyeti girilmiş ürünler üzerinden), kritik stoklar ve son hareketler.
 9. **Kullanıcı ve Cihaz Yönetimi:** Tek işletme sahibi hesabı, Windows ekranından QR kod ile dinamik mobil cihaz eşleştirme, kalıcı cihaz kimliği (`device_id`).
-10. **Yedekleme ve Kurtarma:** SQLite WAL canlı anlık görüntüsü (`VACUUM INTO`), istemci taraflı `AES-256-GCM` şifreleme ve bağımsız Google Drive yedeklemesi.
+10. **Yedekleme ve Kurtarma:** SQLite WAL canlı anlık görüntüsü (`VACUUM INTO`), istemci taraflı S5A-4 standardında `AES-256-CBC` + `HMAC-SHA256` (Encrypt-then-MAC) şifreleme ve bağımsız Google Drive yedeklemesi.
 
 ---
 

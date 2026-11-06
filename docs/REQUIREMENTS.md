@@ -30,7 +30,7 @@ Gereksinim belgeleri 3 katmanda yönetilmektedir:
 | **BR-TNT** | Tenant ve Şube İzolasyonu | 5 Kural | Her kayıtta `tenant_id` zorunluluğu, bileşik foreign key `(tenant_id, store_id)` (`BR-TNT-02`), pilotta tek market tek mağaza standardı (`BR-TNT-03`). |
 | **BR-SYNC** | Senkronizasyon & Outbox | 7 Kural | Kalıcı `sync_operations` kuyruğu (`BR-SYNC-01`), deterministik artan `client_sequence_number` (`BR-SYNC-03`), `idempotency_key` ile mükerrerlik koruması, gerçekleşmiş satışların çakışmada asla silinmemesi (`BR-SYNC-06`). |
 | **BR-DSH** | Dashboard ve Finans | 4 Kural | Takvim günü bazlı ciro (`BR-DSH-01`), maliyeti girilmiş ürünler üzerinden brüt kâr hesabı (`BR-DSH-02`), genel giderler olmadan net kâr iddiasında bulunmama ilkesi (`BR-DSH-03`). |
-| **BR-BAK** | Yedekleme ve Kurtarma | 6 Kural | Bağımsız Google Drive yedeklemesi (`BR-BAK-01`), canlı SQLite `VACUUM INTO` snapshot'ı (`BR-BAK-03`), 30 günlük döngüsel saklama (`BR-BAK-04`), geri yükleme öncesi koruyucu güvenlik yedeği (`BR-BAK-05`), AES-256-GCM zarf şifreleme (`BR-BAK-06`). |
+| **BR-BAK** | Yedekleme ve Kurtarma | 6 Kural | Bağımsız Google Drive yedeklemesi (`BR-BAK-01`), canlı SQLite `VACUUM INTO` snapshot'ı (`BR-BAK-03`), 30 günlük döngüsel saklama (`BR-BAK-04`), geri yükleme öncesi koruyucu güvenlik yedeği (`BR-BAK-05`), S5A-4 standardında AES-256-CBC + HMAC-SHA256 şifreleme (`BR-BAK-06`). |
 | **BR-DEV** | Cihaz ve Donanım | 4 Kural | PC'de USB HID klavye taklitli barkod okuyucu (`BR-DEV-01`), mobilde kamera barkod tarama (`BR-DEV-02`), Windows ekranından QR kod ile cihaz eşleştirme (`BR-DEV-03`). |
 | **BR-USR** | Kullanıcı ve Güvenlik | 4 Kural | Pilot aşamasında tek işletme sahibi hesabı (`BR-USR-01`), hassas işlemler için açık onay ve şifre gereksinimi (`BR-USR-03`). |
 

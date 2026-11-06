@@ -2,7 +2,7 @@
 
 **Belge Sürümü:** v1.0  
 **Tarih:** 4 Kasım 2026  
-**Aşama:** Faz 0 — Geliştirme Ortamı, Kurulum ve Kodlama Standartları  
+**Aşama:** Faz 1 — Geliştirme Ortamı, Kurulum ve Kodlama Standartları  
 **Bağlayıcı Kurallar:** [`AGENTS.md`](../AGENTS.md), [`docs/ai/rules/clean-architecture.md`](./ai/rules/clean-architecture.md), [`docs/ai/rules/clean-code.md`](./ai/rules/clean-code.md)
 
 ---
@@ -23,7 +23,7 @@ MARKET MMS; Windows masaüstü, Android ve iOS platformlarını tek bir Flutter/
 
 ## 2. Mimari ve Dizin Mimarisi (Feature-First + Clean Architecture)
 
-Proje kaynak kodu Faz 1'de açılacak olup, aşağıdaki katı katman ve bağımlılık yönüne göre organize edilecektir:
+Proje kaynak kodu Faz 1.1 ile açılmış olup (`packages/mms_client_storage`, `test_spikes/spike_01_backend`, `lib`), aşağıdaki katı katman ve bağımlılık yönüne göre organize edilmektedir:
 
 ```text
 lib/

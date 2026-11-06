@@ -80,8 +80,8 @@ $$S_{\text{next\_generator}} = \max\left(S_{\text{backup\_max}}, \; \max(S_{\tex
 
 ## 4. Güvenlik ve Kriptografik Risk Değerlendirmesi
 
-1. **AES-256-GCM Seçimi:** CBC moduna kıyasla GCM modu kimlik doğrulamalı şifreleme (AEAD) sağlar. Dosya üzerinde 1 bit dahi oynanırsa çözme aşamasında `AuthenticationTagMismatchException` fırlatılır ve hasarlı verinin veritabanına girmesi engellenir.
-2. **PBKDF2 Anahtar Türetme:** 100.000 iterasyon ve 16-byte rastgele salt, kaba kuvvet (brute-force) saldırılarına karşı endüstri standardı güvenlik sunar.
+1. **AES-256-CBC ve HMAC-SHA256 (Encrypt-then-MAC) Seçimi:** S5A-4 ile doğrulanmış FIPS 197 uyumlu AES-256-CBC (PKCS#7 padding) ve HMAC-SHA256 bütünlük doğrulaması kullanılır. Dosya üzerinde 1 bit dahi oynanırsa çözme öncesinde HMAC uyuşmazlığı tespit edilir ve hasarlı verinin veritabanına girmesi engellenir.
+2. **PBKDF2 Anahtar Türetme:** PBKDF2-HMAC-SHA256 ile en az 600.000 iterasyon ve 16 bayt kriptografik rastgele salt kullanılır; kaba kuvvet (brute-force) saldırılarına karşı en yüksek güvenlik standardı sağlanır.
 3. **Google Drive Scope Sınırı (`drive.file`):** Uygulama hiçbir koşulda kullanıcının özel sürücüsündeki diğer klasörleri tarayamaz; en katı güvenlik denetimlerinden başarıyla geçer.
 
 ---
@@ -93,7 +93,7 @@ $$S_{\text{next\_generator}} = \max\left(S_{\text{backup\_max}}, \; \max(S_{\tex
 | **VAL-BAK-01** | Eşzamanlılık | WAL modunda ham dosya kopyalamanın bozulmaya yol açması | CRITICAL | **ÇÖZÜLDÜ** (`VACUUM INTO` zorunlu kılındı) |
 | **VAL-BAK-02** | Veri Kaybı | Geri yüklemede bekleyen Outbox işlemlerinin ezilmesi | CRITICAL | **ÇÖZÜLDÜ** (Staging + İmmutable Sequence kuralı kondu) |
 | **VAL-BAK-03** | İdempotency | Ağ kopması sonrası yanıtsız kalan satışın mükerrer basılması | HIGH | **ÇÖZÜLDÜ** (`verify-keys` mutabakatı eklendi) |
-| **VAL-BAK-04** | Güvenlik | Buluta yüklenen yedeğin açık metin sızdırılması | HIGH | **ÇÖZÜLDÜ** (İstemci taraflı AES-256-GCM zarflama) |
+| **VAL-BAK-04** | Güvenlik | Buluta yüklenen yedeğin açık metin sızdırılması | HIGH | **ÇÖZÜLDÜ** (İstemci taraflı AES-256-CBC + HMAC-SHA256 şifreleme) |
 | **VAL-BAK-05** | Yetki Aşımı | Google Drive'da geniş izin istenmesi sonucu kullanıcı güvensizliği | MEDIUM | **ÇÖZÜLDÜ** (Yalnızca `drive.file` kapsamı seçildi) |
 | **VAL-BAK-06** | Kota Aşımı | Sınırsız günlük yedek birikmesi sonucu Drive kotasının dolması | LOW | **ÇÖZÜLDÜ** (30 günlük döngüsel temizlik kuralı getirildi) |
 

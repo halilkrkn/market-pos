@@ -515,4 +515,4 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 
 - Bu şartname `MARKET_POS_AI_STUDIO_BUILD_PLANI.md` (v1.2.2) ve `docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md` (v1.3) ile tam tutarlıdır.
 - İş kuralları şartnamesi v1.2 düzeyinde kesinleştirilmiştir.
-- **Faz 0 henüz tamamlanmamıştır.** Kesin veri modeli (tablo şemaları, alan tipleri, foreign key, index), offline senkronizasyon protokolü ve platform depolama doğrulaması tamamlanmadan ve kullanıcıdan açık onay alınmadan **Flutter/Dart kodlamasına geçilemez**.
+- **Faz 0 ve Faz 1.1 tamamlanmıştır.** Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi) uygulamasına geçmeden önce aktif DT-01 alt aşamalarının tamamlanması ve kullanıcıdan açık onay alınması esastır.

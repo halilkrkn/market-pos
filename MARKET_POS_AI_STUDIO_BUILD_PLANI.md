@@ -1,10 +1,10 @@
 # MARKET POS — Market Management System (MMS)
 ## Proje Ana Planı ve Mimari Dokümanı
 
-**Versiyon:** 1.3 (Windows Local Master Hub ve Yerel Senkronizasyon Entegrasyonu)  
-**Tarih:** 4 Kasım 2026  
-**Durum:** Faz 0 — Planlama ve mimari kararlar  
-**Geliştirme durumu:** Henüz uygulama kodu yazılmayacak  
+**Versiyon:** 1.4 (Mimari ve Faz 1.1 Mutabakatı)  
+**Tarih:** 6 Kasım 2026  
+**Durum:** Faz 1 — MVP Uygulama ve Doğrulama  
+**Geliştirme durumu:** Faz 1.1 Windows Client Foundation tamamlandı ve kabul edildi; DT-01.3 teknik çalışması tamamlandı (proje sahibi kabulü bekleniyor).  
 **Teknik Proje / Klasör Adı:** `market-pos`  
 **Ürün Tanımı:** Market Management System (MMS) — Profesyonel Market Yönetim SaaS Uygulaması  
 **Pilot:** Arkadaşın marketi  
@@ -41,18 +41,18 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 |---|---|
 | Ürün Konsepti | Market Management System (MMS) — Tam işlevli market yönetim SaaS |
 | Uygulama Çerçevesi | Flutter (Dart) |
-| Yerel veritabanı | Drift + SQLite (Mobil ve Masaüstü operasyonel depolama) |
-| Merkezi veritabanı | Pilot için Windows Service Merkezi SQLite (Single-Writer); Gelecek SaaS için PostgreSQL |
-| Kimlik doğrulama | Pilot için Yerel API & Cihaz Eşleştirme; Gelecek SaaS için Supabase Auth |
+| Yerel veritabanı | Drift + SQLite (Mobil ve Masaüstü yerel operasyonel depolama, `mms_client.db`) |
+| Merkezi veritabanı | Pilot için Windows Service Dart Shelf + Merkezi SQLite (Single-Writer, `%PROGRAMDATA%\MarketMMS\data\market_master.db`); Gelecek SaaS için PostgreSQL / Supabase |
+| Kimlik doğrulama | Pilot için Dinamik QR Kod & Token Eşleştirme (Tek Owner); Gelecek SaaS için Supabase Auth |
 | Yerel veri erişimi | Repository arayüzleri (Clean Architecture) |
 | Durum yönetimi | Riverpod |
 | Navigasyon | go_router |
 | Barkod Girişi | Masaüstünde USB HID okuyucu, mobil cihazlarda kamera ile tarama |
 | Ürün bilgisi | Open Food Facts API (doğrulama gerektiren öneri mekanizması) |
-| Mimari | Feature-first + Clean Architecture |
-| Kod kalitesi | SOLID, Clean Code, risk temelli otomatik testler |
-| Senkronizasyon | Yerel Wi-Fi / LAN API, kalıcı Outbox işlem kuyruğu ve çakışma yönetimi |
-| Yedekleme | Windows Service `VACUUM INTO` + Google Drive'a bağımsız şifreli otomatik yedek |
+| Mimari | Paket tabanlı Feature-first + Clean Architecture (`mms_client_storage`, `spike_01_backend`, `lib`) |
+| Kod kalitesi | SOLID, Clean Code, 5 aktif beceri, risk temelli otomatik testler (221 yeşil test) |
+| Senkronizasyon | Yerel Wi-Fi / LAN HTTPS API, kalıcı Outbox işlem kuyruğu ve çakışma yönetimi |
+| Yedekleme | Windows Service `VACUUM INTO` + Google Drive'a bağımsız S5A-4 standardında AES-256-CBC, PKCS#7 padding, PBKDF2-HMAC-SHA256 (600.000 iterasyon) ve HMAC-SHA256 Encrypt-then-MAC şifreli otomatik yedek |
 | Dağıtım | Platforma özel dağıtım ve güncelleme stratejisi |
 | Pilot yaklaşımı | Tek markette Windows Master Hub gerçek kullanım; çoklu market SaaS'a hazır mimari |
 
@@ -117,14 +117,15 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 ### 2.2 Pilot öncesi zorunlu altyapı
 
 - Çoklu market (Tenant) veri izolasyonu (Pilot için merkezi API katmanında, Gelecek SaaS için RLS).
-- Yerel veritabanı (Drift) ve migration sistemi.
-- Kalıcı çevrimdışı işlem kuyruğu (`sync_operations`).
+- Windows Local Master Hub mimarisi (Dart Shelf HTTPS API + Merkezi SQLite tekil yazıcı; ilk planlamadaki Supabase pilot seçeneğinin yerini almıştır).
+- Yerel veritabanı (Drift + SQLite) ve migration sistemi (`packages/mms_client_storage`).
+- Kalıcı çevrimdışı işlem kuyruğu (`sync_operations` outbox durum makinesi).
 - Tekrarlanan satış işlemlerine karşı idempotency (`idempotency_key`).
-- Çakışma tespiti ve çözüm kuralları (satışlar asla silinmez).
-- Temel kullanıcı kimlik doğrulama ve yetkilendirme (Pilot için tek yerel Owner hesabı; Gelecek SaaS için Supabase Auth).
-- Otomatik yedekleme ve geri yükleme testi.
+- Çakışma tespiti ve çözüm kuralları (satışlar asla silinmez, eksi stok `allow`).
+- Temel kullanıcı kimlik doğrulama ve yetkilendirme (Pilot için Dinamik QR ve tek yerel Owner hesabı; Gelecek SaaS için Supabase Auth).
+- Otomatik yedekleme ve geri yükleme testi (`VACUUM INTO` + Google Drive).
 - Kritik işlemlere ilişkin audit kayıtları (`audit_logs`).
-- Risk temelli birim ve entegrasyon testleri.
+- Risk temelli birim ve entegrasyon testleri (221 test).
 
 ### 2.3 Sonraki sürümlere bırakılabilecek özellikler
 
@@ -184,18 +185,18 @@ tam işlevli olarak yer alır.
 
 ### 4.2 Offline-first temel kararı
 
-Windows bilgisayar ve telefonlar kendi yerel Drift + SQLite veritabanlarında çalışır. İnternet kesildiğinde ürün arama, satış tamamlama ve stok hareketleri kesintisiz devam eder.
+Windows bilgisayar ve telefonlar kendi yerel Drift + SQLite veritabanlarında (`mms_client.db`) çalışır. İnternet kesildiğinde ürün arama, satış tamamlama ve stok hareketleri kesintisiz devam eder.
 
-Bağlantı kurulduğunda cihazların kuyrukta bekleyen işlemleri yerel ağ (LAN) üzerinden Windows Local Master Hub API'sine aktarılır.
+Mağaza içi ağda (Wi-Fi / LAN), cihazlar Windows Local Master Hub API'sine bağlanır; mağazanın genel internet erişimi kopsa dahi yerel senkronizasyon çalışmaya devam eder. Windows kapalıyken veya servis durduğunda tüm cihazlar (Windows masaüstü UI dahil) yerel outbox kuyruğuna yazar.
 
 ### 4.3 Yerel veri akışı
 
 1. Kullanıcı işlemi başlatır (ör. barkod okutur veya satışı onaylar).
 2. İş kuralı doğrulamaları yerel olarak tamamlanır.
 3. Satış, sepet satırları, stok hareketi ve senkronizasyon operasyonu **tek bir yerel transaction** içinde atomik olarak kaydedilir.
-4. Senkronizasyon servisi işlemi merkezi veritabanına göndermeyi dener.
-5. Başarılı işlem senkronize olarak işaretlenir.
-6. Ağ kesintisinde işlem kuyrukta tutulur ve bağlantı geldiğinde artan aralıklarla tekrar denenir.
+4. Senkronizasyon servisi yerel ağ üzerinden Windows Master Hub API'sine (veya loopback üzerinden) göndermeyi dener.
+5. Sunucudan başarılı onay (ACK) alındığında işlem `SYNCED` olarak mühürlenir.
+6. Ağ kesintisinde işlem kuyrukta tutulur ve bağlantı geldiğinde deterministik FIFO sırasıyla tekrar denenir. (Kuyruk kiralama ve hata tekrar parametreleri `OPEN DECISION` statüsündedir).
 
 ### 4.4 Çoklu cihazın çevrimdışı sınırları ve çakışma yönetimi
 
@@ -252,25 +253,32 @@ Temel veri modeli v1.1 ile tam uyumlu olarak korunmuştur.
 
 ### 6.2 Finansal veri kuralları
 
-- Para değerleri kesinlik kaybını önleyen uygun veri tipleriyle tutulmalıdır; para hesaplamalarında floating-point aritmetiği kullanılmamalıdır. Gerektiğinde para değerleri kuruş bazlı integer (`int`) veya fixed-point tiplerle saklanabilir. Diğer sayısal işlemlerde (gramaj, ağırlık, oran, ölçüm ve istatistik gibi) problem alanına uygun sayısal temsil ayrıca belirlenir.
+- Para değerleri kesinlikle floating-point ile tutulamaz ve hesaplanamaz; kuruş bazlı tamsayılar (`int` / `BIGINT`) veya özel Value Object (`Money`) ile saklanır. Diğer sayısal işlemlerde (gramaj, ağırlık, oran, ölçüm ve istatistik gibi) problem alanına uygun sayısal temsil ayrıca belirlenir.
 - Satış satırları, satış anındaki birim fiyat ve ürün adını snapshot olarak saklar; ürünün sonradan fiyatının değişmesi geçmiş satışları etkileyemez.
+- **Alt Kuruş Yuvarlama Politikası (`OPEN DECISION`):** Kesirli miktar veya birim maliyet hesaplarında ortaya çıkabilecek alt kuruşların yuvarlama yöntemi proje sahibi tarafından henüz onaylanmamış olup `OPEN DECISION` statüsündedir.
 
 ---
 
 ## 7. Mimari ve kod organizasyonu
 
-Feature-first ve modüler Clean Architecture yaklaşımı:
+Paket tabanlı, modüler ve Feature-first Clean Architecture yaklaşımı:
 
 ```text
-lib/
-├── app/               # Router (go_router), tema, bootstrap
-├── core/              # Ortak yardımcılar, hata tipleri, network
-├── features/          # auth, tenants, stores, devices, categories, products, inventory, sales, dashboard, sync, backup, settings
-│   └── <feature>/
-│       ├── domain/        # Entity, value object, repository arayüzleri (saf Dart)
-│       ├── data/          # Repository implementasyonları, Drift DAO, Yerel API DTO (Gelecek SaaS için Supabase DTO)
-│       └── presentation/  # Ekranlar, responsive widget'lar, Riverpod provider'ları
-├── infrastructure/    # Drift veritabanı, Windows Service API istemcisi (Gelecek SaaS için Supabase istemcisi), platform donanım köprüleri
+market-pos/
+├── packages/
+│   └── mms_client_storage/    # Uç / Yerel Drift SQLite veritabanı, outbox işlem kuyruğu, şifreli yedekleme motoru (51 test)
+├── test_spikes/
+│   └── spike_01_backend/      # Dart Shelf HTTPS merkezi API, merkezi SQLite tekil yazıcı, dinamik QR ve yetkilendirme (139 test)
+├── lib/
+│   ├── app/                   # Router (go_router), tema, bootstrap
+│   ├── core/                  # Para (kuruş), rasyonel oran, hata tipleri, network
+│   ├── features/              # auth, tenants, stores, devices, categories, products, inventory, sales, dashboard, sync, backup, settings
+│   │   └── <feature>/
+│   │       ├── domain/        # Entity, value object, repository sözleşmeleri (saf Dart)
+│   │       ├── data/          # Repository implementasyonları, Drift DAO adaptörleri, Master Hub REST DTO'ları
+│   │       └── presentation/  # Ekranlar, responsive widget'lar, Riverpod provider'ları
+│   └── infrastructure/        # Master Hub API istemcisi (REST), platform donanım köprüleri (USB HID, kamera)
+├── test/                      # İstemci unit ve widget testleri (31 test)
 └── main.dart
 ```
 
@@ -279,9 +287,9 @@ lib/
 ## 8. Güvenlik, yedekleme ve test stratejisi
 
 - **Veri İzolasyonu:** Pilot aşamasında merkezi API iş kuralları seviyesinde, Gelecek SaaS aşamasında ise Supabase RLS ile veri izolasyonu sağlanır.
-- **Sırların Korunması:** API anahtarları ve OAuth token'ları asla kaynak koda veya Git'e dahil edilmez; `.env` dosyaları `.gitignore` kapsamındadır.
-- **Yedekleme:** Windows Master Hub SQLite veritabanı ve mobil SQLite veritabanlarının ayrık yedekleri alınır; harici ve bağımsız bir Google Drive yedekleme mekanizması işletilir.
-- **Risk Temelli Test:** Finansal hesaplamalar, atomik transaction'lar, idempotency, çevrimdışı senkronizasyon ve RLS tenant izolasyonu birim ve entegrasyon testleriyle doğrulanır.
+- **Sırların Korunması:** API anahtarları, DPAPI pepper (`pepper.dpapi`) ve OAuth token'ları asla kaynak koda veya Git'e dahil edilmez; `.env` ve secret dosyaları `.gitignore` kapsamındadır.
+- **Yedekleme:** Windows Master Hub SQLite veritabanı ve mobil SQLite veritabanlarının ayrık yedekleri alınır; harici ve bağımsız bir Google Drive yedekleme mekanizması S5A-4 standardında AES-256-CBC, PKCS#7 padding, PBKDF2-HMAC-SHA256 (600.000 iterasyon) ve HMAC-SHA256 Encrypt-then-MAC ile işletilir.
+- **Risk Temelli Test:** Finansal hesaplamalar (kuruş bazlı), atomik transaction'lar, idempotency, çevrimdışı senkronizasyon ve veri bütünlüğü birim ve entegrasyon testleriyle (221 test) doğrulanır.
 
 ---
 
@@ -289,14 +297,20 @@ lib/
 
 Fazların sırası ve kabul kriterleri korunmuştur:
 
-- **Faz 0 — Planlama ve Mimari Kararlar** (🔄 Devam Ediyor — Kod yazılmaz)
-- **Faz 1 — Temel Altyapı** (Flutter iskeleti, Drift, Riverpod, go_router, test altyapısı)
-- **Faz 2 — Kimlik, Tenant ve Cihazlar** (Yerel Owner modeli, Tenant/Store modeli; Gelecek SaaS için Supabase Auth ve RLS)
+- **Faz 0 — Planlama ve Mimari Kararlar** (✅ TAMAMLANDI — Spike 01, protokoller, veri modeli ve iş kuralları onaylandı)
+- **Faz 1 — Temel Altyapı ve MVP** (🔄 DEVAM EDİYOR)
+  - **Faz 1.1 — Windows Client Foundation** (✅ TAMAMLANDI ve KABUL EDİLDİ — Tag `v1.1.0-windows-client-foundation`, 221 yeşil test)
+  - **DT-01.1 — Agent Governance Audit** (✅ TAMAMLANDI)
+  - **DT-01.2 — Skills Security & License Review / Activation** (✅ TAMAMLANDI)
+  - **DT-01.3 — Documentation Reconciliation** (Teknik çalışma tamamlandı — Proje sahibi kabulü bekleniyor)
+  - **DT-01.4 — Instruction Infrastructure Integration** (Henüz başlamadı — Planlandı)
+  - **Faz 1.2 — Kasa Satış Ekranı & Sepet Yönetimi** (⏳ Planlandı — Kullanıcı Onayı Bekleniyor)
+- **Faz 2 — Kimlik, Tenant ve Cihazlar** (Yerel Owner modeli, QR eşleştirme, Tenant/Store modeli; Gelecek SaaS için Supabase Auth ve RLS)
 - **Faz 3 — Ürün ve Kategori Yönetimi** (CRUD, Kamera/USB Barkod, Open Food Facts)
 - **Faz 4 — Stok ve Satış** (Sepet, satış tamamlama, stok hareketi, idempotency)
 - **Faz 5 — Offline ve Senkronizasyon** (Kalıcı kuyruk, çakışma çözümü, çoklu cihaz)
 - **Faz 6 — Dashboard ve Yedekleme** (Ciro/kâr analizi, kritik stok, Google Drive yedekleme)
-- **Faz 7 — Pilot** (Arkadaşın marketinde gerçek operasyonel test)
+- **Faz 7 — Pilot** (Arkadaşın marketinde gerçek operasyonel test — Açık teknik koşulların tamamlanması şartıyla)
 - **Faz 8 — Ticari Hazırlık** (Paketleme, lisanslama, dağıtım ve satış planı)
 
 ---
@@ -304,5 +318,6 @@ Fazların sırası ve kabul kriterleri korunmuştur:
 ## 10. Değişmez kurallar ve sonraki adım
 
 - Bu doküman projenin tek ve bağlayıcı ana referansıdır.
-- **Faz 0 kabul kriterleri eksiksiz tamamlanmadan ve kullanıcı onayı alınmadan Flutter/Dart kodlamasına başlanamaz.**
-- Bir sonraki çalışma: **Faz 0 — İş Kuralları ve Veri Modeli Analizi.**
+- **Faz 0 ve Faz 1.1 başarıyla tamamlanmıştır.**
+- Faz 1.2 geliştirmesine geçilmeden önce DT-01 alt aşamaları tamamlanmalı ve kullanıcı onayı alınmalıdır.
+- Bir sonraki çalışma: **DT-01.3 Proje Sahibi Kabulü ve DT-01.4 Talimat Entegrasyonu.**

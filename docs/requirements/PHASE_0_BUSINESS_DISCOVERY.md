@@ -285,5 +285,5 @@ Tüm iş kuralları ve operasyonel belirsizlikler (eksi stok, ekmek tuşu, bulun
 - [ ] Windows, Android, iOS ve Web platform depolama doğrulaması
 - [ ] Faz 0 Kapanış ve Kabul Doğrulama Raporu'nun kullanıcı onayına sunulması
 
-> [!CAUTION]
-> **Faz 0 henüz tamamlanmamıştır.** `BUSINESS_RULES_SPEC.md`, kesin veri modeli ve senkronizasyon protokolü hazırlanmadan ve kullanıcıdan açık onay alınmadan **Flutter/Dart kodlamasına geçilemez**.
+> [!NOTE]
+> **Faz 0 ve Faz 1.1 tamamlanmıştır.** Faz 1.2 uygulamasına geçmeden önce DT-01 alt aşamalarının tamamlanması ve kullanıcıdan açık onay alınması esastır.

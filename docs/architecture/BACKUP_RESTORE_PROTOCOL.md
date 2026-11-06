@@ -23,7 +23,7 @@ MMS yedekleme mimarisi, klasik "gecelik veritabanı yedeği al ve geç" yaklaş�
 2. **Kasa Satışını Kesintisiz Sürdürme (Non-blocking Snapshot):** Yedekleme işlemi sırasında markette satışlar durdurulamaz, geciktirilemez. Yerel SQLite veritabanında WAL modunun getirdiği `VACUUM INTO` veya SQLite Online Backup API teknik seçenekleri değerlendirilir (`BR-BAK-03`). Windows yedekleme ve kurtarma çözümü henüz teknik olarak doğrulanmamış olup Faz 1 kapsamında ele alınacaktır.
 3. **Senkronize Edilmemiş Outbox İşlemlerinin Mutlak Dokunulmazlığı (Immutability of Pending Operations):** Geri yükleme (restore) işlemi sırasında veya sonrasında, cihazın Outbox kuyruğunda henüz sunucuya ulaşmamış bekleyen işlemler (`sync_operations`) **asla silinemez, sıra numaraları değiştirilemez (`client_sequence_number` kalıcıdır) ve mükerrer üretilemez** (`OFFLINE_SYNC_PROTOCOL.md` Bölüm 6).
 4. **Geri Yükleme Öncesi Güvenlik Yedeği (Pre-Restore Safety Snapshot):** Bir cihaza veya merkezi sunucuya herhangi bir geçmiş yedek yüklenmeden önce sistem, o anki canlı veritabanının atomik bir "güvenlik yedeğini" (Safety Snapshot) otomatik olarak almak zorundadır. Kullanıcı onayı olmaksızın geri dönüşü olmayan işlem yapılamaz (`BR-BAK-05`).
-5. **İki Aşamalı Çift Anahtarlı Güvenlik (Client-side Envelope Encryption):** Google Drive veya harici ortama aktarılan tüm yedek dosyaları, cihazdan çıkmadan önce endüstri standardı `AES-256-GCM` ile şifrelenir ve `HMAC-SHA256` ile bütünlük doğrulamasına tabi tutulur. Yetkisiz kişiler Google Drive dosyasına erişse dahi market verilerini okuyamaz (`BR-BAK-06`).
+5. **İki Aşamalı Çift Anahtarlı Güvenlik (Client-side Envelope Encryption):** Google Drive veya harici ortama aktarılan tüm yedek dosyaları, cihazdan çıkmadan önce S5A-4 standardında `AES-256-CBC` (PKCS#7 padding) ile şifrelenir ve `HMAC-SHA256` (Encrypt-then-MAC) ile bütünlük doğrulamasına tabi tutulur. Yetkisiz kişiler Google Drive dosyasına erişse dahi market verilerini okuyamaz (`BR-BAK-06`).
 6. **Deterministik Mutabakat (Post-Restore Reconciliation):** Geri yükleme tamamlandıktan sonra cihaz, sunucu gelen kutusunu sorgulayarak (`POST /sync/verify-keys`) bekleyen işlemlerinin hangilerinin sunucuda işlenmiş olduğunu teyit eder; sadece işlenmemiş olanları Outbox üzerinden senkronize eder.
 
 ---
@@ -39,7 +39,7 @@ flowchart TD
         OutboxQueue[("Outbox Kuyruğu\nsync_operations")]
         LocalBackupEngine["Yerel Yedekleme Motoru\n(VACUUM INTO / Online Backup)"]
         SafetySnapshot[("Yerel Güvenlik Yedeği\npre_restore_safety.db")]
-        EncModule["AES-256-GCM\nŞifreleme & Sıkıştırma"]
+        EncModule["AES-256-CBC + HMAC-SHA256\nŞifreleme & Sıkıştırma"]
     end
 
     subgraph Central_Master["Merkezi Düğüm (Windows Local Master Hub)"]
@@ -93,7 +93,7 @@ sequenceDiagram
     rect rgb(240, 255, 240)
         Note over Engine, Drive: 2. Adım: Yedek Paketini Doğrulama & Çözme
         Engine->>Drive: Yedek Dosyasını İndir / Aç
-        Engine->>Engine: SHA-256 Checksum & AES-256-GCM Parola Doğrulaması
+        Engine->>Engine: HMAC-SHA256 & AES-256-CBC Parola Doğrulaması
         Engine->>LocalDB: Eski Veritabanı Görüntüsünü Yerel DB'ye Yaz
     end
 
@@ -348,7 +348,7 @@ Kurtarma işlemi operatör hatasına yer bırakmayacak biçimde aşağıdaki 8 a
 
 [ADIM 4: YEDEK DOSYASININ DOĞRULANMASI VE ÇÖZÜLMESİ]
   - Seçilen .mmsbak dosyasının SHA-256 bütünlük özeti kontrol edilir.
-  - Kullanıcıdan alınan şifre çözme anahtarı ile AES-256-GCM çözülür. Hash uyuşmazlığı varsa işlem durdurulur.
+  - Kullanıcıdan alınan şifre çözme anahtarı ile HMAC-SHA256 doğrulanır ve AES-256-CBC çözülür. HMAC veya hash uyuşmazlığı varsa işlem derhal durdurulur.
 
 [ADIM 5: VERİTABANI DOSYASININ DEĞİŞTİRİLMESİ]
   - Aktif veritabanı bağlantıları kapatılır.
@@ -391,29 +391,24 @@ Depolama maliyetlerini optimize etmek ve Google Drive kotasını doldurmamak ama
 
 Yedek dosyaları marketin en hassas ticari sırlarını (ciro, maliyet, müşteri cari bakiyeleri) barındırır. Bu nedenle aktarım ve bekleme anında mutlak güvenlik uygulanır:
 
-1. **Zarf Şifreleme (Envelope Encryption) Mimarisi:**
-   - **Data Encryption Key (DEK):** Her yedek dosyası için kriptografik olarak güvenli rastgele bir 256-bit AES anahtarı üretilir.
-   - **Key Encryption Key (KEK):** DEK anahtarı, market yöneticisinin belirlediği yedekleme parolası ve PBKDF2 (100.000 iterasyon + rastgele salt) ile türetilen anahtarla şifrelenir.
-2. **Kriptografik Algoritmalar:**
-   - **Şifreleme:** `AES-256-GCM` (Galois/Counter Mode). Hem gizlilik (confidentiality) hem de kimlik doğrulama/bütünlük (authenticity) tek adımda sağlanır.
-   - **Bütünlük Özeti:** Dosya oluşturulduğunda tüm paketin `SHA-256` özeti hesaplanır ve başlık (header) kısmına yazılır.
+1. **Şifreleme Mimarisi (S5A-4 Standardı):**
+   - **Anahtar Türetme:** PBKDF2-HMAC-SHA256 (600.000 iterasyon) ile paroladan 32 bayt AES anahtarı ve 32 bayt HMAC anahtarı türetilir.
+   - **Şifreleme:** `AES-256-CBC` (Cipher Block Chaining, PKCS#7 padding).
+   - **Bütünlük ve Kimlik Doğrulama:** `HMAC-SHA256` (Encrypt-then-MAC yaklaşımı). Dosya üzerinde 1 bit dahi oynanırsa çözme öncesinde HMAC uyuşmazlığı ile reddedilir.
+2. **Kriptografik Parametreler:**
+   - **Rastgele Tuz ve IV:** 16 bayt kriptografik rastgele salt ve 16 bayt rastgele IV (`Random.secure()`).
 3. **Paket Yapısı (`.mmsbak`):**
    ```text
    +-------------------------------------------------------+
-   | MMS Magic Header ("MMSBAK" - 6 bytes)                 |
-   +-------------------------------------------------------+
-   | Format Sürümü (Uint16 - 2 bytes, örn: 1)              |
+   | MMS Magic Header ("MMSBAK01" - 8 bytes)               |
    +-------------------------------------------------------+
    | Salt (16 bytes)                                       |
    +-------------------------------------------------------+
-   | GCM Initialization Vector (IV - 12 bytes)             |
+   | CBC Initialization Vector (IV - 16 bytes)             |
    +-------------------------------------------------------+
-   | Şifrelenmiş Metadata JSON (Uzunluk + İçerik)          |
-   | (Tenant ID, Device ID, Timestamp, SHA-256 Hash)       |
+   | Şifrelenmiş Veri (AES-256-CBC, PKCS#7 Padding)        |
    +-------------------------------------------------------+
-   | Şifrelenmiş SQLite DB / Dump Verisi (GZIP + AES-GCM)   |
-   +-------------------------------------------------------+
-   | GCM Kimlik Doğrulama Etiketi (Auth Tag - 16 bytes)    |
+   | HMAC-SHA256 Doğrulama İmzası (32 bytes)               |
    +-------------------------------------------------------+
    ```
 

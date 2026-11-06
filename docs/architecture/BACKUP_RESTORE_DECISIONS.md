@@ -14,7 +14,7 @@
 - [ADR-BAK-03: Geri Yükleme Sırasında Bekleyen Outbox İşlemlerinin Dokunulmazlığı ve Sayacın İlerletilmesi](#adr-bak-03-geri-yükleme-sırasında-bekleyen-outbox-işlemlerinin-dokunulmazlığı-ve-sayacın-ilerletilmesi)
 - [ADR-BAK-04: Geri Yükleme Öncesi Canlı Güvenlik Yedeği (Pre-Restore Safety Snapshot) Zorunluluğu](#adr-bak-04-geri-yükleme-öncesi-canlı-güvenlik-yedeği-pre-restore-safety-snapshot-zorunluluğu)
 - [ADR-BAK-05: Google Drive OAuth 2.0 En Dar Kapsam (`drive.file`) Kullanımı](#adr-bak-05-google-drive-oauth-20-en-dar-kapsam-drivefile-kullanımı)
-- [ADR-BAK-06: İstemci Taraflı Zarf Şifreleme (Client-side Envelope Encryption with AES-256-GCM)](#adr-bak-06-istemci-taraflı-zarf-şifreleme-client-side-envelope-encryption-with-aes-256-gcm)
+- [ADR-BAK-06: İstemci Taraflı Şifreleme (AES-256-CBC + HMAC-SHA256 Encrypt-then-MAC)](#adr-bak-06-istemci-taraflı-şifreleme-aes-256-cbc--hmac-sha256-encrypt-then-mac)
 - [ADR-BAK-07: 30 Günlük Kayan Saklama ve Aylık Arşiv Politikası](#adr-bak-07-30-günlük-kayan-saklama-ve-aylık-arşiv-politikası)
 - [ADR-BAK-08: Geri Yükleme Sonrası Deterministik Sunucu Mutabakatı (`POST /sync/verify-keys`)](#adr-bak-08-geri-yükleme-sonrası-deterministik-sunucu-mutabakatı-post-syncverify-keys)
 
@@ -81,16 +81,16 @@
 
 ---
 
-### ADR-BAK-06: İstemci Taraflı Zarf Şifreleme (Client-side Envelope Encryption with AES-256-GCM)
+### ADR-BAK-06: İstemci Taraflı Şifreleme (AES-256-CBC + HMAC-SHA256 Encrypt-then-MAC)
 
-- **Durum:** Onaylandı.
+- **Durum:** Onaylandı (S5A-4 implementasyonu ve kabulü ile kesinleşti).
 - **Bağlam:** Google Drive veya harici USB bellek gibi üçüncü taraf ortamlara yüklenen yedek dosyaları çalınabilir, sızdırılabilir veya yetkisiz personelin eline geçebilir. Düz metin SQLite veritabanı yedeği ciddi bir veri güvenliği açığıdır.
 - **Karar:**
   1. Yedek dosyaları cihazdan çıkmadan önce istemci tarafında şifrelenir.
-  2. Şifreleme standardı olarak doğrulanmış şifreleme sağlayan `AES-256-GCM` kullanılır.
-  3. Her dosya için benzersiz bir DEK (Data Encryption Key) üretilir; DEK anahtarı yöneticinin şifresinden türetilen KEK (PBKDF2 + SHA-256 + 100.000 iterasyon) ile zarflanır.
-  4. Dosyanın bütünlüğü GCM kimlik doğrulama etiketi (*Authentication Tag*) ve harici SHA-256 özeti ile iki kademeli olarak garanti edilir.
-- **Sonuçlar:** Google veya harici depolama sağlayıcısı dahi yedek içeriğini açamaz; kurumsal düzeyde veri gizliliği sağlanır.
+  2. Şifreleme standardı olarak S5A-4 ile doğrulanan `AES-256-CBC` (PKCS#7 padding) kullanılır.
+  3. Anahtar türetme için PBKDF2-HMAC-SHA256 (600.000 iterasyon) ve 16 bayt kriptografik rastgele salt ve IV kullanılır.
+  4. Dosya bütünlüğü ve kimlik doğrulaması `HMAC-SHA256` Encrypt-then-MAC yaklaşımıyla garanti edilir.
+- **Sonuçlar:** Google veya harici depolama sağlayıcısı dahi yedek içeriğini açamaz; kurumsal düzeyde veri gizliliği ve bütünlüğü sağlanır.
 
 ---
 

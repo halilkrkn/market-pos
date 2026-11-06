@@ -38,7 +38,7 @@ MMS, mağaza içinde internet bağlantısı kopsa dahi kesintisiz çalışmayı 
 - **Tekil Yazıcı (Single-Writer):** Merkezi SQLite veritabanına tüm yazma işlemleri Windows Service API'si üzerinden yönetilir. Flutter masaüstü arayüzü de yerel API üzerinden işlem yapar.
 - **Yerel Senkronizasyon:** Mobil cihazlar (Android/iOS), internet olmasa dahi mağaza içi Wi-Fi / LAN üzerinden Windows Service API'sine bağlanır.
 - **Windows Kapalıyken Satış:** Windows kapalıyken mobil cihazlar yerel Drift + SQLite veritabanlarında satış yapmaya devam eder; Windows açıldığında bekleyen Outbox işlemlerini aktarır.
-- **Google Drive Yedekleme:** Canlı senkronizasyon için değil; merkezi veritabanının `VACUUM INTO` ile alınan şifreli (`AES-256-GCM`) bağımsız yedeklemesi için kullanılır.
+- **Google Drive Yedekleme:** Canlı senkronizasyon için değil; merkezi veritabanının `VACUUM INTO` ile alınan şifreli (S5A-4 standardında `AES-256-CBC` + `HMAC-SHA256`) bağımsız yedeklemesi için kullanılır.
 - **SaaS Hazırlığı:** Gelecekte bulut tabanlı çok şubeli SaaS modeline geçişi kolaylaştırmak amacıyla `tenant_id` ve `store_id` sınırları korunur.
 
 ---
@@ -53,7 +53,7 @@ MMS, mağaza içinde internet bağlantısı kopsa dahi kesintisiz çalışmayı 
 | **Durum Yönetimi** | Riverpod | Reaktif ve test edilebilir durum yönetimi |
 | **Yönlendirme** | go_router | Deklaratif navigasyon |
 | **Barkod Girişi** | PC'de USB HID; Mobilde Kamera | Otomatik ürün arama ve ekleme |
-| **Harici Yedekleme** | Google Drive API (`drive.file`) | İstemci taraflı AES-256-GCM zarf şifreleme |
+| **Harici Yedekleme** | Google Drive API (`drive.file`) | İstemci taraflı AES-256-CBC + HMAC-SHA256 şifreleme |
 
 ---
 
@@ -78,7 +78,7 @@ Proje dokümantasyonu `docs/` klasörü altında kanonik olarak organize edilmi�
 Projeye katkı sağlayan tüm geliştiriciler ve yapay zekâ asistanları için kök dizindeki [`AGENTS.md`](./AGENTS.md) dosyası **birincil ve bağlayıcı ortak kurallar dizinidir**:
 
 1. **Önce İş Kuralları, Sonra Kod:** İlgili modülün iş kuralları dokümante edilmeden kod yazılamaz.
-2. **Faz Bazlı İlerleme:** Faz 0 resmi olarak tamamlanmadan ve kullanıcı onayı alınmadan Flutter/Dart kodlamasına geçilemez.
+2. **Faz Bazlı İlerleme:** Faz kabul kriterleri eksiksiz karşılanmadan ve kullanıcıdan açık onay alınmadan sonraki faza geçilemez. (Faz 0 ve Faz 1.1 tamamlanmıştır; Faz 1.2 için kullanıcı onayı esastır).
 3. **Kuruş Tamsayı Standardı:** Para hesaplamalarında kesinlikle kayan noktalı (`double`) sayı aritmetiği kullanılmaz; tüm tutarlar kuruş tamsayı (`BIGINT` / `int`) tutulur.
 4. **Geçmişin Korunması:** Fiziksel satış fişleri ve stok hareketleri çakışma durumunda asla silinemez.
 
