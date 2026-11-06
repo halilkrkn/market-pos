@@ -16,16 +16,19 @@ Proje teknik adı `market-pos` olarak korunmakla birlikte, ürün bir **Market M
 
 | Alan | Seçilen Teknoloji | Not / Doğrulama Durumu |
 |---|---|---|
-| **Ürün Tipi** | Market Management System (MMS) | Çoklu market SaaS mimarisi |
-| **Uygulama Çerçevesi** | Flutter (Dart) | Windows, Android, iOS ve Web hedefleri |
-| **Yerel Veritabanı** | Drift + SQLite | Mobil ve Masaüstü birincil yerel depolama; Web için depolama doğrulaması Faz 0'da yapılacak |
-| **Merkezi Veritabanı** | Supabase PostgreSQL | Çoklu tenant, RLS güvenlik politikaları |
-| **Kimlik Doğrulama** | Supabase Auth | E-posta/şifre, rol ve üyelik yönetimi |
+| **Ürün Tipi** | Market Management System (MMS) | Pilot tek market; SaaS ve çok şubeli genişlemeye hazır mimari |
+| **Uygulama Çerçevesi** | Flutter (Dart) | Windows masaüstü, Android ve iOS |
+| **Uç / Yerel Depolama** | Drift + SQLite (WAL Modu) | Mobil cihazlarda ve masaüstünde yerel operasyonel veri tabanı |
+| **Merkezi Depolama (Pilot)** | Merkezi SQLite (WAL Modu) | Windows Service tarafından tekil yazıcı (Single-Writer) olarak yönetilen master defter |
+| **Gelecek Merkezi Depolama (SaaS)**| PostgreSQL / Supabase | Çok şubeli zincir ve bulut SaaS fazı için şema uyumluluğu korunur |
+| **Kimlik ve Eşleştirme (Pilot)**| Yerel API & Cihaz Eşleştirme | Pilot tek Owner hesabı; eşleştirme ve yerel kimlik yöntemi açık konudur |
+| **Gelecek Kimlik (SaaS)**| Supabase Auth | E-posta/şifre, rol ve üyelik yönetimi |
+| **Ağ ve Senkronizasyon** | Yerel Wi-Fi / LAN API | İnternet olmadan mağaza içi LAN üzerinden; Windows kapalıyken offline Outbox |
 | **Durum Yönetimi** | Riverpod | Test edilebilir, reaktif durum yönetimi |
 | **Navigasyon** | go_router | Deklaratif yönlendirme, derin bağlantı uyumu |
-| **Barkod Girişi** | PC'de USB HID; Mobilde Kamera | Kamera ile ürün arama ve Open Food Facts önerisi |
-| **Ürün Öneri API** | Open Food Facts API | Barkod okutulduğunda ürün bilgisi önerme (doğrulama gerektirir) |
-| **Yedekleme** | Supabase + Google Drive | Merkezi veritabanı yedeği + harici bağımsız Google Drive yedekleme |
+| **Barkod Girişi** | PC'de USB HID; Mobilde Kamera | Otomatik ürün bulma ve sepet oluşturma |
+| **Ürün Öneri API** | Open Food Facts API | Barkod okutulduğunda ürün bilgisi önerme (fiyat/stok elle girilir) |
+| **Yedekleme** | Windows Service + Google Drive | Merkezi ve mobil ayrık SQLite yedekleri + Şifreli bağımsız Google Drive yedeği |
 
 ---
 
@@ -40,9 +43,9 @@ lib/
 ├── features/          # auth, tenants, stores, products, inventory, sales, dashboard, sync, backup vb.
 │   └── <feature>/
 │       ├── domain/        # Entity, value object, repository arayüzleri
-│       ├── data/          # Repository implementasyonları, Drift DAO, Supabase DTO
+│       ├── data/          # Repository implementasyonları, Drift DAO, Yerel API DTO (Gelecek SaaS için Supabase DTO)
 │       └── presentation/  # Sayfalar, widget'lar, Riverpod provider'ları
-└── infrastructure/    # database (Drift), supabase istemcisi, platform donanım köprüleri
+└── infrastructure/    # database (Drift), Windows Service API istemcisi (Gelecek SaaS için Supabase istemcisi), platform donanım köprüleri
 ```
 
 ### Bağımlılık Yönü
@@ -58,17 +61,19 @@ lib/
 - **Store:** Fiziksel şube/mağaza.
 - **User & Membership:** Kullanıcı ve yetki ilişkisi.
 - **Device:** İşlem yapan fiziksel cihaz (Windows PC, telefon veya tablet).
-- Bütün veri modellerinde `tenant_id` zorunlu alandır; Supabase RLS ile veri izolasyonu veritabanı seviyesinde garanti altına alınır.
+- Tenant/store veri izolasyonu korunacaktır; pilot tek tenant ve tek store ile başlayacaktır. Merkezi API, veri erişiminde tenant/store sınırlarını uygulamalıdır; gelecek bulut SaaS aşamasında ise Supabase RLS ile veri izolasyonu desteklenecektir.
 
 ---
 
 ## 5. Offline-First, Çoklu Cihaz ve Senkronizasyon
 
-- Yerel işlemler internet olmaksızın Drift/SQLite üzerinde yürütülür.
-- Satış, stok düşümü ve `sync_operations` kuyruk kaydı aynı yerel transaction içinde atomik kaydedilir.
-- Senkronizasyon servisi bekleyen işlemleri merkezi PostgreSQL'e aktarır.
-- İşlemlerde `idempotency_key` kullanılarak tekrarlanan çağrıların çifte kayıt oluşturması önlenir.
-- Stok çakışmalarında satışlar silinmez; denetim kaydı oluşturularak yetkili müdahalesi istenir.
+- **Windows Master Hub:** Windows bilgisayar ana sunucudur. Arka planda bağımsız bir Windows Service çalışır.
+- **Single-Writer İlkesi:** Merkezi SQLite veritabanına tüm yazma işlemleri Windows Service API'si üzerinden yönetilir. Flutter Windows masaüstü arayüzü de yerel loopback API (`http://127.0.0.1:<port>`) üzerinden işlem yapar.
+- **SQLite Kilitlenme ve Eşzamanlılık Yönetimi:** Kilitlenme riskini minimize etmek için WAL modu (`PRAGMA journal_mode = WAL;`), meşguliyet zaman aşımı (`PRAGMA busy_timeout = 5000;`), üstel geri çekilme (exponential backoff retry) ve atomik transaction yöneticisi zorunludur.
+- **Yerel Ağda Kesintisiz Çalışma:** Mobil cihazlar mağaza içi Wi-Fi / LAN üzerinden Windows Service API'sine bağlanır; internet kesintisi mağaza içi iletişimi etkilemez.
+- **Windows Kapalıyken Çalışma:** Windows PC kapalıyken mobil cihazlar yerel Drift/SQLite veritabanlarında satış yapar (`sync_operations` kuyruğuna yazar). Windows açıldığında Outbox işlemleri deterministik FIFO sırasıyla merkeze aktarılır.
+- **Idempotency:** İşlemlerde `idempotency_key` kullanılarak tekrarlanan çağrıların çifte kayıt oluşturması önlenir.
+- **Stok Çakışması:** Eksi stok politikası `allow` olup, gerçekleşmiş fiziksel satışlar çakışma durumunda asla silinmez; audit kaydı ve stok düzeltme bildirimi oluşturulur.
 
 ---
 
@@ -80,10 +85,9 @@ lib/
 
 ---
 
-## 7. Henüz Kesinleşmemiş / Faz 0 Kapsamında Doğrulanacak Konular
+## 7. Henüz Kesinleşmemiş / Faz 0 Kapsamında Doğrulanacak Konular (Teknik Spike'lar)
 
-1. Web platformu için kalıcı depolama adaptörü (WASM/IndexedDB SQLite davranışı).
-2. iOS paketleme ve derleme için yerel ortam gereksinimleri (macOS/Xcode).
-3. Senkronizasyon katmanının saf özel modül olarak mı yoksa PowerSync gibi bir motorla mı destekleneceği (prototip doğrulaması).
-4. Google Drive OAuth akışının masaüstü ve mobildeki yerel kimlik doğrulama detayları.
-5. Kamera ile barkod okuma performansının düşük segment Android cihazlarda test edilmesi.
+1. **SPIKE-01 (Windows Service & SQLite):** Dart AOT + Shelf vs C# Worker mimari karşılaştırması ve SQLite WAL eşzamanlı yazma dayanıklılığı.
+2. **SPIKE-02 (LAN Discovery & Pairing):** mDNS yayını ve router AP isolation engeli durumunda Dinamik QR kod doğrudan IP eşleştirmesinin saha testi.
+3. **SPIKE-03 (Yerel TLS & iOS İzni):** Yerel ağda şifreli HTTPS iletişimi ve iOS 14+ `NSLocalNetworkUsageDescription` izin modelinin doğrulanması.
+4. **Dağıtım Stratejisi:** Windows installer (Inno Setup / MSI) ve iOS TestFlight derleme altyapısı (GitHub Actions macOS Runner).

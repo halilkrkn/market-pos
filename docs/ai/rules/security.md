@@ -13,22 +13,23 @@ Bu belge, **Market POS** projesinin veri izolasyonu, kimlik doğrulama, yetkilen
   - `device`: Kasayı veya uygulamayı çalıştıran cihaz.
 - Bütün veri tabloları (`categories`, `products`, `sales`, `stock_movements`, vb.) zorunlu olarak `tenant_id` alanı taşır.
 - **İstemci Güvensizliği İlkesi:** İstemciden gelen `tenant_id` parametresi tek başına yetki kanıtı sayılamaz.
-- **Supabase Row Level Security (RLS):** Merkezi veritabanında her tablo için RLS politikaları yazılır ve test edilir. Bir marketin kullanıcısı veya cihazı, başka bir marketin verisini kesinlikle sorgulayamaz ve değiştiremez.
+- **Veri İzolasyonu (Pilot ve Gelecek SaaS):**
+  - Pilot aşamasında veri izolasyonu merkezi API'nin iş kuralları seviyesinde sorumluluğudur; merkezi API veri erişiminde tenant ve store sınırlarını uygular.
+  - Gelecek bulut SaaS aşamasında merkezi veritabanında her tablo için **Supabase Row Level Security (RLS)** politikaları uygulanır ve doğrulanır.
 
 ---
 
 ## 2. Kimlik Doğrulama ve Yetkilendirme
 
-- Kullanıcı kimlik doğrulama altyapısı olarak **Supabase Auth** kullanılır (`CONFIRMED`).
-- **Kullanıcı Rolleri ve Yetki Durumu (`OPEN`):** `Owner`, `Manager`, `Cashier` gibi unvanlar yalnızca olası örneklerdir; henüz kesinleşmiş onaylı roller değildir.
-  - Market sahibi dışında personelin sistemi kullanıp kullanmayacağı, kullanıcı sayısı, hangi rollerin ürün fiyatı değiştirme, stok düzeltme veya satış iptali yapabileceği ve işlem geçmişinde kullanıcı kimliği tutulma zorunluluğu Faz 0 kapsamında kullanıcı kararı bekleyen açık gereksinimlerdir (`OPEN`).
-  - Rol ve yetki sınırları netleştiğinde yetkilendirme sadece arayüzde buton gizlemekle sınırlı kalmayacak, iş kuralları ve RLS seviyesinde güvenceye alınacaktır.
+- **Pilot Kimlik Modeli:** Pilot aşaması tek işletme sahibi (Owner) hesabı ile yürütülür. Kasiyer ve personel rolleri MVP kapsamı dışındadır (`CONFIRMED`).
+- **Yerel Kimlik Yöntemi (`OPEN`):** Yerel Owner kimlik doğrulamasının teknik yöntemi (PIN, parola, yerel token vb.) henüz kesinleşmemiştir; açık mimari konu olarak Faz 1 kapsamında ele alınacaktır.
+- **Gelecek SaaS Kimlik Modeli:** Çok şubeli ve bulut SaaS aşamasında kullanıcı kimlik doğrulama altyapısı olarak **Supabase Auth** değerlendirilecektir.
 
 ---
 
 ## 3. Gizli Bilgilerin Korunması
 
-- API anahtarları, Supabase Service Role anahtarları, veritabanı şifreleri ve Google Drive OAuth sırları **asla** kaynak koduna veya Git deposuna yazılmaz.
+- API anahtarları, servis anahtarları, veritabanı şifreleri ve Google Drive OAuth sırları **asla** kaynak koduna veya Git deposuna yazılmaz.
 - Ortam değişkenleri `.env` dosyaları üzerinden yerel geliştirmede yönetilir; bu dosyalar `.gitignore` ile dışarıda bırakılır. Projede yalnızca sır içermeyen `.env.example` şablonu paylaşılabilir.
 
 ---

@@ -1,8 +1,8 @@
 # MARKET POS — Market Management System (MMS)
 ## Proje Ana Planı ve Mimari Dokümanı
 
-**Versiyon:** 1.2  
-**Tarih:** 30 Ekim 2026  
+**Versiyon:** 1.3 (Windows Local Master Hub ve Yerel Senkronizasyon Entegrasyonu)  
+**Tarih:** 4 Kasım 2026  
 **Durum:** Faz 0 — Planlama ve mimari kararlar  
 **Geliştirme durumu:** Henüz uygulama kodu yazılmayacak  
 **Teknik Proje / Klasör Adı:** `market-pos`  
@@ -30,7 +30,7 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 - Birden fazla cihazdan (PC ve telefon) bağımsız çevrimdışı işlem yapabilme.
 - Bağlantı geldiğinde güvenli, idempotent ve otomatik senkronizasyon.
 - Market sahibine yönelik kapsamlı, ciro/kâr ayrımı net dashboard ve raporlama.
-- Supabase ve Google Drive üzerinden otomatik bağımsız yedekleme.
+- Windows Master Hub SQLite ve Google Drive üzerinden otomatik bağımsız yedekleme.
 - Çoklu market (Multi-Tenant) SaaS altyapısı.
 - Uzaktan güncelleme ve sürdürülebilir ürün geliştirme.
 - Pilot kullanım sonrası ticari satış ve lisanslama.
@@ -41,9 +41,9 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 |---|---|
 | Ürün Konsepti | Market Management System (MMS) — Tam işlevli market yönetim SaaS |
 | Uygulama Çerçevesi | Flutter (Dart) |
-| Yerel veritabanı | Drift + SQLite; platforma özel depolama doğrulaması |
-| Merkezi veritabanı | Supabase PostgreSQL |
-| Kimlik doğrulama | Supabase Auth |
+| Yerel veritabanı | Drift + SQLite (Mobil ve Masaüstü operasyonel depolama) |
+| Merkezi veritabanı | Pilot için Windows Service Merkezi SQLite (Single-Writer); Gelecek SaaS için PostgreSQL |
+| Kimlik doğrulama | Pilot için Yerel API & Cihaz Eşleştirme; Gelecek SaaS için Supabase Auth |
 | Yerel veri erişimi | Repository arayüzleri (Clean Architecture) |
 | Durum yönetimi | Riverpod |
 | Navigasyon | go_router |
@@ -51,10 +51,10 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 | Ürün bilgisi | Open Food Facts API (doğrulama gerektiren öneri mekanizması) |
 | Mimari | Feature-first + Clean Architecture |
 | Kod kalitesi | SOLID, Clean Code, risk temelli otomatik testler |
-| Senkronizasyon | Ayrı modül, kalıcı işlem kuyruğu ve çakışma yönetimi |
-| Yedekleme | Supabase tarafı + Google Drive'a bağımsız otomatik yedek |
-| Dağıtım | Platforma özel güncelleme stratejisi |
-| Pilot yaklaşımı | Tek markette gerçek kullanım, çoklu market SaaS mimarisi |
+| Senkronizasyon | Yerel Wi-Fi / LAN API, kalıcı Outbox işlem kuyruğu ve çakışma yönetimi |
+| Yedekleme | Windows Service `VACUUM INTO` + Google Drive'a bağımsız şifreli otomatik yedek |
+| Dağıtım | Platforma özel dağıtım ve güncelleme stratejisi |
+| Pilot yaklaşımı | Tek markette Windows Master Hub gerçek kullanım; çoklu market SaaS'a hazır mimari |
 
 ---
 
@@ -91,7 +91,13 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 - Satış tamamlandığında atomik transaction ile satış kaydı, sepet detayları ve stok hareketinin oluşturulması.
 - Satış geçmişini anlık ve geriye dönük görüntüleme.
 - Çevrimdışı satışların yerel olarak kaydedilmesi ve bağlantı kurulduğunda senkronizasyonu.
-- **Ödeme İşlemleri Durumu:** Satış ekranında nakit, kart veya karma ödeme türlerinin kaydedilmesi birer değerlendirme önerisidir (`PROPOSED`). Parçalı/karma ödeme mantığı, para üstü hesabı, ödeme yöntemlerinin yerel kaydı ve ödeme iptal/iade davranışları henüz kesinleşmemiş olup, Faz 0 kapsamında kullanıcı kararı bekleyen açık konulardır (`OPEN`). Kullanıcı onayı olmadan kesin bir ödeme işleyişi tasarlanamaz.
+- **Ödeme İşlemleri ve Kuralları:**
+  - Satış başına tek bir ödeme yöntemi seçilir: **Nakit** veya **Kredi Kartı** (`CONFIRMED`).
+  - Karma (split) ödeme ve veresiye (müşteri borç defteri) MVP kapsamı dışındadır (`OUT_OF_SCOPE`).
+  - Nakit satışta müşteriden alınan tutar girilir ve para üstü sistem tarafından otomatik hesaplanır; alınan tutar satış toplamından düşükse satış işlemi kesinlikle tamamlanamaz (`CONFIRMED`).
+  - Kart ödemesi yalnızca uygulamaya ödeme kaydı olarak işlenir; banka POS terminaline otomatik tutar gönderilmez (`CONFIRMED`).
+  - Yanlış ödeme yöntemi seçimi durumunda ödeme yöntemi düzeltmesi ayrı, denetlenebilir ve yetki kontrollü bir işlem olarak (`audit_logs`) yürütülür (`CONFIRMED`).
+  - Kasa açılış/kapanış oturumları, gün sonu fiziki nakit sayımı ve kasa farkı takibi MVP kapsamı dışındadır (`OUT_OF_SCOPE`).
 
 > [!IMPORTANT]
 > **Banka POS Terminali Entegrasyonu Kapsam Dışıdır:**  
@@ -110,12 +116,12 @@ Proje, yalnızca kasada barkod okutup fiş kesen dar kapsamlı bir CRUD/POS uygu
 
 ### 2.2 Pilot öncesi zorunlu altyapı
 
-- Çoklu market (Tenant) veri izolasyonu ve RLS politikaları.
+- Çoklu market (Tenant) veri izolasyonu (Pilot için merkezi API katmanında, Gelecek SaaS için RLS).
 - Yerel veritabanı (Drift) ve migration sistemi.
 - Kalıcı çevrimdışı işlem kuyruğu (`sync_operations`).
 - Tekrarlanan satış işlemlerine karşı idempotency (`idempotency_key`).
 - Çakışma tespiti ve çözüm kuralları (satışlar asla silinmez).
-- Temel kullanıcı kimlik doğrulama ve yetkilendirme (Supabase Auth).
+- Temel kullanıcı kimlik doğrulama ve yetkilendirme (Pilot için tek yerel Owner hesabı; Gelecek SaaS için Supabase Auth).
 - Otomatik yedekleme ve geri yükleme testi.
 - Kritik işlemlere ilişkin audit kayıtları (`audit_logs`).
 - Risk temelli birim ve entegrasyon testleri.
@@ -151,7 +157,7 @@ Her iş kaydı mutlaka doğru `tenant_id` ve gerektiğinde `store_id` ile ilişk
 
 - Tenant'a ait veriler `tenant_id` üzerinden ayrıştırılır.
 - Ürün, kategori, stok, satış ve kullanıcı ilişkileri yetki sınırları içinde doğrulanır.
-- Supabase Row Level Security (RLS) politikaları tüm tablolarda tavizsiz uygulanır ve negatif testlerle doğrulanır.
+- Pilot aşamasında veri izolasyonu merkezi API tarafından uygulanır; Gelecek SaaS aşamasında Supabase Row Level Security (RLS) politikaları tüm tablolarda uygulanır ve doğrulanır.
 - İstemci tarafından gönderilen `tenant_id` parametresi tek başına yetki kanıtı sayılmaz; kullanıcının JWT kimliğiyle doğrulanır.
 
 ---
@@ -180,7 +186,7 @@ tam işlevli olarak yer alır.
 
 Windows bilgisayar ve telefonlar kendi yerel Drift + SQLite veritabanlarında çalışır. İnternet kesildiğinde ürün arama, satış tamamlama ve stok hareketleri kesintisiz devam eder.
 
-Bağlantı kurulduğunda cihazların kuyrukta bekleyen işlemleri merkezi Supabase veritabanına aktarılır.
+Bağlantı kurulduğunda cihazların kuyrukta bekleyen işlemleri yerel ağ (LAN) üzerinden Windows Local Master Hub API'sine aktarılır.
 
 ### 4.3 Yerel veri akışı
 
@@ -262,9 +268,9 @@ lib/
 ├── features/          # auth, tenants, stores, devices, categories, products, inventory, sales, dashboard, sync, backup, settings
 │   └── <feature>/
 │       ├── domain/        # Entity, value object, repository arayüzleri (saf Dart)
-│       ├── data/          # Repository implementasyonları, Drift DAO, Supabase DTO
+│       ├── data/          # Repository implementasyonları, Drift DAO, Yerel API DTO (Gelecek SaaS için Supabase DTO)
 │       └── presentation/  # Ekranlar, responsive widget'lar, Riverpod provider'ları
-├── infrastructure/    # Drift veritabanı, Supabase istemcisi, platform donanım köprüleri
+├── infrastructure/    # Drift veritabanı, Windows Service API istemcisi (Gelecek SaaS için Supabase istemcisi), platform donanım köprüleri
 └── main.dart
 ```
 
@@ -272,9 +278,9 @@ lib/
 
 ## 8. Güvenlik, yedekleme ve test stratejisi
 
-- **Supabase RLS:** Çoklu kiracı veri izolasyonu veritabanı seviyesinde zorunludur.
+- **Veri İzolasyonu:** Pilot aşamasında merkezi API iş kuralları seviyesinde, Gelecek SaaS aşamasında ise Supabase RLS ile veri izolasyonu sağlanır.
 - **Sırların Korunması:** API anahtarları ve OAuth token'ları asla kaynak koda veya Git'e dahil edilmez; `.env` dosyaları `.gitignore` kapsamındadır.
-- **Çift Yedekleme:** Supabase'in kendi veritabanı yedeklerine ek olarak, harici ve bağımsız bir Google Drive yedekleme mekanizması işletilir.
+- **Yedekleme:** Windows Master Hub SQLite veritabanı ve mobil SQLite veritabanlarının ayrık yedekleri alınır; harici ve bağımsız bir Google Drive yedekleme mekanizması işletilir.
 - **Risk Temelli Test:** Finansal hesaplamalar, atomik transaction'lar, idempotency, çevrimdışı senkronizasyon ve RLS tenant izolasyonu birim ve entegrasyon testleriyle doğrulanır.
 
 ---
@@ -285,7 +291,7 @@ Fazların sırası ve kabul kriterleri korunmuştur:
 
 - **Faz 0 — Planlama ve Mimari Kararlar** (🔄 Devam Ediyor — Kod yazılmaz)
 - **Faz 1 — Temel Altyapı** (Flutter iskeleti, Drift, Riverpod, go_router, test altyapısı)
-- **Faz 2 — Kimlik, Tenant ve Cihazlar** (Supabase Auth, Tenant/Store modeli, RLS)
+- **Faz 2 — Kimlik, Tenant ve Cihazlar** (Yerel Owner modeli, Tenant/Store modeli; Gelecek SaaS için Supabase Auth ve RLS)
 - **Faz 3 — Ürün ve Kategori Yönetimi** (CRUD, Kamera/USB Barkod, Open Food Facts)
 - **Faz 4 — Stok ve Satış** (Sepet, satış tamamlama, stok hareketi, idempotency)
 - **Faz 5 — Offline ve Senkronizasyon** (Kalıcı kuyruk, çakışma çözümü, çoklu cihaz)

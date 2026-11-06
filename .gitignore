@@ -78,6 +78,8 @@ out/
 **/windows/flutter/ephemeral/
 **/windows/**/GeneratedPluginRegistrant.cc
 **/windows/**/GeneratedPluginRegistrant.h
+# Flutter generated Windows plugin registrant
+**/windows/flutter/generated_plugin_registrant.*
 
 # Web
 **/web/build/
@@ -96,6 +98,10 @@ google-services.json
 GoogleService-Info.plist
 firebase_options.dart.bak
 
+# Machine-specific encrypted secrets
+*.dpapi
+pepper.dpapi
+
 # ------------------------------------------------------------------------------
 # 6. Veritabanı, Günlükler ve Çökme Raporları
 # ------------------------------------------------------------------------------
@@ -106,4 +112,10 @@ firebase_options.dart.bak
 *.db-journal
 *.db-shm
 *.db-wal
+
+# ------------------------------------------------------------------------------
+# 7. Servis İkili Dosyaları (Binaries)
+# ------------------------------------------------------------------------------
+# Bundled service executables
+test_spikes/**/service_wrapper/*.exe
 
