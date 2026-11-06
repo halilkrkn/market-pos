@@ -1,0 +1,23 @@
+name: mms_client_storage
+description: "MARKET MMS Windows Client Local Storage & Outbox Synchronization"
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  crypto: ^3.0.3
+  drift: ^2.20.0
+  http: ^1.2.2
+  meta: ^1.11.0
+  path: ^1.9.0
+  sqlite3: ^2.4.6
+
+dev_dependencies:
+  build_runner: ^2.4.9
+  drift_dev: ^2.20.0
+  lints: ^3.0.0
+  spike_01_backend:
+    path: ../../test_spikes/spike_01_backend
+  test: ^1.25.0
