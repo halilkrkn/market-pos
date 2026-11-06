@@ -1,0 +1,11 @@
+# MARKET MANAGEMENT SYSTEM (MMS) — Skill Attribution Notice
+
+**Skill Name:** `code-quality`  
+**Provenance / Source:** Clean Architecture and SOLID rules curated internally for the Market Management System (MMS) project, conceptually inspired by software engineering principles attributed to Matt Pocock.  
+**Upstream Repository:** Unverified external Git repository (no standalone Dart upstream found).  
+**License Status:** Unverified upstream license. Not claimed as sole proprietary MMS software.  
+**Project Owner Authorization:** Explicitly reviewed and authorized for active use in MMS development by the Project Owner on 6 November 2026.  
+
+## Scope and Intent
+This skill establishes strict 3-layer Clean Architecture boundaries (`presentation -> domain <- data`), pure Dart domain isolation, immutability, integer kuruş financial calculations, and anti-overengineering (YAGNI & KISS) standards for all Dart/Flutter code authored in the MMS project.
+

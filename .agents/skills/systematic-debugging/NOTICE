@@ -1,0 +1,13 @@
+# MARKET MANAGEMENT SYSTEM (MMS) — Skill Attribution Notice
+
+**Skill Name:** `systematic-debugging`  
+**Original Repository:** `obra/superpowers` (`https://github.com/obra/superpowers`)  
+**Original Author / Copyright Holder:** Jesse Vincent (`obra`)  
+**Source Commit Reference:** `e9c3a1b`  
+**License:** MIT License  
+
+## Scope of Adaptation
+This skill adapts hypothesis-driven root cause analysis (RCA) and disciplined debugging methodology from `obra/superpowers` for use within the Market Management System (MMS) Flutter, Drift SQLite, and Windows Service architecture. It focuses on SQLite WAL diagnostics, lock troubleshooting, outbox stall resolution, and monetary rounding drift detection.
+
+Licensed under the MIT License. A full copy of the license is available in the accompanying `LICENSE` file.
+

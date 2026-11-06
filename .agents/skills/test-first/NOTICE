@@ -1,0 +1,13 @@
+# MARKET MANAGEMENT SYSTEM (MMS) — Skill Attribution Notice
+
+**Skill Name:** `test-first`  
+**Original Repository:** `obra/superpowers` (`https://github.com/obra/superpowers`)  
+**Original Author / Copyright Holder:** Jesse Vincent (`obra`)  
+**Source Commit Reference:** `e9c3a1b`  
+**License:** MIT License  
+
+## Scope of Adaptation
+This skill adapts Test-Driven Development (TDD) principles (Red-Green-Refactor, 3 Laws of TDD) from the `obra/superpowers` methodology for application within the Market Management System (MMS) Flutter/Dart codebase, with specific focus on monetary math, integer kuruş precision, and local database transaction testing.
+
+Licensed under the MIT License. A full copy of the license is available in the accompanying `LICENSE` file.
+

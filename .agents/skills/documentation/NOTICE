@@ -1,0 +1,11 @@
+# MARKET MANAGEMENT SYSTEM (MMS) — Skill Attribution Notice
+
+**Skill Name:** `documentation`  
+**Provenance / Source:** Architecture Decision Record (ADR) and Phase reporting standards adapted from Universal Project Template structures for the Market Management System (MMS) project.  
+**Upstream Repository:** Unverified external Git repository (template structure adaptation).  
+**License Status:** Unverified upstream license. Not claimed as sole proprietary MMS software.  
+**Project Owner Authorization:** Explicitly reviewed and authorized for active use in MMS development by the Project Owner on 6 November 2026.  
+
+## Scope and Intent
+This skill establishes the canonical documentation hierarchy (`AGENTS.md` -> `BUILD_PLANI.md` -> `PROJECT_STATUS.md` -> `docs/`), ADR authoring standards, and phase sign-off checklists for project governance in the MMS repository.
+

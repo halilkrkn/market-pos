@@ -1,0 +1,13 @@
+# MARKET MANAGEMENT SYSTEM (MMS) — Skill Attribution Notice
+
+**Skill Name:** `flutter-ui-standards`  
+**Original Repository:** `nextlevelbuilder/ui-ux-pro-max-skill` (`https://github.com/nextlevelbuilder/ui-ux-pro-max-skill`)  
+**Original Author / Copyright Holder:** nextlevelbuilder  
+**Source Commit Reference:** `3b8d14e`  
+**License:** MIT License  
+
+## Scope of Adaptation
+This skill adapts UI/UX ergonomics, touch target standards ($\ge 48\times 48\text{ dp}$), high-contrast accessibility (WCAG AA/AAA), and typography guidelines from `ui-ux-pro-max-skill` specifically for the Market Management System (MMS) Flutter cashier and mobile POS screens. Web/React/Next.js components were removed; only Flutter, desktop keyboard shortcuts (F1-F10), and USB HID barcode scanner focus rules were retained.
+
+Licensed under the MIT License. A full copy of the license is available in the accompanying `LICENSE` file.
+
