@@ -1,0 +1,34 @@
+<service>
+  <id>MarketMmsLocalHub</id>
+  <name>Market MMS Local Master Hub Service</name>
+  <description>MARKET MMS yerel backend ve merkezi SQLite veritabanı yönetim servisi (Shelf + Drift + SQLite)</description>
+  
+  <!-- Çalıştırılacak Dart AOT binary yolu -->
+  <executable>%BASE%\spike_service.exe</executable>
+  <arguments>--port=8080 --db-path="%BASE%\data\market_mms_master.db"</arguments>
+  <workingdirectory>%BASE%</workingdirectory>
+  
+  <!-- Servis Başlangıç Davranışı -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  
+  <!-- Loglama Yapılandırması: 10 MB limitli 5 dosya rotasyonu -->
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  
+  <!-- Çökme / Hata Kurtarma Politikası (Restart Backoff) -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  
+  <!-- Graceful Shutdown: WriteQueue tahliyesi ve SQLite WAL checkpoint için 15 saniye bekleme -->
+  <stoptimeout>15 sec</stoptimeout>
+  
+  <!-- Ortam Değişkenleri -->
+  <env name="MMS_ENV" value="production"/>
+</service>
+

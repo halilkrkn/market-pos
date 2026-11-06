@@ -1,0 +1,34 @@
+<service>
+  <id>MarketMmsSpike01</id>
+  <name>Market MMS Spike-01 Windows Service</name>
+  <description>MARKET MMS SPIKE-01 Test Servisi (Dart Shelf + SQLite Local Master Hub)</description>
+  
+  <!-- Çalıştırılacak Dart AOT binary yolu -->
+  <executable>%BASE%\..\build\spike_service.exe</executable>
+  <arguments>--port=8085 --db-path="%BASE%\..\build\service_test.db"</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  
+  <!-- Servis Başlangıç Davranışı: Sistem açılışında otomatik başlama -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  
+  <!-- Loglama Yapılandırması: 10 MB limitli 5 dosya rotasyonu -->
+  <logpath>%BASE%\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  
+  <!-- Çökme / Hata Kurtarma Politikası (Restart Backoff) -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  
+  <!-- Graceful Shutdown: WriteQueue tahliyesi için 15 saniye bekleme -->
+  <stoptimeout>15 sec</stoptimeout>
+  
+  <!-- Ortam Değişkenleri -->
+  <env name="MMS_ENV" value="test_spike"/>
+</service>
+

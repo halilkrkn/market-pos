@@ -1,0 +1,39 @@
+<service>
+  <id>MarketMMSService</id>
+  <name>Market MMS Backend Engine</name>
+  <description>Market Management System Local Master Hub Service</description>
+  
+  <!-- Çalıştırılacak Dart AOT binary yolu (ProgramData Dağıtım Standardı) -->
+  <executable>%BASE%\mms_backend.exe</executable>
+  <arguments>--port=8085 --db-path="%BASE%\..\data\market_master.db" --cert="%BASE%\..\certs\server.crt" --key="%BASE%\..\certs\server.key" --pepper-file="%BASE%\..\security\pepper.dpapi" --backup-dir="%BASE%\..\backups" --tls</arguments>
+  <workingdirectory>%BASE%\..</workingdirectory>
+  
+  <!-- Servis Başlangıç Davranışı: Sistem açılışında otomatik başlama -->
+  <startmode>Automatic</startmode>
+  
+  <!-- WinSW v2.12.0 LocalService Hesabı -->
+  <serviceaccount>
+    <domain>NT AUTHORITY</domain>
+    <user>LocalService</user>
+  </serviceaccount>
+
+  <!-- Loglama Yapılandırması: 10 MB limitli 5 dosya rotasyonu -->
+  <logpath>%BASE%\..\logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+  
+  <!-- Çökme / Hata Kurtarma Politikası (Restart Backoff) -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+  
+  <!-- Graceful Shutdown: 15 saniye bekleme -->
+  <stoptimeout>15 sec</stoptimeout>
+  
+  <!-- Ortam Değişkenleri: Şifresiz HTTP kesinlikle yasaktır, TLS zorunludur -->
+  <env name="MMS_ENV" value="production"/>
+  <env name="ENABLE_TLS" value="true"/>
+</service>
