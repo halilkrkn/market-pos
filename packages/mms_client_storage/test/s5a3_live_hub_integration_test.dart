@@ -267,7 +267,7 @@ void main() {
     // Satış 2: 1.25 L Çiftlik Sütü (40 TL/L = 4000 kuruş) -> 5000 kuruş (50 TL)
     final sale2 = await clientRepo.createOfflineSale(
       deviceId: testDeviceId,
-      paymentMethod: 'CREDIT_CARD',
+      paymentMethod: 'CARD',
       items: [
         CartItemInput.fractional('prod_live_milk', 1250), // 1.250 L
       ],
@@ -323,8 +323,10 @@ void main() {
     expect(masterSales.length, equals(2));
     expect(masterSales[0]['client_seq'], equals(1));
     expect(masterSales[0]['total_amount'], equals(10000)); // 100 TL
+    expect(masterSales[0]['payment_method'], equals('CASH'));
     expect(masterSales[1]['client_seq'], equals(2));
     expect(masterSales[1]['total_amount'], equals(5000)); // 50 TL
+    expect(masterSales[1]['payment_method'], equals('CARD'));
 
     // Master DB'deki satır kalemleri ve kesirli miktarları doğrula
     final masterItems = rawMaster.select("SELECT * FROM sale_items ORDER BY id ASC;");

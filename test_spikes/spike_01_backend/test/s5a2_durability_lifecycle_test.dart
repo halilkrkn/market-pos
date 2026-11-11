@@ -496,7 +496,7 @@ void main() {
         'operation_id': 'op_conflict_1',
         'client_seq': 12, // AYNI SIRA NO
         'total_amount': 5000, // FARKLI TUTAR!
-        'payment_method': 'CREDIT_CARD',
+        'payment_method': 'CARD',
         'items': [
           {'product_id': 'prod_cola', 'quantity': 2000, 'unit_price': 2500, 'total_price': 5000}
         ],
@@ -545,7 +545,7 @@ void main() {
         'operation_id': 'op_dev_b_seq_1',
         'client_seq': 1,
         'total_amount': 1000,
-        'payment_method': 'CREDIT_CARD',
+        'payment_method': 'CARD',
         'items': [
           {'product_id': 'prod_water', 'quantity': 1000, 'unit_price': 1000, 'total_price': 1000}
         ],

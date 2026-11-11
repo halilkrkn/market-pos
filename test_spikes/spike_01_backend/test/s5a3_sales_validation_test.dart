@@ -461,5 +461,236 @@ void main() {
       final err = jsonDecode(res.body);
       expect(err['code'], equals('ERR_ITEM_TOTAL_MISMATCH'));
     });
+
+    test('12. Kanonik CARD ödeme yöntemi 201 COMMITTED döner, kaydedilir ve tekrar gönderimde idempotent replay yapar', () async {
+      final cardPayload = {
+        'operation_id': 'op_canonical_card_14',
+        'client_seq': 14,
+        'total_amount': 20000,
+        'payment_method': 'CARD',
+        'items': [
+          {
+            'product_id': 'prod_et',
+            'quantity': 1000,
+            'unit_price': 20000,
+            'total_price': 20000,
+          }
+        ],
+      };
+
+      final res1 = await http.post(
+        Uri.parse('$baseUrl/api/v1/sales'),
+        headers: authHeaders(),
+        body: jsonEncode(cardPayload),
+      );
+      expect(res1.statusCode, equals(201));
+      final body1 = jsonDecode(res1.body) as Map<String, dynamic>;
+      expect(body1['status'], equals('COMMITTED'));
+      final saleId = body1['sale_id'] as String;
+
+      final savedSale = await (db.select(db.sales)..where((s) => s.id.equals(saleId))).getSingle();
+      expect(savedSale.paymentMethod, equals('CARD'));
+
+      // Aynı CARD satışının tekrar gönderilmesi duplicate satış oluşturmaz
+      final resReplay = await http.post(
+        Uri.parse('$baseUrl/api/v1/sales'),
+        headers: authHeaders(),
+        body: jsonEncode(cardPayload),
+      );
+      expect(resReplay.statusCode, equals(200));
+      expect(resReplay.headers['x-mms-idempotent-replay'], equals('true'));
+
+      final allSeq14Sales = await (db.select(db.sales)
+            ..where((s) => s.deviceId.equals(deviceId) & s.clientSeq.equals(14)))
+          .get();
+      expect(allSeq14Sales.length, equals(1));
+    });
+
+    test('13. Geçersiz veya eski ödeme yöntemleri (CREDIT_CARD, NAKIT, küçük harf, boş) ve eksik/null alan 400 ERR_INVALID_PAYMENT_METHOD ile reddedilir', () async {
+      final salesCountBefore = (await db.select(db.sales).get()).length;
+      final invalidBodies = <Map<String, dynamic>>[
+        {
+          'operation_id': 'op_bad_pm_credit_card',
+          'client_seq': 15,
+          'total_amount': 20000,
+          'payment_method': 'CREDIT_CARD',
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          'operation_id': 'op_bad_pm_nakit',
+          'client_seq': 16,
+          'total_amount': 20000,
+          'payment_method': 'NAKIT',
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          'operation_id': 'op_bad_pm_lower',
+          'client_seq': 17,
+          'total_amount': 20000,
+          'payment_method': 'cash',
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          'operation_id': 'op_bad_pm_empty',
+          'client_seq': 18,
+          'total_amount': 20000,
+          'payment_method': '',
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          'operation_id': 'op_bad_pm_null',
+          'client_seq': 19,
+          'total_amount': 20000,
+          'payment_method': null,
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          'operation_id': 'op_bad_pm_int',
+          'client_seq': 20,
+          'total_amount': 20000,
+          'payment_method': 123,
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+        {
+          // Eksik payment_method alanı sessizce CASH yapılmaz!
+          'operation_id': 'op_bad_pm_missing',
+          'client_seq': 21,
+          'total_amount': 20000,
+          'items': [
+            {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
+          ],
+        },
+      ];
+
+      for (final body in invalidBodies) {
+        final res = await http.post(
+          Uri.parse('$baseUrl/api/v1/sales'),
+          headers: authHeaders(),
+          body: jsonEncode(body),
+        );
+        expect(res.statusCode, equals(400), reason: 'Reddedilmeli: ${body['operation_id']}');
+        final err = jsonDecode(res.body) as Map<String, dynamic>;
+        expect(err['code'], equals('ERR_INVALID_PAYMENT_METHOD'));
+      }
+
+      final salesCountAfter = (await db.select(db.sales).get()).length;
+      expect(salesCountAfter, equals(salesCountBefore));
+    });
+
+    test('14. Aynı idempotency key üzerinde payment_method değiştirilmesi (CARD -> CASH) 409 ERR_IDEMPOTENCY_PAYLOAD_MISMATCH döner', () async {
+      final mutatedReplay = {
+        'operation_id': 'op_canonical_card_14',
+        'client_seq': 14,
+        'total_amount': 20000,
+        'payment_method': 'CASH',
+        'items': [
+          {
+            'product_id': 'prod_et',
+            'quantity': 1000,
+            'unit_price': 20000,
+            'total_price': 20000,
+          }
+        ],
+      };
+
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/v1/sales'),
+        headers: authHeaders(),
+        body: jsonEncode(mutatedReplay),
+      );
+      expect(res.statusCode, equals(409));
+      final err = jsonDecode(res.body) as Map<String, dynamic>;
+      expect(err['code'], equals('ERR_IDEMPOTENCY_PAYLOAD_MISMATCH'));
+    });
+
+    test('15. Geriye Dönük Uyumluluk: Önceden işlenmiş legacy CREDIT_CARD operasyonu aynı payload ile tekrarlanırsa idempotent replay (200) döner, mutasyona uğratılırsa 409 döner', () async {
+      final legacyBody = {
+        'operation_id': 'op_legacy_preexisting_22',
+        'client_seq': 22,
+        'total_amount': 20000,
+        'payment_method': 'CREDIT_CARD',
+        'items': [
+          {
+            'product_id': 'prod_et',
+            'quantity': 1000,
+            'unit_price': 20000,
+            'total_price': 20000,
+          }
+        ],
+      };
+      final legacyHash = SpikeServer.computeSaleRequestHash(legacyBody);
+      final cachedResponse = {
+        'status': 'COMMITTED',
+        'sale_id': 'sale_legacy_preexisting_22',
+        'device_id': deviceId,
+        'client_seq': 22,
+        'total_amount': 20000,
+        'updated_stocks': {'prod_et': 9998000},
+        'committed_at': DateTime.now().toIso8601String(),
+        '__request_hash': legacyHash,
+      };
+
+      await writeQueue.enqueue(() async {
+        await db.into(db.sales).insert(
+              SalesCompanion(
+                id: const Value('sale_legacy_preexisting_22'),
+                deviceId: Value(deviceId),
+                clientSeq: const Value(22),
+                totalAmount: const Value(20000),
+                paymentMethod: const Value('CREDIT_CARD'),
+              ),
+            );
+        await db.into(db.processedOperations).insert(
+              ProcessedOperationsCompanion(
+                operationId: const Value('op_legacy_preexisting_22'),
+                deviceId: Value(deviceId),
+                idempotencyKey: Value('$deviceId:22'),
+                resultPayload: Value(jsonEncode(cachedResponse)),
+              ),
+            );
+      });
+
+      // Birebir aynı legacy payload ile ACK-loss tekrarında 200 replay döner ve duplicate oluşmaz
+      final resSame = await http.post(
+        Uri.parse('$baseUrl/api/v1/sales'),
+        headers: authHeaders(),
+        body: jsonEncode(legacyBody),
+      );
+      expect(resSame.statusCode, equals(200));
+      expect(resSame.headers['x-mms-idempotent-replay'], equals('true'));
+      expect(
+        (await (db.select(db.sales)
+                  ..where((s) => s.deviceId.equals(deviceId) & s.clientSeq.equals(22)))
+                .get())
+            .length,
+        equals(1),
+      );
+
+      // Aynı seq üzerinde CREDIT_CARD -> CARD değiştirilmeye çalışılırsa hash mismatch (409) yakalar
+      final alteredBody = {
+        ...legacyBody,
+        'payment_method': 'CARD',
+      };
+      final resAltered = await http.post(
+        Uri.parse('$baseUrl/api/v1/sales'),
+        headers: authHeaders(),
+        body: jsonEncode(alteredBody),
+      );
+      expect(resAltered.statusCode, equals(409));
+      final errAltered = jsonDecode(resAltered.body) as Map<String, dynamic>;
+      expect(errAltered['code'], equals('ERR_IDEMPOTENCY_PAYLOAD_MISMATCH'));
+    });
   });
 }

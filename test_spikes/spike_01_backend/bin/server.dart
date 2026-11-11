@@ -992,7 +992,7 @@ class SpikeServer {
 
       final operationId = body['operation_id'] as String;
       final idempotencyKey = '$deviceId:$clientSeq';
-      final paymentMethod = body['payment_method'] as String? ?? 'CASH';
+      final rawPaymentMethod = body['payment_method'];
       final incomingHash = computeSaleRequestHash(body);
 
       // A. Önce Idempotency kontrolü (Inbox defteri)
@@ -1027,6 +1027,22 @@ class SpikeServer {
           },
         );
       }
+
+      // Kanonik ödeme yöntemi doğrulaması:
+      // Yeni satışlarda yalnız 'CASH' ve 'CARD' kabul edilir; eksik, null, metin dışı
+      // veya geçersiz/eski ('CREDIT_CARD', 'NAKIT') değerler asla sessizce 'CASH' yapılmaz.
+      if (!PaymentMethod.isCanonical(rawPaymentMethod)) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_PAYMENT_METHOD',
+            'message': 'Geçersiz veya eksik payment_method değeri. Yalnızca "CASH" veya "CARD" kabul edilir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      final paymentMethod = PaymentMethod.parse(rawPaymentMethod).code;
 
       // B. Yeni işlem: Tekil yazıcı kuyruğunda atomik transaction işlet
       try {

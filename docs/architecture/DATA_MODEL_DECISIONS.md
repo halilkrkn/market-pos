@@ -71,6 +71,7 @@ Bu doküman, **Market Management System (MMS)** veri modeli v1.1 tasarlanırken 
 - **Bağlam:** MVP aşamasında satış başına tek ödeme (Nakit veya Kart) esastır (`BR-PAY-01`).
 - **Karar:** Karmaşık 1-N `payments` tablosu yerine `sales.payment_method` doğrudan kullanılır. Hatalı seçimler `payment_method_corrections` tablosuyla denetlenir (`BR-PAY-05`).
 - **Durum:** `[CONFIRMED]`
+- **11 Kasım 2026 Kanonik Sözleşme Güncellemesi:** Saf Dart domain/ortak model (`PaymentMethod`), yerel Drift (`local_sales`), Outbox JSON yükü, SHA-256 hash girdisi ve merkezi backend (`POST /api/v1/sales`) sözleşmesinde kabul edilen kanonik değerler yalnızca **`'CASH'`** ve **`'CARD'`**dır. Önceki kod/test örneklerinde yer alan `'CREDIT_CARD'` ve `'NAKIT'` değerleri yürürlükten kaldırılmıştır (*obsolete*). Backend bilinmeyen/eksik/geçersiz `payment_method` değerlerini sessizce `'CASH'` olarak yorumlamaz (`400 ERR_INVALID_PAYMENT_METHOD` ile reddeder); yalnızca daha önce işlenmiş `processed_operations` kayıtlarının idempotent replay uyumluluğu korunur.
 
 ---
 

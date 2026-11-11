@@ -1297,7 +1297,7 @@ void main() {
           'idempotency_key': 'idem_s4_test_01',
           'client_seq': 1,
           'total_amount': 500,
-          'payment_method': 'NAKIT',
+          'payment_method': 'CASH',
           'items': [
             {
               'product_id': 'prod_su_01',
@@ -1388,7 +1388,7 @@ void main() {
           'idempotency_key': 'idem_unconf_01',
           'client_seq': 1,
           'total_amount': 500,
-          'payment_method': 'NAKIT',
+          'payment_method': 'CASH',
           'items': [
             {
               'product_id': 'prod_su_01',
@@ -1452,7 +1452,7 @@ void main() {
           'idempotency_key': 'idem_conf_01',
           'client_seq': 1,
           'total_amount': 500,
-          'payment_method': 'NAKIT',
+          'payment_method': 'CASH',
           'items': [
             {
               'product_id': 'prod_su_01',
@@ -1485,7 +1485,7 @@ void main() {
           'idempotency_key': 'idem_rev_01',
           'client_seq': 2,
           'total_amount': 500,
-          'payment_method': 'NAKIT',
+          'payment_method': 'CASH',
           'items': [
             {
               'product_id': 'prod_su_01',

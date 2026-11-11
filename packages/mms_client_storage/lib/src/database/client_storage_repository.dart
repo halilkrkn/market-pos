@@ -4,6 +4,7 @@ import 'package:drift/drift.dart';
 
 import 'client_database.dart';
 import '../models/cart_item_input.dart';
+import '../models/payment_method.dart';
 import '../models/sale_transaction_result.dart';
 
 class ClientStorageRepository {
@@ -72,6 +73,7 @@ class ClientStorageRepository {
     if (items.isEmpty) {
       throw ArgumentError('Satış en az bir ürün içermelidir.');
     }
+    final canonicalPaymentMethod = PaymentMethod.parse(paymentMethod).code;
 
     final saleTimestamp = occurredAt ?? DateTime.now();
 
@@ -173,7 +175,7 @@ class ClientStorageRepository {
               deviceId: Value(deviceId),
               clientSeq: Value(nextSeq),
               totalAmount: Value(calculatedTotalAmount),
-              paymentMethod: Value(paymentMethod),
+              paymentMethod: Value(canonicalPaymentMethod),
               status: const Value('COMPLETED'),
               createdAt: Value(saleTimestamp),
             ),
@@ -228,7 +230,7 @@ class ClientStorageRepository {
         'operation_id': operationId,
         'client_seq': nextSeq,
         'total_amount': calculatedTotalAmount,
-        'payment_method': paymentMethod,
+        'payment_method': canonicalPaymentMethod,
         'items': payloadItems,
       };
 
@@ -264,7 +266,7 @@ class ClientStorageRepository {
         deviceId: deviceId,
         clientSeq: nextSeq,
         totalAmount: calculatedTotalAmount,
-        paymentMethod: paymentMethod,
+        paymentMethod: canonicalPaymentMethod,
         operationId: operationId,
         items: itemResults,
         createdAt: saleTimestamp,
@@ -433,24 +435,112 @@ class ClientStorageRepository {
         );
   }
 
-  /// S5A-3: Düzeltilmiş yeni bir işlem yükü ile kalıcı hatalı operasyonu günceller ve yeniden dener
+  /// S5A-3: Kalıcı hatalı (`FAILED_PERMANENT`) operasyonu tek atomik SQLite
+  /// transaction içinde doğrular, payload ve SHA-256 hash'i günceller ve
+  /// yeniden senkronizasyon için `PENDING` durumuna geçirir.
   Future<void> updateAndRetryFailedOperation(
     String operationId, {
     required Map<String, dynamic> correctedPayload,
   }) async {
-    final payloadStr = jsonEncode(correctedPayload);
-    final payloadHash = computeSaleRequestHash(correctedPayload);
+    await db.transaction(() async {
+      final existing = await (db.select(db.outboxOperations)
+            ..where((o) => o.operationId.equals(operationId)))
+          .getSingleOrNull();
 
-    await (db.update(db.outboxOperations)..where((o) => o.operationId.equals(operationId))).write(
-          OutboxOperationsCompanion(
-            payload: Value(payloadStr),
-            payloadHash: Value(payloadHash),
-            status: const Value('PENDING'),
-            attemptCount: const Value(0),
-            nextRetryAt: const Value(null),
-            lastError: const Value(null),
-          ),
+      if (existing == null) {
+        throw StateError('Outbox operasyonu bulunamadı: $operationId');
+      }
+      if (existing.status != 'FAILED_PERMANENT') {
+        throw StateError(
+          'Yalnızca FAILED_PERMANENT durumundaki operasyonlar onarılabilir (mevcut durum: ${existing.status}).',
         );
+      }
+      if (correctedPayload['operation_id'] != existing.operationId) {
+        throw ArgumentError(
+          'Onarım yükünde operation_id değiştirilemez (beklenen: ${existing.operationId}).',
+        );
+      }
+      if (correctedPayload['client_seq'] != existing.clientSeq) {
+        throw ArgumentError(
+          'Onarım yükünde client_seq değiştirilemez (beklenen: ${existing.clientSeq}).',
+        );
+      }
+
+      final isSaleCreate = existing.operationType == 'SALE_CREATE';
+      PaymentMethod? parsedPaymentMethod;
+      if (isSaleCreate || correctedPayload.containsKey('payment_method')) {
+        parsedPaymentMethod = PaymentMethod.parse(correctedPayload['payment_method']);
+      }
+
+      int? repairedTotalAmount;
+      if (isSaleCreate) {
+        final rawTotalAmount = correctedPayload['total_amount'];
+        final rawItems = correctedPayload['items'];
+        if (rawTotalAmount is! int || rawTotalAmount <= 0) {
+          throw ArgumentError('Onarım yükünde total_amount pozitif tamsayı olmalıdır.');
+        }
+        if (rawItems is! List || rawItems.isEmpty) {
+          throw ArgumentError('Onarım yükünde en az bir satış kalemi (items) bulunmalıdır.');
+        }
+        repairedTotalAmount = rawTotalAmount;
+      }
+
+      final payloadStr = jsonEncode(correctedPayload);
+      final payloadHash = computeSaleRequestHash(correctedPayload);
+
+      await (db.update(db.outboxOperations)..where((o) => o.operationId.equals(operationId)))
+          .write(
+        OutboxOperationsCompanion(
+          payload: Value(payloadStr),
+          payloadHash: Value(payloadHash),
+          status: const Value('PENDING'),
+          attemptCount: const Value(0),
+          nextRetryAt: const Value(null),
+          lastError: const Value(null),
+        ),
+      );
+
+      if (isSaleCreate && parsedPaymentMethod != null && repairedTotalAmount != null) {
+        await _syncRepairedLocalSale(
+          deviceId: existing.deviceId,
+          clientSeq: existing.clientSeq,
+          repairedMethod: parsedPaymentMethod,
+          repairedTotalAmount: repairedTotalAmount,
+        );
+      }
+    });
+  }
+
+  /// Legacy satışın yerel kaydını aynı transaction içinde kanonik sözleşmeyle
+  /// eşitler; tutar veya ödeme ailesi uyuşmazlığında transaction rollback tetikler.
+  Future<void> _syncRepairedLocalSale({
+    required String deviceId,
+    required int clientSeq,
+    required PaymentMethod repairedMethod,
+    required int repairedTotalAmount,
+  }) async {
+    final localSale = await (db.select(db.localSales)
+          ..where((s) => s.deviceId.equals(deviceId) & s.clientSeq.equals(clientSeq)))
+        .getSingleOrNull();
+    if (localSale == null) return;
+
+    if (repairedTotalAmount != localSale.totalAmount) {
+      throw ArgumentError(
+        'Onarım yükündeki total_amount ($repairedTotalAmount) yerel satış tutarıyla (${localSale.totalAmount}) uyuşmuyor.',
+      );
+    }
+
+    final logicalPrior = PaymentMethod.tryParseLegacyReadOnly(localSale.paymentMethod);
+    if (logicalPrior != null && logicalPrior != repairedMethod) {
+      throw ArgumentError(
+        'Satışın ödeme yöntemi (${localSale.paymentMethod}) farklı bir yönteme (${repairedMethod.code}) sessizce dönüştürülemez.',
+      );
+    }
+
+    if (localSale.paymentMethod != repairedMethod.code) {
+      await (db.update(db.localSales)..where((s) => s.id.equals(localSale.id)))
+          .write(LocalSalesCompanion(paymentMethod: Value(repairedMethod.code)));
+    }
   }
 
   /// Uygulama başladığında kilitli/yarıda kalmış IN_PROGRESS işlemlerini kurtarır (Crash Recovery)

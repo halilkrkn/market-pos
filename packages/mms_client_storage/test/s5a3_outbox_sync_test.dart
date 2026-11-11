@@ -169,7 +169,7 @@ void main() {
       );
       await repo.createOfflineSale(
         deviceId: 'DEV_WIN1',
-        paymentMethod: 'CREDIT_CARD',
+        paymentMethod: 'CARD',
         items: [CartItemInput.units('prod_1', 2)], // 2000 kuruş
       );
 

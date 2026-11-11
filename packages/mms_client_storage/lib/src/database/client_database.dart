@@ -53,7 +53,7 @@ class LocalSales extends Table {
   TextColumn get deviceId => text()();
   IntColumn get clientSeq => integer()();
   IntColumn get totalAmount => integer()(); // Kuruş bazlı tamsayı
-  TextColumn get paymentMethod => text()(); // 'CASH', 'CREDIT_CARD', etc.
+  TextColumn get paymentMethod => text()(); // Kanonik sözleşme: 'CASH', 'CARD'
   TextColumn get status => text().withDefault(const Constant('COMPLETED'))(); // 'COMPLETED', 'CANCELLED'
   DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
 
