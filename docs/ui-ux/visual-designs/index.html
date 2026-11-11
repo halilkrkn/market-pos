@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Görsel Tasarım Ekranları Vitrini (UI/UX Hub)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .hub-container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: var(--space-6) var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-6);
+    }
+    .hub-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: var(--space-3);
+      padding-bottom: var(--space-4);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .screen-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+      gap: var(--space-4);
+    }
+    @media (max-width: 640px) {
+      .screen-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .screen-card {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-lg);
+      padding: var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+    }
+    .screen-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+    }
+    .screen-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .screen-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-main);
+    }
+    .screen-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>MARKET MMS GÖRSEL TASARIM PROGRAMI</strong> — HTML/CSS Ekran Mock-Up Koleksiyonu (Flutter uygulaması değildir)</span>
+    <span>WCAG 2.1 Kontrast Kontrollü Renk Token'ları</span>
+  </div>
+
+  <div class="hub-container">
+    
+    <!-- Başlık & Tema Butonu -->
+    <header class="hub-header">
+      <div>
+        <h1 style="font-size: 24px; font-weight: 800; display: flex; align-items: center; gap: 10px;">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          MARKET MMS Görsel Tasarım Vitrini
+        </h1>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+          Windows Masaüstü (6 Ekran) ve Mobil (4 Ekran) için üretilmiş HTML/CSS statik/etkileşimli tasarım prototipleri (gerçek Flutter uygulaması değildir).
+        </p>
+      </div>
+      <div style="display: flex; gap: var(--space-2);">
+        <button class="btn btn-secondary" onclick="toggleTheme()">
+          🌓 Tema Değiştir (Light / Dark)
+        </button>
+      </div>
+    </header>
+
+    <!-- Mimari Anayasa ve Değişmezler Hatırlatma Kartı -->
+    <div class="card" style="background-color: var(--bg-surface-subtle); border-left: 4px solid var(--accent);">
+      <h3 style="font-size: 14px; font-weight: 700; color: var(--accent-text);">Görsel Tasarımda Uygulanan Kesin Mimari Değişmezler:</h3>
+      <ul style="font-size: 12px; margin-top: 8px; margin-left: 20px; line-height: 1.6; color: var(--text-muted);">
+        <li><strong>INV-01 (Kuruş Standardı):</strong> Tüm ekranlarda double yasaktır; tüm tutarlar tamsayı kuruş üzerinden Monospace Tabular olarak ve onaylanan görsel formatta (Örn: <code>12.50 TL</code>) gösterilmektedir.</li>
+        <li><strong>INV-02 (Ayrık Veritabanı):</strong> Windows UI `client_local.db`'ye bağlanır, `market_master.db` erişimi yoktur; anlık Hub durumu rozetle izlenir.</li>
+        <li><strong>INV-04 (Eksi Stok Politikası):</strong> Eksi stok "allow"dur; faturası girilmemiş ürünün satışı engellenmez, sarı uyarı rozeti verilir.</li>
+        <li><strong>INV-05 (Banka POS Sınırı):</strong> Banka POS cihazlarına otomatik tutar aktarımı yoktur; tutar terminale elle girilir.</li>
+        <li><strong>INV-08 (Nakit + Kart Yalnızca):</strong> Pilot aşamasında yalnızca Nakit ve Kredi Kartı vardır; parçalı ödeme MVP dışıdır.</li>
+        <li><strong>INV-09 (Tek Sahip Hesabı):</strong> Pilot sürümde kasiyer rol yetkilendirmesi yoktur; bizzat Mağaza Sahibi tek hesapla oturum açar.</li>
+      </ul>
+    </div>
+
+    <!-- Windows Masaüstü Ekranları -->
+    <div>
+      <h2 style="font-size: 18px; font-weight: 700; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+        Windows Masaüstü Ekranları (6 Öncelikli Ekran)
+      </h2>
+
+      <div class="screen-grid">
+        
+        <!-- Win 1 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">1. Dashboard (Özet Panel)</span>
+            <span class="badge badge-online">W-05</span>
+          </div>
+          <p class="screen-desc">
+            4'lü KPI kartı (Toplam, Nakit, Kart Cirosu), bekleyen Outbox durumu, son satış tablosu ve eksiye düşen ürünler uyarı listesi.
+          </p>
+          <a href="win-01-dashboard.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Win 2 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">2. Kasa Satış (Ana POS)</span>
+            <span class="badge badge-online">W-01</span>
+          </div>
+          <p class="screen-desc">
+            %60 Sepet tablosu, %40 hızlı tuşlar, opsiyonel sanal numpad yerleşim önizlemesi [OD-04: Varsayılan Kapalı], dev genel toplam kutusu, F10 Nakit ve F9 Kredi Kartı butonları (`main_shell_screen.dart` uyumlu).
+          </p>
+          <a href="win-02-pos.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Win 3 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">3. Ürün Arama & Katalog</span>
+            <span class="badge badge-online">W-06</span>
+          </div>
+          <p class="screen-desc">
+            Anlık arama çubuğu, kategori filtresi, son bilinen satış fiyatı [INV-10], eksi stok uyarıları ve tek tıkla sepete ekleme.
+          </p>
+          <a href="win-03-product-search.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Win 4 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">4. Hızlı Ödeme & Para Üstü</span>
+            <span class="badge badge-online">W-02</span>
+          </div>
+          <p class="screen-desc">
+            Masaüstü ödeme modalı (Flutter hedefi 600&times;480 dp), hızlı banknot butonları (310 TL, 400 TL, 1,000 TL), tamsayı kuruş dönüşümlü nakit girişi ve para üstü kutusu.
+          </p>
+          <a href="win-04-payment-modal.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Win 5 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">5. Satış Geçmişi & İade</span>
+            <span class="badge badge-online">W-10</span>
+          </div>
+          <p class="screen-desc">
+            Tarih filtreli fiş tablosu, seçili fişin snapshot satış fiyatları dökümü ve satış dokunulmazlığına uygun ters REFUND iade akışı [INV-03].
+          </p>
+          <a href="win-05-sales-history.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Win 6 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">6. Stok Takibi & Hareketler</span>
+            <span class="badge badge-online">W-09</span>
+          </div>
+          <p class="screen-desc">
+            Stok seviyeleri, eksi stok politikası uyarı paneli [INV-04], toptancı mal kabul girişi ve tam audit trail hareket tablosu.
+          </p>
+          <a href="win-06-stock-management.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Mobil Ekranlar -->
+    <div>
+      <h2 style="font-size: 18px; font-weight: 700; margin-bottom: var(--space-4); display: flex; align-items: center; gap: 8px;">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+        Mobil Android / iOS Ekranları (4 Öncelikli Ekran)
+      </h2>
+
+      <div class="screen-grid">
+        
+        <!-- Mob 1 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">7. Mobil Dashboard</span>
+            <span class="badge badge-outbox">M-01</span>
+          </div>
+          <p class="screen-desc">
+            Mağaza sahibi günlük özet, ciro kartı, Wi-Fi Hub online rozeti, bekleyen outbox sayacı ve hızlı reyon aksiyonları.
+          </p>
+          <a href="mob-01-dashboard.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Mob 2 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">8. Kamera Barkod Tarama</span>
+            <span class="badge badge-outbox">M-02</span>
+          </div>
+          <p class="screen-desc">
+            Kamera vizör simülasyonu, lazer tarama çizgisi, fener kontrolü ve taranan ürün için açılan alt çekmece (Bottom Sheet) kartı.
+          </p>
+          <a href="mob-02-barcode-scan.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Mob 3 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">9. Mobil Sepet ve Ödeme</span>
+            <span class="badge badge-outbox">M-03</span>
+          </div>
+          <p class="screen-desc">
+            Dikey sepet listesi, dokunmatik adet +/- butonları, alt yapışkan ödeme çubuğu ve tek dokunuşla Nakit/Kart satış tamamlama.
+          </p>
+          <a href="mob-03-cart-checkout.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+        <!-- Mob 4 -->
+        <div class="screen-card">
+          <div class="screen-card-header">
+            <span class="screen-title">10. Mobil Stok Görüntüleme & Hareketler</span>
+            <span class="badge badge-outbox">M-04</span>
+          </div>
+          <p class="screen-desc">
+            Reyonda raf önünde anlık stok durumu sorgulama, allow politikası uyarınca eksi stok gösterimi [INV-04], son bilinen fiyat [INV-10] ve hareket geçmişi (audit trail).
+          </p>
+          <a href="mob-04-stock-view.html" class="btn btn-secondary" style="margin-top: auto;">
+            Ekranı Aç &rarr;
+          </a>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <script src="shared.js"></script>
+</body>
+</html>

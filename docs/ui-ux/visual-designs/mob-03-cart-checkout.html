@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Mobil Sepet ve Ödeme (Görsel Tasarım M-03)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .cart-item-card {
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      padding: var(--space-3);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: var(--space-2);
+    }
+    .cart-checkout-bar {
+      background-color: var(--bg-surface);
+      border-top: 1px solid var(--border-subtle);
+      padding: var(--space-3) var(--space-4);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-2);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>MOBİL TASARIM MOCK-UP</strong> — Mobil Kasa & Sepet. Donanımsal POS terminali yoktur [INV-05].</span>
+    <a href="index.html" style="color: inherit; text-decoration: underline; min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center;">Menü</a>
+  </div>
+
+  <div class="mobile-wrapper">
+    <div class="mobile-frame">
+      
+      <!-- Mobil Üst Bar -->
+      <header class="mobile-topbar">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span>Aktif Sepet</span>
+          <span class="badge badge-online" style="font-size: 10px; padding: 2px 6px;">3 Kalem</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button class="btn btn-secondary" onclick="alert('Sepet Temizlendi')" style="min-height: 48px; min-width: 48px; padding: 0 12px; font-size: 13px;">
+            Temizle
+          </button>
+          <button class="btn btn-secondary" onclick="toggleTheme()" style="min-height: 48px; min-width: 48px; padding: 0 12px; font-size: 13px;">
+            Tema
+          </button>
+        </div>
+      </header>
+
+      <!-- Mobil Sepet Listesi -->
+      <main class="mobile-content">
+        
+        <!-- Kalem 1 -->
+        <div class="cart-item-card">
+          <div style="flex: 1; min-width: 140px;">
+            <h5 style="font-size: 14px; font-weight: 700; color: var(--text-main);">Somun Ekmek 200g</h5>
+            <div class="mono" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              Birim: 12.50 TL
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">-</button>
+            <span class="mono" style="font-weight: 700; font-size: 15px; width: 24px; text-align: center;">2</span>
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">+</button>
+          </div>
+          <div class="mono" style="font-size: 15px; font-weight: 800; min-width: 65px; text-align: right;">
+            25.00 TL
+          </div>
+        </div>
+
+        <!-- Kalem 2 -->
+        <div class="cart-item-card">
+          <div style="flex: 1; min-width: 140px;">
+            <h5 style="font-size: 14px; font-weight: 700; color: var(--text-main);">Yarım Yağlı Süt 1L</h5>
+            <div class="mono" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              Birim: 34.90 TL
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">-</button>
+            <span class="mono" style="font-weight: 700; font-size: 15px; width: 24px; text-align: center;">1</span>
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">+</button>
+          </div>
+          <div class="mono" style="font-size: 15px; font-weight: 800; min-width: 65px; text-align: right;">
+            34.90 TL
+          </div>
+        </div>
+
+        <!-- Kalem 3 -->
+        <div class="cart-item-card">
+          <div style="flex: 1; min-width: 140px;">
+            <h5 style="font-size: 14px; font-weight: 700; color: var(--text-main);">Çay Rize 1000g</h5>
+            <div class="mono" style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+              Birim: 185.00 TL
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">-</button>
+            <span class="mono" style="font-weight: 700; font-size: 15px; width: 24px; text-align: center;">1</span>
+            <button class="btn btn-secondary" style="width: 48px; height: 48px; min-width: 48px; min-height: 48px; padding: 0; font-size: 20px; font-weight: 700;">+</button>
+          </div>
+          <div class="mono" style="font-size: 15px; font-weight: 800; min-width: 65px; text-align: right;">
+            185.00 TL
+          </div>
+        </div>
+
+        <!-- Hızlı Barkod Ekle Butonu -->
+        <a href="mob-02-barcode-scan.html" class="btn btn-secondary" style="min-height: 48px; margin-top: var(--space-2); text-decoration: none;">
+          + Ürün Okutmaya Devam Et
+        </a>
+
+      </main>
+
+      <!-- Alt Ödeme Çubuğu (Checkout Sticky Footer) -->
+      <div class="cart-checkout-bar">
+        <div style="display: flex; justify-content: space-between; align-items: baseline;">
+          <span style="font-size: 13px; color: var(--text-muted); font-weight: 600;">Genel Toplam:</span>
+          <span class="mono" style="font-size: 26px; font-weight: 800; color: var(--text-main);">244.90 TL</span>
+        </div>
+
+        <div style="display: flex; gap: var(--space-2);">
+          <button class="btn btn-cash" style="flex: 1; height: 50px; min-height: 48px; font-size: 15px; font-weight: 700;" onclick="alert('Mobil Nakit Tahsilat: 244.90 TL kaydedildi. Yerel Outbox kuyruğuna yazıldı.')">
+            Nakit Al
+          </button>
+          <button class="btn btn-card" style="flex: 1; height: 50px; min-height: 48px; font-size: 15px; font-weight: 700;" onclick="alert('Mobil Kredi Kartı: 244.90 TL kaydedildi (Banka POS cihazına elle girildi).')">
+            Kredi Kartı
+          </button>
+        </div>
+      </div>
+
+      <!-- Mobil Alt Bar -->
+      <nav class="mobile-bottom-nav">
+        <a href="mob-01-dashboard.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Özet
+        </a>
+        <a href="mob-02-barcode-scan.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+          Tara
+        </a>
+        <a href="mob-03-cart-checkout.html" class="mob-nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+          Sepet
+        </a>
+        <a href="mob-04-stock-view.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Stok
+        </a>
+      </nav>
+
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+</body>
+</html>

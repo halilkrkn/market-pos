@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — [LEGACY / EXPERIMENTAL] Eski POS Prototipi (Ana Vitrin Dışı)</title>
+  <style>
+    /* ====================================================================
+       MARKET MMS — [LEGACY / EXPERIMENTAL] Eski Tek-Dosya POS Prototipi
+       BU DOSYA GÜNCEL TASARIM SİSTEMİNİN PARÇASI DEĞİLDİR (ANA VİTRİN DIŞIDIR).
+       Güncel 10 ekranlı tasarım için bkz: visual-designs/index.html
+       Mevcut ürün davranışının veya Flutter kodunun kanıtı olarak gösterilemez.
+       ==================================================================== */
+
+    :root {
+      /* Light tema — WCAG AA uyumlu token'lar */
+      --primary: #0F172A;
+      --primary-foreground: #FFFFFF;
+      --bg: #F8FAFC;
+      --surface: #FFFFFF;
+      --border: #E2E8F0;
+      --text: #0F172A;
+      --muted: #475569;
+      --success: #047857;        /* #047857 beyaz üzeri 5.48:1 — WCAG AA ✅ (düzeltildi: eski #059669 = 3.77:1 ❌) */
+      --accent: #2563EB;         /* #2563EB beyaz üzeri 5.17:1 — WCAG AA ✅ */
+      --warning: #B45309;        /* #B45309 beyaz üzeri 5.02:1 — WCAG AA ✅ (düzeltildi: eski #D97706 = 3.19:1 ❌) */
+      --danger: #B91C1C;         /* #B91C1C beyaz üzeri 6.47:1 — WCAG AA ✅ (düzeltildi: eski #DC2626 = 3.76:1 ❌) */
+      --focus-ring: #2563EB;
+    }
+
+    body.dark {
+      /* Dark tema — WCAG AA uyumlu token'lar */
+      --primary: #F8FAFC;
+      --primary-foreground: #0F172A;
+      --bg: #090D16;
+      --surface: #1E293B;
+      --border: #334155;
+      --text: #F8FAFC;
+      --muted: #94A3B8;
+      --success: #047857;        /* Koyu temada da WCAG AA uyumlu */
+      --accent: #1D4ED8;         /* #1D4ED8 beyaz üzeri 6.70:1 — WCAG AA ✅ (düzeltildi: eski #3B82F6 = 3.68:1 ❌) */
+      --warning: #B45309;
+      --danger: #B91C1C;
+      --focus-ring: #60A5FA;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    body { background-color: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }
+
+    .mono { font-family: "Courier New", Courier, monospace; font-variant-numeric: tabular-nums; }
+
+    /* Top App Bar */
+    header {
+      height: 52px; background: var(--surface); border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; padding: 0 16px;
+    }
+    .brand { font-size: 18px; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+    .badge { padding: 4px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+    .badge-online { background: #DCFCE7; color: #166534; }
+    .badge-offline { background: #FEF3C7; color: #92400E; }
+    .badge-outbox { background: #DBEAFE; color: #1E40AF; }
+
+    /* Main Split Canvas */
+    .pos-container { display: flex; flex: 1; overflow: hidden; }
+
+    /* Left Cart Panel (60%) */
+    .cart-panel {
+      flex: 6; border-right: 1px solid var(--border); display: flex; flex-direction: column; background: var(--surface);
+    }
+    .barcode-bar {
+      padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; background: var(--bg);
+    }
+    .barcode-input {
+      flex: 1; height: 48px; font-size: 16px; padding: 0 16px; border: 2px solid var(--focus-ring); border-radius: 8px;
+      outline: none; background: var(--surface); color: var(--text); font-weight: 600;
+    }
+    .cart-table-wrapper { flex: 1; overflow-y: auto; }
+    table { width: 100%; border-collapse: collapse; text-align: left; }
+    th { background: var(--bg); padding: 12px 16px; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 15px; }
+    tr:hover { background: rgba(0,0,0,0.02); }
+    .qty-btn { width: 32px; height: 32px; border-radius: 4px; border: 1px solid var(--border); background: var(--surface); font-weight: bold; cursor: pointer; color: var(--text); }
+    .del-btn { color: var(--danger); background: none; border: none; cursor: pointer; font-size: 18px; }
+
+    /* Right Action Panel (40%) */
+    .action-panel {
+      flex: 4; display: flex; flex-direction: column; padding: 16px; gap: 12px; background: var(--bg); overflow-y: auto;
+    }
+    .quick-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+    .quick-btn {
+      height: 64px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface);
+      display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer;
+      font-size: 14px; font-weight: 600; color: var(--text); transition: transform 0.05s;
+    }
+    .quick-btn:active { transform: scale(0.97); }
+    .quick-btn span { font-size: 12px; color: var(--muted); font-weight: normal; margin-top: 2px; }
+
+    /* Numpad */
+    .numpad-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+    .num-btn {
+      height: 48px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface);
+      font-size: 18px; font-weight: 600; cursor: pointer; color: var(--text);
+    }
+    .num-btn:active { background: var(--border); }
+
+    /* Total Box */
+    .total-box {
+      background: var(--surface); border: 2px solid var(--border); border-radius: 12px; padding: 16px; text-align: right;
+    }
+    .total-label { font-size: 14px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .total-amount { font-size: 48px; font-weight: 800; color: var(--text); margin-top: 4px; }
+
+    /* Checkout Buttons */
+    .checkout-row { display: flex; gap: 10px; height: 68px; }
+    .btn-cash {
+      flex: 1; background: var(--success); color: white; border: none; border-radius: 10px;
+      font-size: 20px; font-weight: 700; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .btn-card {
+      flex: 1; background: var(--accent); color: white; border: none; border-radius: 10px;
+      font-size: 20px; font-weight: 700; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .btn-sub { font-size: 12px; opacity: 0.9; font-weight: 500; }
+
+    /* Modal */
+    .modal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.6);
+      display: none; align-items: center; justify-content: center; z-index: 100;
+    }
+    .modal-card {
+      background: var(--surface); width: 500px; border-radius: 16px; padding: 24px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.3);
+      display: flex; flex-direction: column; gap: 16px;
+    }
+    .modal-title { font-size: 20px; font-weight: 700; border-bottom: 1px solid var(--border); padding-bottom: 12px; }
+    .change-box {
+      background: #DCFCE7; border: 2px solid #86EFAC; border-radius: 10px; padding: 16px; text-align: center;
+    }
+    .change-val { font-size: 40px; font-weight: 800; color: #166534; }
+  </style>
+</head>
+<body>
+
+  <!-- ==========================================
+       ⚠️ [LEGACY / EXPERIMENTAL] ESKİ TEK-DOSYA PROTOTİP
+       ==========================================
+       Bu dosya erken aşama tek-dosyalı deneysel bir prototiptir.
+       • Güncel UI/UX vitrini (`visual-designs/index.html`) kapsamı dışındadır ve menüden çıkarılmıştır.
+       • Güncel ürün davranışının veya Flutter uygulamasının kanıtı değildir.
+       • F11/F12 kısayolları eski taslaktan kalmıştır (Mevcut Flutter `main_shell_screen.dart`: F9 Kart, F10 Nakit).
+       • Gerçek SQLite, Drift, Riverpod, Outbox veya Master Hub bağlantısı YOKTUR.
+       ========================================== -->
+  <div style="background: #FEF3C7; color: #92400E; border-bottom: 1px solid #FDE68A; padding: 8px 20px; font-size: 12px; font-weight: 700; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+    <span>⚠️ LEGACY / EXPERIMENTAL PROTOTYPE — Güncel tasarım sisteminin parçası değildir; ürün davranışının kanıtı olarak kullanılamaz.</span>
+    <a href="visual-designs/index.html" style="color: #92400E; text-decoration: underline;">Güncel Tasarım Vitrini (visual-designs/index.html) &rarr;</a>
+  </div>
+
+  <!-- Top App Bar -->
+  <header>
+    <div class="brand">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+      MARKET MMS <span style="font-size: 12px; color: var(--muted); font-weight: normal;">| Terminal: KASA-01 | <span class="badge badge-offline">LEGACY / EXPERIMENTAL</span></span>
+    </div>
+    <div style="display: flex; gap: 12px; align-items: center;">
+      <span id="hubBadge" class="badge badge-online">● HUB ONLINE</span>
+      <span id="outboxBadge" class="badge badge-outbox">Outbox: 0</span>
+      <button onclick="toggleTheme()" style="padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px;">Tema Değiştir</button>
+      <button onclick="toggleHub()" style="padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface); color: var(--text); cursor: pointer; font-size: 12px;">Ağ Simülasyonu</button>
+    </div>
+  </header>
+
+  <!-- POS Main Screen -->
+  <div class="pos-container">
+    
+    <!-- Left: Cart (60%) -->
+    <div class="cart-panel">
+      <div class="barcode-bar">
+        <input type="text" id="barcodeInput" class="barcode-input mono" placeholder="Barkod okutun veya yazın (Örn: 101, 102, 103) + [Enter]" autocomplete="off" autofocus>
+        <button onclick="addManualBarcode()" style="padding: 0 20px; border-radius: 8px; border: none; background: var(--primary); color: var(--primary-foreground); font-weight: 600; cursor: pointer;">Ekle (Enter)</button>
+      </div>
+
+      <div class="cart-table-wrapper">
+        <table id="cartTable">
+          <thead>
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th>Barkod</th>
+              <th>Ürün Adı</th>
+              <th style="text-align: right;">Birim Fiyat</th>
+              <th style="text-align: center; width: 140px;">Miktar</th>
+              <th style="text-align: right;">Tutar</th>
+              <th style="text-align: center; width: 50px;">Sil</th>
+            </tr>
+          </thead>
+          <tbody id="cartItems">
+            <!-- Sepet satırları buraya gelecek -->
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Footer Info -->
+      <div style="padding: 12px 16px; border-top: 1px solid var(--border); display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); background: var(--bg);">
+        <div>Kalem: <b id="totalItems" style="color:var(--text);">0</b> | Adet: <b id="totalQty" style="color:var(--text);">0</b></div>
+        <div>[F12] Nakit | [F11] Kart | [F9] Seçili Sil | [F10] Temizle | [ESC] Kapat</div>
+      </div>
+    </div>
+
+    <!-- Right: Quick Keys & Totals (40%) -->
+    <div class="action-panel">
+      
+      <!-- Quick Products -->
+      <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase;">Hızlı Ürünler</div>
+      <div class="quick-grid">
+        <div class="quick-btn" onclick="addItem('101', 'Somun Ekmek 200g', 1250)">Ekmek 200g<span>12.50 TL</span></div>
+        <div class="quick-btn" onclick="addItem('102', 'Su 0.5L', 500)">Su 0.5L<span>5.00 TL</span></div>
+        <div class="quick-btn" onclick="addItem('103', 'Alışveriş Poşeti', 50)">Poşet<span>0.50 TL</span></div>
+        <div class="quick-btn" onclick="addItem('104', 'Köy Yumurtası 15li', 6500)">Yumurta 15li<span>65.00 TL</span></div>
+        <div class="quick-btn" onclick="addItem('105', 'Maden Suyu 200ml', 800)">Soda<span>8.00 TL</span></div>
+        <div class="quick-btn" onclick="addItem('106', 'Sokak Simidi', 1500)">Simit<span>15.00 TL</span></div>
+      </div>
+
+      <!-- Numpad -->
+      <div style="font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; margin-top: 4px;">Sayısal Tuş Takımı</div>
+      <div class="numpad-grid">
+        <button class="num-btn" onclick="pressNum('7')">7</button>
+        <button class="num-btn" onclick="pressNum('8')">8</button>
+        <button class="num-btn" onclick="pressNum('9')">9</button>
+        <button class="num-btn" style="background:#FEE2E2; color:var(--danger);" onclick="clearBarcode()">C</button>
+        
+        <button class="num-btn" onclick="pressNum('4')">4</button>
+        <button class="num-btn" onclick="pressNum('5')">5</button>
+        <button class="num-btn" onclick="pressNum('6')">6</button>
+        <button class="num-btn" onclick="clearCart()">Sil</button>
+
+        <button class="num-btn" onclick="pressNum('1')">1</button>
+        <button class="num-btn" onclick="pressNum('2')">2</button>
+        <button class="num-btn" onclick="pressNum('3')">3</button>
+        <button class="num-btn" style="background:#E0E7FF; color:var(--accent);" onclick="addManualBarcode()">OK</button>
+
+        <button class="num-btn" onclick="pressNum('0')">0</button>
+        <button class="num-btn" onclick="pressNum('00')">00</button>
+        <button class="num-btn" onclick="pressNum(',')">,</button>
+        <button class="num-btn" onclick="multiplyQty()">X</button>
+      </div>
+
+      <!-- Grand Total -->
+      <div class="total-box">
+        <div class="total-label">Ödenecek Toplam Tutar</div>
+        <div id="grandTotal" class="total-amount mono">0.00 TL</div>
+      </div>
+
+      <!-- Checkout Row -->
+      <div class="checkout-row">
+        <button class="btn-cash" onclick="openCashModal()">
+          NAKİT
+          <span class="btn-sub">[F12]</span>
+        </button>
+        <button class="btn-card" onclick="checkoutCard()">
+          KREDİ KARTI
+          <span class="btn-sub">[F11]</span>
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Cash Payment Modal -->
+  <div id="cashModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-title">Hızlı Nakit Ödeme</div>
+      
+      <div style="display: flex; justify-content: space-between; font-size: 18px;">
+        <span>Ödenecek Tutar:</span>
+        <b id="modalTotal" class="mono">0.00 TL</b>
+      </div>
+
+      <div style="font-size: 14px; font-weight: 600; color: var(--muted);">Hızlı Banknotlar:</div>
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;">
+        <button onclick="setCashAmount('exact')" style="padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-weight: 700; cursor: pointer;">Tam Tutar</button>
+        <button onclick="setCashAmount(5000)" style="padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-weight: 700; cursor: pointer;">50 TL</button>
+        <button onclick="setCashAmount(10000)" style="padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-weight: 700; cursor: pointer;">100 TL</button>
+        <button onclick="setCashAmount(20000)" style="padding: 10px; border-radius: 6px; border: 1px solid var(--border); font-weight: 700; cursor: pointer;">200 TL</button>
+      </div>
+
+      <div>
+        <label style="font-size: 13px; font-weight: 600; color: var(--muted);">Müşteriden Alınan Tutar (TL):</label>
+        <input type="text" id="cashInput" class="barcode-input mono" style="margin-top: 6px; width: 100%;" oninput="calculateChange()">
+      </div>
+
+      <div class="change-box">
+        <div style="font-size: 14px; font-weight: 700; color: #166534;">VERİLECEK PARA ÜSTÜ</div>
+        <div id="changeAmount" class="change-val mono">0.00 TL</div>
+      </div>
+
+      <div style="display: flex; gap: 10px;">
+        <button onclick="closeModal()" style="flex: 1; height: 50px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); font-weight: 600; cursor: pointer;">İptal [ESC]</button>
+        <button onclick="completeCashSale()" style="flex: 1; height: 50px; border-radius: 8px; border: none; background: var(--success); color: white; font-size: 16px; font-weight: 700; cursor: pointer;">SATIŞI TAMAMLA [Enter]</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State (All currency in integer cents / kuruş)
+    let cart = [];
+    let isHubOnline = true;
+    let pendingOutbox = 0;
+
+    const catalog = {
+      '101': { name: 'Somun Ekmek 200g', price: 1250 },
+      '102': { name: 'Su 0.5L', price: 500 },
+      '103': { name: 'Alışveriş Poşeti', price: 50 },
+      '104': { name: 'Köy Yumurtası 15li', price: 6500 },
+      '105': { name: 'Maden Suyu 200ml', price: 800 },
+      '106': { name: 'Sokak Simidi', price: 1500 },
+      '8690504018241': { name: 'Somun Ekmek 200g', price: 1250 },
+      '8690555012345': { name: 'Yarım Yağlı Süt 1L', price: 3490 },
+      '8691234567890': { name: 'Çay Rize 1000g', price: 18500 }
+    };
+
+    function formatKurus(cents) {
+      if (typeof cents !== 'number' || !Number.isSafeInteger(cents)) {
+        throw new TypeError(`Geçersiz kuruş değeri: "${cents}". Değer güvenli bir tamsayı (int) olmalıdır.`);
+      }
+      const isNegative = cents < 0;
+      const absCents = Math.abs(cents);
+      const liras = Math.floor(absCents / 100);
+      const kurus = absCents % 100;
+      const kurusStr = kurus < 10 ? '0' + kurus : '' + kurus;
+      const liraStr = liras.toLocaleString('en-US');
+      const sign = isNegative ? '-' : '';
+      return sign + liraStr + '.' + kurusStr + ' TL';
+    }
+
+    function formatCentsToInput(cents) {
+      if (typeof cents !== 'number' || !Number.isSafeInteger(cents)) {
+        throw new TypeError(`Geçersiz kuruş değeri: "${cents}". Değer güvenli bir tamsayı (int) olmalıdır.`);
+      }
+      const isNegative = cents < 0;
+      const absCents = Math.abs(cents);
+      const liras = Math.floor(absCents / 100);
+      const kurus = absCents % 100;
+      const kurusStr = kurus < 10 ? '0' + kurus : '' + kurus;
+      const sign = isNegative ? '-' : '';
+      return sign + liras + '.' + kurusStr;
+    }
+
+    function parseToCents(textInput, allowNegative = false) {
+      if (textInput === null || textInput === undefined) {
+        return { valid: false, error: 'Boş giriş' };
+      }
+      const str = String(textInput).trim();
+      if (str === '') {
+        return { valid: false, error: 'Boş giriş' };
+      }
+      let cleaned = str.replace(/\s+/g, '');
+      if (/tl$/i.test(cleaned)) {
+        cleaned = cleaned.replace(/tl$/i, '').trim();
+      }
+      if (cleaned === '') {
+        return { valid: false, error: 'Boş giriş' };
+      }
+      let isNegative = false;
+      if (cleaned.startsWith('-')) {
+        if (!allowNegative) {
+          return { valid: false, error: 'Negatif değerlere izin verilmez' };
+        }
+        isNegative = true;
+        cleaned = cleaned.substring(1);
+      }
+      if (cleaned === '' || !/^[\d.,]+$/.test(cleaned)) {
+        return { valid: false, error: 'Geçersiz sayısal karakter' };
+      }
+      const dots = (cleaned.match(/\./g) || []).length;
+      const commas = (cleaned.match(/,/g) || []).length;
+      let intPartStr = '';
+      let decPartStr = '';
+
+      if (dots > 0 && commas > 0) {
+        const lastDot = cleaned.lastIndexOf('.');
+        const lastComma = cleaned.lastIndexOf(',');
+        if (lastDot > lastComma) {
+          if (dots > 1) return { valid: false, error: 'Birden fazla ondalık nokta kullanılamaz' };
+          const intRaw = cleaned.substring(0, lastDot);
+          if (!/^\d{1,3}(,\d{3})+$/.test(intRaw)) {
+            return { valid: false, error: 'Geçersiz binlik ayırıcı formatı (Örn: 1,250.00)' };
+          }
+          intPartStr = intRaw.replace(/,/g, '');
+          decPartStr = cleaned.substring(lastDot + 1);
+        } else {
+          if (commas > 1) return { valid: false, error: 'Birden fazla ondalık virgül kullanılamaz' };
+          const intRaw = cleaned.substring(0, lastComma);
+          if (!/^\d{1,3}(\.\d{3})+$/.test(intRaw)) {
+            return { valid: false, error: 'Geçersiz binlik ayırıcı formatı (Örn: 1.250,00)' };
+          }
+          intPartStr = intRaw.replace(/\./g, '');
+          decPartStr = cleaned.substring(lastComma + 1);
+        }
+      } else if (commas === 1 && dots === 0) {
+        const parts = cleaned.split(',');
+        intPartStr = parts[0];
+        decPartStr = parts[1];
+      } else if (dots === 1 && commas === 0) {
+        const parts = cleaned.split('.');
+        intPartStr = parts[0];
+        decPartStr = parts[1];
+      } else if (dots > 1 || commas > 1) {
+        return { valid: false, error: 'Birden fazla ondalık ayırıcı kullanılamaz' };
+      } else {
+        intPartStr = cleaned;
+        decPartStr = '';
+      }
+
+      if (intPartStr === '' || !/^\d+$/.test(intPartStr)) {
+        return { valid: false, error: 'Tam sayı kısmı geçersiz' };
+      }
+      if (decPartStr !== '' && !/^\d+$/.test(decPartStr)) {
+        return { valid: false, error: 'Ondalık kısmı geçersiz' };
+      }
+      if (decPartStr.length > 2) {
+        return { valid: false, error: 'Kuruş hanesi en fazla 2 basamak olabilir' };
+      }
+      const decKurus = decPartStr === '' ? 0 : (decPartStr.length === 1 ? parseInt(decPartStr + '0', 10) : parseInt(decPartStr, 10));
+      try {
+        const totalCentsBig = BigInt(intPartStr) * 100n + BigInt(decKurus);
+        if (totalCentsBig > BigInt(Number.MAX_SAFE_INTEGER)) {
+          return { valid: false, error: 'Güvenli kuruş tamsayı sınırı aşıldı' };
+        }
+        const totalCents = Number(totalCentsBig);
+        const signedCents = totalCents === 0 ? 0 : (isNegative ? -totalCents : totalCents);
+        return { valid: true, cents: signedCents };
+      } catch (err) {
+        return { valid: false, error: 'Güvenli kuruş tamsayı sınırı aşıldı' };
+      }
+    }
+
+    function multiplyQty() {
+      const input = document.getElementById('barcodeInput');
+      const raw = input.value.trim();
+      if (cart.length === 0) {
+        alert('Çarpan uygulamak için sepette en az 1 ürün olmalıdır.');
+        refocus();
+        return;
+      }
+      if (!/^\d+$/.test(raw) || parseInt(raw, 10) < 1) {
+        alert('Miktar güncellemek için sayısal bir adet girip X tuşuna basın (Örn: 5).');
+        refocus();
+        return;
+      }
+      const qtyVal = parseInt(raw, 10);
+      cart[cart.length - 1].qty = qtyVal;
+      input.value = '';
+      renderCart();
+      refocus();
+    }
+
+    function renderCart() {
+      const tbody = document.getElementById('cartItems');
+      tbody.innerHTML = '';
+      let totalCents = 0;
+      let totalCount = 0;
+
+      cart.forEach((item, idx) => {
+        const itemTotal = item.price * item.qty;
+        totalCents += itemTotal;
+        totalCount += item.qty;
+
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx + 1}</td>
+          <td class="mono" style="color:var(--muted);">${item.barcode}</td>
+          <td><b>${item.name}</b></td>
+          <td class="mono" style="text-align: right;">${formatKurus(item.price)}</td>
+          <td style="text-align: center;">
+            <button class="qty-btn" onclick="updateQty(${idx}, -1)">-</button>
+            <span class="mono" style="display:inline-block; width:36px; font-weight:bold;">${item.qty}</span>
+            <button class="qty-btn" onclick="updateQty(${idx}, 1)">+</button>
+          </td>
+          <td class="mono" style="text-align: right; font-weight: bold;">${formatKurus(itemTotal)}</td>
+          <td style="text-align: center;"><button class="del-btn" onclick="deleteItem(${idx})">&times;</button></td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+      document.getElementById('grandTotal').innerText = formatKurus(totalCents);
+      document.getElementById('totalItems').innerText = cart.length;
+      document.getElementById('totalQty').innerText = totalCount;
+    }
+
+    function addItem(barcode, name, price) {
+      const existing = cart.find(x => x.barcode === barcode);
+      if (existing) {
+        existing.qty += 1;
+      } else {
+        cart.unshift({ barcode, name, price, qty: 1 });
+      }
+      renderCart();
+      refocus();
+    }
+
+    function updateQty(idx, delta) {
+      cart[idx].qty += delta;
+      if (cart[idx].qty <= 0) cart.splice(idx, 1);
+      renderCart();
+      refocus();
+    }
+
+    function deleteItem(idx) {
+      cart.splice(idx, 1);
+      renderCart();
+      refocus();
+    }
+
+    function clearCart() {
+      if (cart.length === 0) return;
+      if (confirm('Sepet tamamen temizlensin mi?')) {
+        cart = [];
+        renderCart();
+      }
+      refocus();
+    }
+
+    function addManualBarcode() {
+      const input = document.getElementById('barcodeInput');
+      const val = input.value.trim();
+      if (!val) return;
+
+      if (catalog[val]) {
+        addItem(val, catalog[val].name, catalog[val].price);
+      } else {
+        alert('Bilinmeyen Barkod: ' + val + '\n(Ürün kataloğunda kayıtlı değil)');
+      }
+      input.value = '';
+      refocus();
+    }
+
+    function pressNum(char) {
+      const input = document.getElementById('barcodeInput');
+      input.value += char;
+      refocus();
+    }
+
+    function clearBarcode() {
+      document.getElementById('barcodeInput').value = '';
+      refocus();
+    }
+
+    function refocus() {
+      /* Bağlam duyarlı odak (Context-Aware Focus):
+         Modal kapalıyken ve kullanıcı aktif olarak başka bir alana odaklanmamışsa
+         barkod alanına geri döner. Kullanıcıyı zorla yönlendirmez. */
+      setTimeout(() => {
+        const modal = document.getElementById('cashModal');
+        const isModalOpen = modal.style.display === 'flex';
+        const activeEl = document.activeElement;
+        const barcodeInput = document.getElementById('barcodeInput');
+        // Sadece modal kapalıysa ve odak bir input/button'da değilse geri dön
+        if (!isModalOpen && activeEl !== barcodeInput &&
+            activeEl.tagName !== 'INPUT' && activeEl.tagName !== 'SELECT') {
+          barcodeInput.focus();
+        }
+      }, 80);
+    }
+
+    // Modal & Payments
+    function openCashModal() {
+      if (cart.length === 0) { alert('Sepet boş!'); return; }
+      const totalCents = cart.reduce((acc, x) => acc + (x.price * x.qty), 0);
+      document.getElementById('modalTotal').innerText = formatKurus(totalCents);
+      document.getElementById('cashInput').value = formatCentsToInput(totalCents);
+      calculateChange();
+      document.getElementById('cashModal').style.display = 'flex';
+      setTimeout(() => document.getElementById('cashInput').select(), 50);
+    }
+
+    function closeModal() {
+      document.getElementById('cashModal').style.display = 'none';
+      refocus();
+    }
+
+    function setCashAmount(val) {
+      const totalCents = cart.reduce((acc, x) => acc + (x.price * x.qty), 0);
+      if (val === 'exact') {
+        document.getElementById('cashInput').value = formatCentsToInput(totalCents);
+      } else {
+        document.getElementById('cashInput').value = formatCentsToInput(val);
+      }
+      calculateChange();
+    }
+
+    function calculateChange() {
+      const totalCents = cart.reduce((acc, x) => acc + (x.price * x.qty), 0);
+      const parsed = parseToCents(document.getElementById('cashInput').value);
+      const changeBox = document.getElementById('changeAmount');
+      if (!parsed.valid) {
+        changeBox.innerText = 'Geçersiz Giriş';
+        changeBox.style.color = 'var(--danger)';
+        return;
+      }
+      const changeCents = parsed.cents - totalCents;
+      if (changeCents >= 0) {
+        changeBox.innerText = formatKurus(changeCents);
+        changeBox.style.color = '#166534';
+      } else {
+        changeBox.innerText = 'Eksik: ' + formatKurus(Math.abs(changeCents));
+        changeBox.style.color = 'var(--danger)';
+      }
+    }
+
+    function completeCashSale() {
+      const totalCents = cart.reduce((acc, x) => acc + (x.price * x.qty), 0);
+      const parsed = parseToCents(document.getElementById('cashInput').value);
+      if (!parsed.valid) {
+        alert('Hata: ' + (parsed.error || 'Geçersiz tutar formatı!'));
+        return;
+      }
+      const givenCents = parsed.cents;
+      if (givenCents < totalCents) {
+        alert('Hata: Alınan tutar toplam tutardan az olamaz!');
+        return;
+      }
+      
+      closeModal();
+      if (!isHubOnline) {
+        pendingOutbox++;
+        document.getElementById('outboxBadge').innerText = 'Outbox: ' + pendingOutbox;
+      }
+      alert('SATIŞ BAŞARILI!\nSatış yerel olarak kaydedildi. Para üstü: ' + formatKurus(givenCents - totalCents) + '\n(Not: Donanımsal fiş yazıcı entegrasyonu MVP dışıdır)');
+      cart = [];
+      renderCart();
+      refocus();
+    }
+
+    function checkoutCard() {
+      if (cart.length === 0) { alert('Sepet boş!'); return; }
+      const totalCents = cart.reduce((acc, x) => acc + (x.price * x.qty), 0);
+      if (confirm('Kredi Kartı ile ' + formatKurus(totalCents) + ' tahsil edildi mi? (Banka POS tutarı elle girilir)')) {
+        if (!isHubOnline) {
+          pendingOutbox++;
+          document.getElementById('outboxBadge').innerText = 'Outbox: ' + pendingOutbox;
+        }
+        alert('KREDİ KARTI SATIŞI BAŞARILI!\nSatış yerel olarak kaydedildi.\n(Not: Donanımsal banka POS ve fiş yazıcı MVP dışıdır)');
+        cart = [];
+        renderCart();
+      }
+      refocus();
+    }
+
+    function toggleTheme() {
+      document.body.classList.toggle('dark');
+    }
+
+    function toggleHub() {
+      isHubOnline = !isHubOnline;
+      const badge = document.getElementById('hubBadge');
+      if (isHubOnline) {
+        badge.className = 'badge badge-online';
+        badge.innerText = '● HUB ONLINE';
+        if (pendingOutbox > 0) {
+          setTimeout(() => {
+            alert(pendingOutbox + ' adet bekleyen outbox işlemi Hub ile senkronize edildi.');
+            pendingOutbox = 0;
+            document.getElementById('outboxBadge').innerText = 'Outbox: 0';
+          }, 800);
+        }
+      } else {
+        badge.className = 'badge badge-offline';
+        badge.innerText = '● LOCAL OFFLINE';
+      }
+    }
+
+    // Keyboard Shortcuts
+    window.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('cashModal');
+      const isModalOpen = modal.style.display === 'flex';
+
+      if (e.key === 'F12') {
+        e.preventDefault();
+        openCashModal();
+      } else if (e.key === 'F11') {
+        e.preventDefault();
+        checkoutCard();
+      } else if (e.key === 'F10') {
+        e.preventDefault();
+        clearCart();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (isModalOpen) closeModal();
+      } else if (e.key === 'Enter') {
+        if (isModalOpen) {
+          e.preventDefault();
+          completeCashSale();
+        }
+      }
+    });
+
+    document.getElementById('barcodeInput').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addManualBarcode();
+      }
+    });
+
+    // Start with 1 default bread
+    addItem('101', 'Somun Ekmek 200g', 1250);
+  </script>
+</body>
+</html>

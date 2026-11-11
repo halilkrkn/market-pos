@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Windows Stok Yönetimi & Hareketler (Görsel Tasarım W-09)</title>
+  <link rel="stylesheet" href="shared.css">
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>GÖRSEL TASARIM MOCK-UP</strong> — Stok Yönetimi. Eksi stok politikası "allow"dur: Fiziksel satış faturadan önce yapılabilir [INV-04].</span>
+    <span>MARKET MMS | Pilot Sürüm</span>
+  </div>
+
+  <div class="desktop-layout">
+    <!-- Sol Kenar Çubuğu -->
+    <aside class="desktop-sidebar">
+      <div class="sidebar-header">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+        <span>MARKET MMS</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="win-01-dashboard.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Dashboard
+        </a>
+        <a href="win-02-pos.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="6" y1="16" x2="14" y2="16"/></svg>
+          Kasa Satış (POS)
+        </a>
+        <a href="win-03-product-search.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Ürün Arama & Katalog
+        </a>
+        <a href="win-06-stock-management.html" class="nav-link active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Stok &amp; Hareketler
+        </a>
+        <a href="win-05-sales-history.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="12 8 12 12 14 14"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/></svg>
+          Satış Geçmişi
+        </a>
+        <div style="margin-top: auto; padding-top: var(--space-4); border-top: 1px solid var(--border-subtle);">
+          <a href="index.html" class="nav-link nav-link-hub">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Tüm Ekranlar Menüsü
+          </a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Ana Gövde -->
+    <main class="desktop-main">
+      <header class="desktop-topbar">
+        <div>
+          <span style="font-size: 16px; font-weight: 700;">Stok Takibi & Hareket Günlüğü</span>
+          <span style="font-size: 13px; color: var(--text-muted); margin-left: 8px;">| Eksi Stok Politikası: <strong>allow</strong> [INV-04]</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+          <button class="btn btn-primary" onclick="alert('Toptancı Faturası Mal Kabul Modalı açılır.')">
+            + Toptancı Mal Kabul Girişi
+          </button>
+          <button class="btn btn-secondary" onclick="toggleTheme()">Tema</button>
+        </div>
+      </header>
+
+      <div class="desktop-content">
+        
+        <!-- Üst Bilgi Kartı: Eksi Stok Politikası Açıklaması -->
+        <div class="card" style="margin-bottom: var(--space-4); border-left: 4px solid var(--warning); background-color: var(--warning-bg); color: var(--warning-text);">
+          <div style="font-weight: 700; font-size: 14px;">Eksi Stok Politikası Bilgilendirmesi (`allow` [INV-04])</div>
+          <p style="font-size: 12px; margin-top: 4px; line-height: 1.5;">
+            MARKET MMS perakende felsefesinde müşteri kasadayken ürün satışı engellenemez. Toptancı faturası henüz sisteme girilmemiş olsa dahi satış tamamlanır ve stok geçici olarak eksiye düşer. Fatura girişi yapıldığında stok kendiliğinden eşitlenir.
+          </p>
+        </div>
+
+        <!-- Filtreler -->
+        <div class="card" style="margin-bottom: var(--space-4); padding: var(--space-3);">
+          <div style="display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap;">
+            <input type="text" class="input-text mono" placeholder="Barkod veya ürün adı filtrele..." style="flex: 2; min-width: 200px;">
+            <select class="input-text" style="flex: 1; min-width: 180px;">
+              <option>Tüm Hareket Türleri</option>
+              <option>Satış Düşüşü (SALE)</option>
+              <option>Toptancı Girişi (PURCHASE)</option>
+              <option>Manuel Stok Düzeltme (MANUEL_DUZELTME)</option>
+              <option>Fire / Kayıp (FIRE_KAYIP)</option>
+              <option>İade Girişi (REFUND)</option>
+            </select>
+            <button class="btn btn-secondary">Filtrele</button>
+          </div>
+        </div>
+
+        <!-- Stok Hareket Tablosu (Audit Trail) -->
+        <div class="table-container">
+          <table class="mms-table">
+            <thead>
+              <tr>
+                <th>Tarih / Saat</th>
+                <th>Barkod</th>
+                <th>Ürün Adı</th>
+                <th>Hareket Türü</th>
+                <th style="text-align: center;">Değişim</th>
+                <th style="text-align: center;">Kalan Stok</th>
+                <th>İşlemi Yapan</th>
+                <th>Açıklama / Fiş No</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono">06.11 19:42</td>
+                <td class="mono">8690504018241</td>
+                <td><strong>Somun Ekmek 200g</strong></td>
+                <td><span class="badge badge-online">SATIŞ (SALE)</span></td>
+                <td class="mono" style="text-align: center; color: var(--danger-text); font-weight: 700;">-3 Adet</td>
+                <td class="mono" style="text-align: center; font-weight: 700; color: var(--warning-text);">-14 Adet</td>
+                <td>Mağaza Sahibi</td>
+                <td class="mono">Fiş #1042</td>
+              </tr>
+              <tr>
+                <td class="mono">06.11 19:42</td>
+                <td class="mono">8690555012345</td>
+                <td><strong>Yarım Yağlı Süt 1L</strong></td>
+                <td><span class="badge badge-online">SATIŞ (SALE)</span></td>
+                <td class="mono" style="text-align: center; color: var(--danger-text); font-weight: 700;">-2 Adet</td>
+                <td class="mono" style="text-align: center; font-weight: 700; color: var(--warning-text);">-3 Adet</td>
+                <td>Mağaza Sahibi</td>
+                <td class="mono">Fiş #1042</td>
+              </tr>
+              <tr>
+                <td class="mono">06.11 18:30</td>
+                <td class="mono">8691234567890</td>
+                <td><strong>Çay Rize 1000g</strong></td>
+                <td><span class="badge badge-outbox">TOPTANCI GİRİŞİ</span></td>
+                <td class="mono" style="text-align: center; color: var(--success-text); font-weight: 700;">+20 Adet</td>
+                <td class="mono" style="text-align: center; font-weight: 700;">18 Adet</td>
+                <td>Mağaza Sahibi</td>
+                <td>İrsaliye #FT-8812</td>
+              </tr>
+              <tr>
+                <td class="mono">06.11 15:10</td>
+                <td class="mono">8699999000112</td>
+                <td><strong>Bisküvi Kakaolu 100g</strong></td>
+                <td><span class="badge badge-offline">FİRE / KAYIP</span></td>
+                <td class="mono" style="text-align: center; color: var(--danger-text); font-weight: 700;">-2 Adet</td>
+                <td class="mono" style="text-align: center; font-weight: 700;">42 Adet</td>
+                <td>Mağaza Sahibi</td>
+                <td>Ambalaj Hasarı (Fire)</td>
+              </tr>
+              <tr>
+                <td class="mono">06.11 11:20</td>
+                <td class="mono">8690504018241</td>
+                <td><strong>Somun Ekmek 200g</strong></td>
+                <td><span class="badge badge-danger">İADE (REFUND)</span></td>
+                <td class="mono" style="text-align: center; color: var(--success-text); font-weight: 700;">+1 Adet</td>
+                <td class="mono" style="text-align: center; font-weight: 700; color: var(--warning-text);">-11 Adet</td>
+                <td>Mağaza Sahibi</td>
+                <td class="mono">İade #RF-009</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="shared.js"></script>
+</body>
+</html>

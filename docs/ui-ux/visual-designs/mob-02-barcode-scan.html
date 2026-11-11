@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Mobil Barkod Tarama (Görsel Tasarım M-02)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .camera-viewport {
+      flex: 1;
+      background-color: #020617;
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .scanner-target-box {
+      width: 240px;
+      height: 160px;
+      border: 2px dashed rgba(255, 255, 255, 0.4);
+      border-radius: var(--radius-lg);
+      position: relative;
+      box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.55);
+    }
+    .scan-laser-line {
+      position: absolute;
+      top: 50%;
+      left: 10px;
+      right: 10px;
+      height: 2px;
+      background-color: #EF4444;
+      box-shadow: 0 0 8px #EF4444;
+      animation: scanAnim 2s infinite ease-in-out;
+    }
+    @keyframes scanAnim {
+      0%, 100% { transform: translateY(-60px); }
+      50% { transform: translateY(60px); }
+    }
+    .scanned-product-sheet {
+      background-color: var(--bg-surface);
+      border-top: 1px solid var(--border-subtle);
+      border-radius: 20px 20px 0 0;
+      padding: var(--space-4);
+      box-shadow: 0 -10px 25px -5px rgba(0, 0, 0, 0.2);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-3);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>MOBİL TASARIM MOCK-UP</strong> — Kamera barkod okuma vizörü ve alt ürün kartı.</span>
+    <a href="index.html" style="color: inherit; text-decoration: underline; min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center;">Menü</a>
+  </div>
+
+  <div class="mobile-wrapper">
+    <div class="mobile-frame">
+      
+      <!-- Mobil Üst Bar -->
+      <header class="mobile-topbar" style="background-color: #0F172A; color: #FFFFFF; border-bottom: none;">
+        <span>Kamera Barkod Okuyucu</span>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" style="min-height: 48px; min-width: 48px; padding: 0 12px; font-size: 13px; background:#1E293B; color:#FFF; border-color:#334155;" onclick="alert('Kamera Feneri Açıldı / Kapandı')">
+            🔦 Fener
+          </button>
+          <button class="btn btn-secondary" style="min-height: 48px; min-width: 48px; padding: 0 12px; font-size: 13px; background:#1E293B; color:#FFF; border-color:#334155;" onclick="toggleTheme()">
+            Tema
+          </button>
+        </div>
+      </header>
+
+      <!-- Kamera Alanı -->
+      <div class="camera-viewport">
+        <div class="scanner-target-box">
+          <div class="scan-laser-line"></div>
+        </div>
+        <div style="position: absolute; top: 16px; color: rgba(255,255,255,0.7); font-size: 12px; font-weight: 500;">
+          Barkodu çerçeve içine hizalayın
+        </div>
+      </div>
+
+      <!-- Taranan Ürün Alt Çekmecesi (Bottom Sheet) -->
+      <div class="scanned-product-sheet">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+          <div>
+            <span class="mono" style="font-size: 11px; color: var(--text-muted);">8691234567890</span>
+            <h4 style="font-size: 16px; font-weight: 700; color: var(--text-main); margin-top: 2px;">Çay Rize 1000g</h4>
+            <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Kategori: İçecekler</div>
+          </div>
+          <div style="text-align: right;">
+            <div class="mono" style="font-size: 22px; font-weight: 800; color: var(--text-main);">185.00 TL</div>
+            <span class="badge badge-online" style="font-size: 10px; margin-top: 4px;">Stok: 18 Adet</span>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: var(--space-2); margin-top: 4px;">
+          <a href="mob-03-cart-checkout.html" class="btn btn-cash" style="flex: 2; height: 48px; min-height: 48px; text-decoration: none;">
+            + Sepete Ekle
+          </a>
+          <a href="mob-04-stock-view.html" class="btn btn-secondary" style="flex: 1; height: 48px; min-height: 48px; text-decoration: none; font-size: 13px;">
+            Stok Geçmişi
+          </a>
+        </div>
+      </div>
+
+      <!-- Mobil Alt Bar -->
+      <nav class="mobile-bottom-nav">
+        <a href="mob-01-dashboard.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Özet
+        </a>
+        <a href="mob-02-barcode-scan.html" class="mob-nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/></svg>
+          Tara
+        </a>
+        <a href="mob-03-cart-checkout.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/></svg>
+          Sepet
+        </a>
+        <a href="mob-04-stock-view.html" class="mob-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Stok
+        </a>
+      </nav>
+
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+</body>
+</html>

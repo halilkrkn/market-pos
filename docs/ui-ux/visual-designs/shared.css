@@ -1,0 +1,576 @@
+/* ====================================================================
+   MARKET MMS — Paylaşılan Görsel Tasarım Token'ları ve Temel Stiller
+   Dosya: shared.css
+   Tasarım Sistemi: UX_03_DESIGN_SYSTEM.md v1.1
+   WCAG 2.1 AA Kontrast Onaylı Renk Token'ları
+   ==================================================================== */
+
+:root {
+  /* Renk Skalası (Light Tema - Default) */
+  --bg-app: #F8FAFC;              /* Slate 50 */
+  --bg-surface: #FFFFFF;          /* Beyaz */
+  --bg-surface-subtle: #F1F5F9;   /* Slate 100 */
+  --border-subtle: #E2E8F0;       /* Slate 200 */
+  --border-strong: #64748B;       /* Slate 500 — Beyaz üzerinde 4.76:1 (WCAG 2.1 Non-text ≥ 3:1) */
+
+  --text-main: #0F172A;           /* Slate 900 — Beyaz üzerinde 17.85:1 AAA */
+  --text-muted: #475569;          /* Slate 600 — Beyaz 7.58:1 AAA, Slate 100 6.92:1 AA */
+  --text-inverse: #FFFFFF;
+
+  /* İşlevsel Durum Renkleri (WCAG AA Doğrulanmış) */
+  --success: #047857;             /* Emerald 700 — Beyaz üzerinde 5.48:1 AA (Nakit Buton) */
+  --success-bg: #DCFCE7;          /* Rozet zemini */
+  --success-text: #166534;        /* 6.49:1 AA */
+
+  --accent: #2563EB;              /* Blue 600 — Beyaz üzerinde 5.17:1 AA (Kart Buton) */
+  --accent-bg: #DBEAFE;           /* Rozet zemini */
+  --accent-text: #1E40AF;         /* 7.15:1 AAA */
+
+  --warning: #B45309;             /* Amber 700 — Beyaz üzerinde 5.02:1 AA (Eksi Stok / Uyarı) */
+  --warning-bg: #FEF3C7;          /* Rozet zemini */
+  --warning-text: #92400E;        /* 6.37:1 AA */
+
+  --danger: #B91C1C;              /* Red 700 — Beyaz üzerinde 6.47:1 AA (Sil / İptal) */
+  --danger-bg: #FEE2E2;           /* Rozet zemini */
+  --danger-text: #991B1B;         /* 7.20:1 AAA */
+
+  --focus-ring: #2563EB;
+
+  /* Tipografi Skalası */
+  --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "SF Mono", Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Courier New", monospace;
+
+  /* Spacing Skalası: 4px temel birim / 8px artış ölçeği (4px base / 8px major step) */
+  --space-1: 4px;   /* 4px  - mikro boşluk */
+  --space-2: 8px;   /* 8px  - temel ızgara adımı */
+  --space-3: 12px;  /* 12px - kompakt boşluk */
+  --space-4: 16px;  /* 16px - standart kart ve padding */
+  --space-5: 20px;  /* 20px - orta boşluk */
+  --space-6: 24px;  /* 24px - büyük bölüm boşluğu */
+  --space-8: 32px;  /* 32px - makro boşluk */
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* Header ve Sidebar Ölçüleri */
+  --header-height: 56px;
+  --sidebar-width: 240px;
+  --bottom-nav-height: 64px;
+}
+
+/* Dark Tema */
+body.dark {
+  --bg-app: #090D16;              /* Çok Koyu Kömür */
+  --bg-surface: #1E293B;          /* Slate 800 */
+  --bg-surface-subtle: #0F172A;   /* Slate 900 */
+  --border-subtle: #334155;       /* Slate 700 */
+  --border-strong: #64748B;       /* Slate 500 — Slate 800 üzerinde 3.07:1 (WCAG 2.1 Non-text ≥ 3:1) */
+
+  --text-main: #F8FAFC;           /* Slate 50 — Slate 800 üzerinde 13.98:1 AAA */
+  --text-muted: #94A3B8;          /* Slate 400 — Slate 800 üzerinde 5.71:1 AA */
+  --text-inverse: #0F172A;
+
+  --success: #047857;             /* Dark temada da erişilebilir */
+  --success-bg: rgba(4, 120, 87, 0.2);
+  --success-text: #34D399;
+
+  --accent: #1D4ED8;              /* Blue 700 — Beyaz üzerinde 6.70:1 AA */
+  --accent-bg: rgba(29, 78, 216, 0.25);
+  --accent-text: #60A5FA;
+
+  --warning: #B45309;
+  --warning-bg: rgba(180, 83, 9, 0.2);
+  --warning-text: #FBBF24;
+
+  --danger: #B91C1C;
+  --danger-bg: rgba(185, 28, 28, 0.2);
+  --danger-text: #F87171;
+
+  --focus-ring: #60A5FA;
+}
+
+/* Temel Reset */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  height: 100%;
+  font-family: var(--font-sans);
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Monospace Tabular Rakamlar */
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+}
+
+/* Tasarım Demosu Uyarı Çubuğu */
+.demo-disclaimer-bar {
+  background: #FFFBEB;
+  color: #B45309;
+  border-bottom: 1px solid #FDE68A;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  letter-spacing: 0.02em;
+}
+body.dark .demo-disclaimer-bar {
+  background: #1C1917;
+  color: #FBBF24;
+  border-bottom: 1px solid #292524;
+}
+
+/* Ortak Buton Stilleri */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-width: 48px;
+  min-height: 48px;
+  padding: 8px 16px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+  user-select: none;
+  text-decoration: none;
+}
+.btn:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.btn:active {
+  transform: translateY(1px);
+}
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+.btn-primary {
+  background-color: var(--text-main);
+  color: var(--text-inverse);
+  border-color: var(--text-main);
+}
+.btn-primary:hover {
+  background-color: #1E293B;
+  border-color: #1E293B;
+}
+body.dark .btn-primary:hover {
+  background-color: #E2E8F0;
+  border-color: #E2E8F0;
+}
+.btn-secondary {
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  border-color: var(--border-subtle);
+}
+.btn-secondary:hover {
+  background-color: var(--bg-surface-subtle);
+}
+.btn-cash {
+  background-color: var(--success);
+  color: #FFFFFF;
+}
+.btn-cash:hover {
+  background-color: #065F46;
+}
+.btn-card {
+  background-color: var(--accent);
+  color: #FFFFFF;
+}
+.btn-card:hover {
+  background-color: #1D4ED8;
+}
+body.dark .btn-card:hover {
+  background-color: #1E40AF;
+}
+.btn-danger {
+  background-color: var(--danger);
+  color: #FFFFFF;
+}
+.btn-danger:hover {
+  background-color: #991B1B;
+}
+
+/* Durum Rozetleri */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge-online {
+  background-color: var(--success-bg);
+  color: var(--success-text);
+}
+.badge-offline {
+  background-color: var(--warning-bg);
+  color: var(--warning-text);
+}
+.badge-outbox {
+  background-color: var(--accent-bg);
+  color: var(--accent-text);
+}
+.badge-danger {
+  background-color: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+/* Form Girdileri */
+.input-text {
+  min-height: 48px;
+  height: 48px;
+  padding: 0 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  background-color: var(--bg-surface);
+  color: var(--text-main);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+.input-text:focus {
+  border-color: var(--focus-ring);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+.input-text:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.input-text::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+.input-text.input-error {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px rgba(185, 28, 28, 0.2);
+}
+body.dark .input-text.input-error {
+  border-color: var(--danger-text);
+  box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.25);
+}
+.input-error-msg {
+  color: var(--danger-text);
+  font-size: 12px;
+  font-weight: 500;
+  margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Ortak Tablo */
+.table-container {
+  width: 100%;
+  overflow-x: auto;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+}
+table.mms-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 14px;
+}
+table.mms-table th {
+  background-color: var(--bg-surface-subtle);
+  color: #475569; /* Light modda #475569 on #F1F5F9: 6.92:1 AAA (≥ 4.5:1) */
+  font-weight: 600;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+body.dark table.mms-table th {
+  color: var(--text-muted); /* Dark modda #94A3B8 on #0F172A: 6.96:1 AAA (≥ 4.5:1) */
+}
+table.mms-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-main);
+}
+table.mms-table tr:last-child td {
+  border-bottom: none;
+}
+table.mms-table tr:hover td {
+  background-color: rgba(148, 163, 184, 0.05);
+}
+
+/* Kart Stilleri */
+.card {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: var(--space-4);
+}
+
+/* ====================================================================
+   Windows Desktop Layout (Sidebar + Header + Main Canvas)
+   ==================================================================== */
+.desktop-layout {
+  display: flex;
+  height: calc(100vh - 24px); /* Disclaimer bar hariç */
+  overflow: hidden;
+}
+
+.desktop-sidebar {
+  width: var(--sidebar-width);
+  background-color: var(--bg-surface);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+
+.sidebar-header {
+  height: var(--header-height);
+  padding: 0 var(--space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-bottom: 1px solid var(--border-subtle);
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  padding: var(--space-3) var(--space-2);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  min-height: 48px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+.nav-link:hover {
+  background-color: var(--bg-surface-subtle);
+  color: var(--text-main);
+}
+.nav-link.active {
+  background-color: var(--bg-surface-subtle);
+  color: var(--accent-text); /* Light: #1E40AF (7.96:1 AAA), Dark: #60A5FA (7.02:1 AAA) */
+  font-weight: 600;
+}
+.nav-link-hub {
+  color: var(--accent-text) !important;
+}
+.nav-link svg {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+
+.desktop-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background-color: var(--bg-app);
+}
+
+.desktop-topbar {
+  height: var(--header-height);
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-5);
+  flex-shrink: 0;
+}
+
+.desktop-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-5);
+}
+
+/* ====================================================================
+   Mobile Device Layout (Mock Çerçeve veya Responsive Mobil)
+   ==================================================================== */
+.mobile-wrapper {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(100vh - 24px);
+  padding: var(--space-4);
+  background-color: #E2E8F0;
+}
+body.dark .mobile-wrapper {
+  background-color: #020617;
+}
+
+.mobile-frame {
+  width: 100%;
+  max-width: 390px;
+  height: 800px;
+  background-color: var(--bg-app);
+  border: 1px solid var(--border-strong);
+  border-radius: 36px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+.mobile-topbar {
+  height: 56px;
+  min-height: 56px;
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--space-4);
+  flex-shrink: 0;
+  font-weight: 700;
+  font-size: 15px;
+}
+
+.mobile-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.mobile-bottom-nav {
+  height: var(--bottom-nav-height);
+  background-color: var(--bg-surface);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  flex-shrink: 0;
+  padding-bottom: 6px;
+}
+
+.mob-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-width: 48px;
+  min-height: 48px;
+  text-decoration: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+}
+.mob-nav-item.active {
+  color: var(--accent-text); /* Light: #1E40AF (8.72:1 AAA), Dark: #60A5FA (5.75:1 AA) */
+  font-weight: 700;
+}
+.mob-nav-item svg {
+  width: 20px;
+  height: 20px;
+}
+
+/* ====================================================================
+   Responsive Viewport Uyarlamaları (Media Queries)
+   ==================================================================== */
+@media (max-width: 480px) {
+  .mobile-wrapper {
+    padding: 0;
+    min-height: 100vh;
+    background-color: var(--bg-app);
+  }
+  .mobile-frame {
+    max-width: 100%;
+    height: 100vh;
+    border-radius: 0;
+    border: none;
+    box-shadow: none;
+  }
+}
+
+@media (max-height: 840px) and (min-width: 481px) {
+  .mobile-frame {
+    height: calc(100vh - 48px);
+  }
+}
+
+@media (max-width: 1024px) {
+  .desktop-layout {
+    height: auto;
+    min-height: calc(100vh - 24px);
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .desktop-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .sidebar-nav {
+    flex-direction: row;
+    overflow-x: auto;
+    padding: var(--space-2);
+  }
+  .desktop-main {
+    overflow: visible;
+  }
+  .desktop-topbar {
+    min-height: var(--header-height);
+    height: auto;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-4);
+  }
+  .desktop-content {
+    padding: var(--space-3);
+    overflow-y: visible;
+  }
+}
+
+@media (max-width: 640px) {
+  .demo-disclaimer-bar {
+    flex-wrap: wrap;
+    gap: 4px;
+    padding: 6px 12px;
+  }
+}

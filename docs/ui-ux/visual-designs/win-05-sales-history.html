@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Windows Satış Geçmişi & İade (Görsel Tasarım W-10)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    .sales-split {
+      display: grid;
+      grid-template-columns: 3fr 2fr;
+      gap: var(--space-5);
+      height: 100%;
+    }
+    .detail-item-row {
+      display: flex;
+      justify-content: space-between;
+      padding: var(--space-2) 0;
+      border-bottom: 1px solid var(--border-subtle);
+      font-size: 13px;
+    }
+    @media (max-width: 1024px) {
+      .sales-split {
+        grid-template-columns: 1fr;
+        height: auto;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>GÖRSEL TASARIM MOCK-UP</strong> — Satış Geçmişi. Satış dokunulmazlığı geçerlidir: Kayıt silinemez, iptaller ters hareketle izlenir [INV-03].</span>
+    <span>MARKET MMS | Pilot Sürüm</span>
+  </div>
+
+  <div class="desktop-layout">
+    <!-- Sol Kenar Çubuğu -->
+    <aside class="desktop-sidebar">
+      <div class="sidebar-header">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+        <span>MARKET MMS</span>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="win-01-dashboard.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Dashboard
+        </a>
+        <a href="win-02-pos.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="6" y1="8" x2="6" y2="8"/><line x1="10" y1="8" x2="18" y2="8"/><line x1="6" y1="12" x2="18" y2="12"/><line x1="6" y1="16" x2="14" y2="16"/></svg>
+          Kasa Satış (POS)
+        </a>
+        <a href="win-03-product-search.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Ürün Arama & Katalog
+        </a>
+        <a href="win-06-stock-management.html" class="nav-link">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          Stok &amp; Hareketler
+        </a>
+        <a href="win-05-sales-history.html" class="nav-link active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="12 8 12 12 14 14"/><path d="M3.05 11a9 9 0 1 1 .5 4m-.5 5v-5h5"/></svg>
+          Satış Geçmişi
+        </a>
+        <div style="margin-top: auto; padding-top: var(--space-4); border-top: 1px solid var(--border-subtle);">
+          <a href="index.html" class="nav-link nav-link-hub">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            Tüm Ekranlar Menüsü
+          </a>
+        </div>
+      </nav>
+    </aside>
+
+    <!-- Ana Gövde -->
+    <main class="desktop-main">
+      <header class="desktop-topbar">
+        <div>
+          <span style="font-size: 16px; font-weight: 700;">Satış Fişleri & İade Yönetimi</span>
+          <span style="font-size: 13px; color: var(--text-muted); margin-left: 8px;">| Tarih: Bugün (06.11.2026)</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: var(--space-3);">
+          <span class="badge badge-online">● HUB ONLINE</span>
+          <button class="btn btn-secondary" onclick="toggleTheme()">Tema</button>
+        </div>
+      </header>
+
+      <div class="desktop-content">
+        
+        <div class="sales-split">
+          
+          <!-- Sol: Fiş Listesi -->
+          <div style="display: flex; flex-direction: column; gap: var(--space-3);">
+            <div class="card" style="padding: var(--space-3);">
+              <div style="display: flex; gap: var(--space-3); flex-wrap: wrap;">
+                <input type="text" class="input-text mono" placeholder="Fiş no veya barkod ara..." style="flex: 2; min-width: 180px;">
+                <select class="input-text" style="flex: 1; min-width: 130px;">
+                  <option>Bugün</option>
+                  <option>Dün</option>
+                  <option>Son 7 Gün</option>
+                </select>
+                <select class="input-text" style="flex: 1; min-width: 140px;">
+                  <option>Tüm Ödemeler</option>
+                  <option>Nakit</option>
+                  <option>Kredi Kartı</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="table-container">
+              <table class="mms-table">
+                <thead>
+                  <tr>
+                    <th>Fiş No</th>
+                    <th>Saat</th>
+                    <th>Ödeme</th>
+                    <th>Kalem / Adet</th>
+                    <th style="text-align: right;">Toplam Tutar</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr style="background-color: var(--bg-surface-subtle); font-weight: 600;">
+                    <td class="mono">#1042</td>
+                    <td>19:42:15</td>
+                    <td><span class="badge badge-online">NAKİT</span></td>
+                    <td>4 Kalem (7 Adet)</td>
+                    <td class="mono" style="text-align: right; font-weight: 700;">306.80 TL</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">#1041</td>
+                    <td>19:35:02</td>
+                    <td><span class="badge badge-outbox">KREDİ KARTI</span></td>
+                    <td>2 Kalem (2 Adet)</td>
+                    <td class="mono" style="text-align: right; font-weight: 700;">85.00 TL</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">#1040</td>
+                    <td>19:28:44</td>
+                    <td><span class="badge badge-online">NAKİT</span></td>
+                    <td>1 Kalem (1 Adet)</td>
+                    <td class="mono" style="text-align: right; font-weight: 700;">12.50 TL</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">#1039</td>
+                    <td>19:14:19</td>
+                    <td><span class="badge badge-online">NAKİT</span></td>
+                    <td>5 Kalem (9 Adet)</td>
+                    <td class="mono" style="text-align: right; font-weight: 700;">412.00 TL</td>
+                  </tr>
+                  <tr>
+                    <td class="mono">#1038</td>
+                    <td>18:55:30</td>
+                    <td><span class="badge badge-outbox">KREDİ KARTI</span></td>
+                    <td>3 Kalem (4 Adet)</td>
+                    <td class="mono" style="text-align: right; font-weight: 700;">198.40 TL</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Sağ: Seçili Fiş Detay Paneli (Snapshot ve İade) -->
+          <div class="card" style="display: flex; flex-direction: column; gap: var(--space-4);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: var(--space-3);">
+              <div>
+                <span class="mono" style="font-size: 18px; font-weight: 800;">Fiş #1042</span>
+                <span style="font-size: 12px; color: var(--text-muted); display: block;">Terminal: KASA-01 | Tarih: 06.11.2026 19:42:15</span>
+              </div>
+              <span class="badge badge-online">NAKİT SATIŞ</span>
+            </div>
+
+            <!-- Satış Anındaki Snapshot Kalemler (INV-01 & INV-03) -->
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px;">
+                Sepet Kalemleri (Snapshot Satış Fiyatları)
+              </div>
+              <div style="display: flex; flex-direction: column;">
+                <div class="detail-item-row">
+                  <span>3 × Somun Ekmek 200g (@ 12.50 TL)</span>
+                  <strong class="mono">37.50 TL</strong>
+                </div>
+                <div class="detail-item-row">
+                  <span>2 × Yarım Yağlı Süt 1L (@ 34.90 TL)</span>
+                  <strong class="mono">69.80 TL</strong>
+                </div>
+                <div class="detail-item-row">
+                  <span>1 × Çay Rize 1000g (@ 185.00 TL)</span>
+                  <strong class="mono">185.00 TL</strong>
+                </div>
+                <div class="detail-item-row">
+                  <span>1 × Bisküvi Kakaolu 100g (@ 14.50 TL)</span>
+                  <strong class="mono">14.50 TL</strong>
+                </div>
+              </div>
+            </div>
+
+            <!-- Ödeme Detayı -->
+            <div style="background-color: var(--bg-surface-subtle); padding: var(--space-3); border-radius: var(--radius-md);">
+              <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+                <span>Toplam Tutar:</span>
+                <strong class="mono" style="font-size: 16px;">306.80 TL</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted);">
+                <span>Alınan Nakit:</span>
+                <span class="mono">400.00 TL</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--success-text); font-weight: 600;">
+                <span>Verilen Para Üstü:</span>
+                <span class="mono">93.20 TL</span>
+              </div>
+            </div>
+
+            <!-- İade ve İptal Bilgilendirmesi (INV-03 / BR-POS-09) -->
+            <div style="font-size: 11px; color: var(--text-muted);">
+              * Satış dokunulmazlığı gereğince satış kaydı sistemden silinemez. İptal/iade ters stok hareketi ve <code>REFUND</code> satışı oluşturur [INV-03] ve yalnızca Master Hub LAN bağlantısı aktifken işlenir [BR-POS-09].
+            </div>
+
+            <div style="display: flex; gap: var(--space-3); margin-top: auto;">
+              <button class="btn btn-danger" style="flex: 1;" onclick="alert('İade işlemi: Ters stok hareketi ve REFUND kaydı oluşturulacaktır [INV-03].')">
+                Satışı İptal / İade Et
+              </button>
+              <button class="btn btn-secondary" style="flex: 1;" onclick="alert('Fiş Yazdırma: Donanımsal yazıcı entegrasyonu MVP dışıdır [FUTURE SCOPE].')">
+                Fiş Önizleme
+              </button>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script src="shared.js"></script>
+</body>
+</html>

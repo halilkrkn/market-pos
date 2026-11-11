@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MARKET MMS — Hızlı Ödeme ve Para Üstü Modalı (Görsel Tasarım W-02)</title>
+  <link rel="stylesheet" href="shared.css">
+  <style>
+    /* Modal Backdrop */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background-color: rgba(15, 23, 42, 0.65);
+      backdrop-filter: blur(3px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      padding: var(--space-4);
+    }
+    .payment-modal-card {
+      width: 100%;
+      max-width: 580px;
+      max-height: calc(100vh - 32px);
+      background-color: var(--bg-surface);
+      border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+    .modal-header {
+      padding: var(--space-4) var(--space-5);
+      border-bottom: 1px solid var(--border-subtle);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background-color: var(--bg-surface-subtle);
+    }
+    .modal-body {
+      padding: var(--space-5);
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-4);
+    }
+    .banknote-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-2);
+    }
+    .banknote-btn {
+      height: 48px;
+      min-height: 48px;
+      background-color: var(--bg-surface-subtle);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-main);
+      cursor: pointer;
+      user-select: none;
+      transition: all 0.1s ease;
+    }
+    .banknote-btn:hover {
+      border-color: var(--accent);
+      background-color: var(--bg-surface);
+    }
+    .change-display-box {
+      background-color: var(--success-bg);
+      border: 2px solid #86EFAC;
+      border-radius: var(--radius-md);
+      padding: var(--space-4);
+      text-align: center;
+    }
+    body.dark .change-display-box {
+      border-color: var(--success);
+    }
+    .change-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--success-text);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .change-amount {
+      font-size: 40px;
+      font-weight: 800;
+      color: var(--success-text);
+      margin-top: 4px;
+    }
+    .change-display-box.is-error {
+      background-color: var(--danger-bg);
+      border-color: var(--danger-text);
+    }
+    .change-display-box.is-error .change-title,
+    .change-display-box.is-error .change-amount {
+      color: var(--danger-text);
+    }
+    .change-display-box.is-info {
+      background-color: var(--accent-bg);
+      border-color: var(--accent);
+    }
+    .change-display-box.is-info .change-title,
+    .change-display-box.is-info .change-amount {
+      color: var(--accent-text);
+    }
+    @media (max-width: 540px) {
+      .banknote-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+      .modal-body {
+        padding: var(--space-4);
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Tasarım Demosu Uyarı Çubuğu -->
+  <div class="demo-disclaimer-bar">
+    <span>⚠️ <strong>GÖRSEL TASARIM MOCK-UP</strong> — Hızlı Ödeme Modalı. Fiş basma ve banka POS entegrasyonu MVP dışıdır [INV-05].</span>
+    <span>MARKET MMS | Pilot Sürüm</span>
+  </div>
+
+  <!-- Modal Penceresi -->
+  <div class="modal-backdrop">
+    <div class="payment-modal-card">
+      
+      <!-- Başlık -->
+      <div class="modal-header">
+        <div style="font-size: 18px; font-weight: 700;">Hızlı Tahsilat & Para Üstü</div>
+        <a href="win-02-pos.html" title="Kapat" style="text-decoration: none; color: var(--text-muted); font-size: 24px; font-weight: bold; min-width: 48px; min-height: 48px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--radius-md);">&times;</a>
+      </div>
+
+      <!-- Gövde -->
+      <div class="modal-body">
+        
+        <!-- Ödenecek Tutar Satırı -->
+        <div style="display: flex; justify-content: space-between; align-items: baseline; padding-bottom: var(--space-3); border-bottom: 1px solid var(--border-subtle);">
+          <span style="font-size: 15px; color: var(--text-muted); font-weight: 600;">Ödenecek Tutar:</span>
+          <span class="mono" style="font-size: 32px; font-weight: 800; color: var(--text-main);">306.80 TL</span>
+        </div>
+
+        <!-- Ödeme Türü Seçimi (INV-08: Nakit ve Kart Yalnızca - Parçalı YOKTUR) -->
+        <div>
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+            Ödeme Yöntemi [INV-08]
+          </label>
+          <div style="display: flex; gap: var(--space-3); margin-top: 6px;">
+            <label id="cashMethodLabel" class="btn btn-secondary" style="flex: 1; cursor: pointer; border-color: var(--success); background-color: var(--success-bg); color: var(--success-text);">
+              <input type="radio" name="payType" value="cash" checked style="accent-color: var(--success);" onchange="setPaymentMethod('cash')">
+              <strong>NAKİT (F10)</strong>
+            </label>
+            <label id="cardMethodLabel" class="btn btn-secondary" style="flex: 1; cursor: pointer;">
+              <input type="radio" name="payType" value="card" style="accent-color: var(--accent);" onchange="setPaymentMethod('card')">
+              <strong>KREDİ KARTI (F9)</strong>
+            </label>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            * Banka POS terminallerine otomatik tutar aktarımı yoktur; tutar terminale elle girilir [INV-05].
+          </div>
+        </div>
+
+        <!-- Hızlı Banknot Butonları -->
+        <div id="cashSection">
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+            Hızlı Banknot Seçimi
+          </label>
+          <div class="banknote-grid" style="margin-top: 6px;">
+            <button type="button" class="banknote-btn" onclick="setAmount(30680)">Tam Tutar</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(31000)">310 TL</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(35000)">350 TL</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(40000)">400 TL</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(50000)">500 TL</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(60000)">600 TL</button>
+            <button type="button" class="banknote-btn mono" onclick="setAmount(100000)">1,000 TL</button>
+            <button type="button" class="banknote-btn" onclick="focusInput()">Manuel</button>
+          </div>
+        </div>
+
+        <!-- Alınan Nakit Girişi -->
+        <div id="cashInputGroup">
+          <label for="cashInput" style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+            Müşteriden Alınan Nakit (TL)
+          </label>
+          <input type="text" id="cashInput" class="input-text mono" value="400.00" style="width: 100%; height: 48px; font-size: 20px; font-weight: 700; margin-top: 6px;" oninput="updateChange()">
+        </div>
+
+        <!-- Para Üstü Kutusu -->
+        <div id="changeBox" class="change-display-box">
+          <div id="changeTitle" class="change-title">
+            Verilecek Para Üstü
+          </div>
+          <div id="changeValue" class="change-amount mono">
+            93.20 TL
+          </div>
+        </div>
+
+        <!-- Butonlar -->
+        <div style="display: flex; gap: var(--space-3); margin-top: var(--space-2);">
+          <a href="win-02-pos.html" class="btn btn-secondary" style="flex: 1; height: 50px;">
+            İptal [ESC]
+          </a>
+          <button type="button" id="confirmSaleBtn" class="btn btn-cash" style="flex: 2; height: 50px; font-size: 16px;" onclick="confirmSale()">
+            SATIŞI TAMAMLA [Enter]
+          </button>
+        </div>
+
+      </div>
+
+    </div>
+  </div>
+
+  <script src="shared.js"></script>
+  <script>
+    const totalDueCents = 30680; // 306.80 TL integer kuruş
+    let currentMethod = 'cash';
+
+    function setPaymentMethod(method) {
+      currentMethod = method;
+      const cashLabel = document.getElementById('cashMethodLabel');
+      const cardLabel = document.getElementById('cardMethodLabel');
+      const cashSection = document.getElementById('cashSection');
+      const cashInputGroup = document.getElementById('cashInputGroup');
+      const confirmBtn = document.getElementById('confirmSaleBtn');
+      const changeBox = document.getElementById('changeBox');
+      const changeTitle = document.getElementById('changeTitle');
+      const changeValue = document.getElementById('changeValue');
+
+      if (method === 'card') {
+        document.querySelector('input[name="payType"][value="card"]').checked = true;
+        cardLabel.style.borderColor = 'var(--accent)';
+        cardLabel.style.backgroundColor = 'var(--accent-bg)';
+        cardLabel.style.color = 'var(--accent-text)';
+        cashLabel.style.borderColor = '';
+        cashLabel.style.backgroundColor = '';
+        cashLabel.style.color = '';
+        cashSection.style.display = 'none';
+        cashInputGroup.style.display = 'none';
+        confirmBtn.classList.remove('btn-cash');
+        confirmBtn.classList.add('btn-card');
+        changeBox.className = 'change-display-box is-info';
+        changeTitle.innerText = 'Banka POS Cihazına Elle Girilecek Tutar [INV-05]';
+        changeValue.innerText = formatKurus(totalDueCents);
+      } else {
+        document.querySelector('input[name="payType"][value="cash"]').checked = true;
+        cashLabel.style.borderColor = 'var(--success)';
+        cashLabel.style.backgroundColor = 'var(--success-bg)';
+        cashLabel.style.color = 'var(--success-text)';
+        cardLabel.style.borderColor = '';
+        cardLabel.style.backgroundColor = '';
+        cardLabel.style.color = '';
+        cashSection.style.display = 'block';
+        cashInputGroup.style.display = 'block';
+        confirmBtn.classList.remove('btn-card');
+        confirmBtn.classList.add('btn-cash');
+        changeTitle.innerText = 'Verilecek Para Üstü';
+        updateChange();
+      }
+    }
+
+    function setAmount(cents) {
+      setPaymentMethod('cash');
+      document.getElementById('cashInput').value = formatCentsToInput(cents);
+      updateChange();
+    }
+
+    function focusInput() {
+      setPaymentMethod('cash');
+      const input = document.getElementById('cashInput');
+      input.focus();
+      input.select();
+    }
+
+    function updateChange() {
+      if (currentMethod === 'card') return;
+      const inputEl = document.getElementById('cashInput');
+      const changeBox = document.getElementById('changeBox');
+      const changeTitle = document.getElementById('changeTitle');
+      const changeValue = document.getElementById('changeValue');
+      const parsed = parseToCents(inputEl.value);
+
+      if (!parsed.valid) {
+        inputEl.classList.add('input-error');
+        changeBox.className = 'change-display-box is-error';
+        changeTitle.innerText = 'Geçersiz Tutar Formatı';
+        changeValue.innerText = 'Geçersiz Giriş';
+        return;
+      }
+
+      const givenCents = parsed.cents;
+      const changeCents = givenCents - totalDueCents;
+
+      if (changeCents >= 0) {
+        inputEl.classList.remove('input-error');
+        changeBox.className = 'change-display-box';
+        changeTitle.innerText = 'Verilecek Para Üstü';
+        changeValue.innerText = formatKurus(changeCents);
+      } else {
+        inputEl.classList.add('input-error');
+        changeBox.className = 'change-display-box is-error';
+        changeTitle.innerText = 'Yetersiz Nakit Tutarı';
+        changeValue.innerText = 'Eksik: ' + formatKurus(Math.abs(changeCents));
+      }
+    }
+
+    function confirmSale() {
+      if (currentMethod === 'card') {
+        alert('KREDİ KARTI SATIŞI TAMAMLANDI!\nKuruş Tamsayı Standardı [INV-01] ile yerel veritabanına kaydedildi.\nTutar: ' + formatKurus(totalDueCents) + '\n(Not: Banka POS terminaline tutar elle girilir [INV-05])');
+        window.location.href = 'win-02-pos.html';
+        return;
+      }
+      const valStr = document.getElementById('cashInput').value;
+      const parsed = parseToCents(valStr);
+      if (!parsed.valid) {
+        alert('Hata: ' + (parsed.error || 'Geçersiz tutar formatı!'));
+        return;
+      }
+      const givenCents = parsed.cents;
+      if (givenCents < totalDueCents) {
+        alert('Hata: Alınan tutar toplam tutardan az olamaz!');
+        return;
+      }
+      alert('SATIŞ BAŞARILI!\nKuruş Tamsayı Standardı [INV-01] ile yerel veritabanına kaydedildi.\nPara Üstü: ' + formatKurus(givenCents - totalDueCents) + '\n(Not: Fiş yazıcı entegrasyonu MVP dışıdır)');
+      window.location.href = 'win-02-pos.html';
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        window.location.href = 'win-02-pos.html';
+      } else if (e.key === 'F9') {
+        e.preventDefault();
+        setPaymentMethod('card');
+      } else if (e.key === 'F10') {
+        e.preventDefault();
+        setPaymentMethod('cash');
+      } else if (e.key === 'Enter') {
+        confirmSale();
+      }
+    });
+  </script>
+</body>
+</html>
