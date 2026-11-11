@@ -1,18 +1,21 @@
 # PROJECT_STATUS.md — Market POS (MMS) Mevcut Durum Raporu
 
 *Bu belge her yeni yapay zekâ geliştirme oturumunda durum kontrolü amacıyla okunmalıdır.*  
-*Son güncelleme: 6 Kasım 2026*
+*Son güncelleme: 12 Kasım 2026*
 
 ---
 
 ## 1. Aktif Aşama
 **Faz 1 — MVP Uygulama ve Doğrulama**
+- **Git & Depo Durumu:** Aktif dal `main`, son commit `b069d5b` (`HEAD == origin/main` — `PaymentMethod` & Legacy Outbox Recovery push edildi; `docs/ui-ux/`, önceki faz raporları ve 3 kanonik doküman güncellemesi commit onayı beklemektedir).
 - **Faz 1.1 (Windows Client Foundation):** **TAMAMLANDI ve KABUL EDİLDİ** (Commit `8676586`, Tag `v1.1.0-windows-client-foundation`, `docs/phase-1/PHASE_1_1_IMPLEMENTATION_REPORT.md` - 6 Kasım 2026).
 - **DT-01.1 (Agent Governance Audit):** **TAMAMLANDI** (`docs/development/DT_01_1_AGENT_GOVERNANCE_AUDIT.md` - 6 Kasım 2026).
-- **DT-01.2 (Skills Security & License Review / Activation / Verification):** **TAMAMLANDI** (`docs/compliance/DT_01_2_FINAL_VERIFICATION_AUDIT.md` - 6 Kasım 2026).
-- **DT-01.3 (Documentation Reconciliation):** **TEKNİK ÇALIŞMA TAMAMLANDI** (Proje Sahibi Kabulü Bekleniyor).
-- **DT-01.4 (Instruction Infrastructure Integration):** Henüz Başlamadı (Planlandı).
-- **Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi):** Planlandı (Kullanıcı Onayı Bekleniyor).
+- **DT-01.2 (Skills Security & License Review / Activation / Verification):** **TAMAMLANDI ve PUSH EDİLDİ** (Commit `50343d9`, `docs/compliance/DT_01_2_FINAL_VERIFICATION_AUDIT.md`).
+- **DT-01.3 (Documentation Reconciliation):** **TAMAMLANDI ve PUSH EDİLDİ** (Commit `6b7898c`, `docs/development/DT_01_3_FINAL_REVIEW_REPORT.md`).
+- **DT-01.4 (Instruction Infrastructure Integration):** **TAMAMLANDI ve PUSH EDİLDİ** (Commitler `2db892d` & `32111b8`, `docs/development/DT_01_4_FINAL_GOVERNANCE_AUDIT.md`; not: `docs/development/PHASE_1_1_GIT_EXECUTION_REPORT.md` untracked).
+- **UI/UX Tasarım ve Prototip Programı (`docs/ui-ux/`):** **TAMAMLANDI VE KABUL EDİLDİ (11 Kasım 2026 — Proje Sahibi Onayı)** *(Teslimat kabul edildi; `OD-01` Half-Up + `12.50 TL`, `OD-02` Parked Carts MVP dışı, `OD-03` offline bilinmeyen barkod eklenemez/oluşturulamaz, `OD-04` sanal numpad opsiyonel & varsayılan kapalı kararları kesinleşti; `docs/ui-ux/` Git'te commit onayı beklediği için untracked durumdadır; fiziksel cihaz ve saha kullanıcı testleri Faz 7 Pilot kapsamındadır)*.
+- **Faz 1.2 Öncesi `PaymentMethod` Standardizasyonu ve Legacy Outbox Recovery:** **TAMAMLANDI, KABUL EDİLDİ VE PUSH EDİLDİ (12 Kasım 2026 — Commit `b069d5b`)** *(Tüm katmanlarda yalnızca `'CASH'` ve `'CARD'` sözleşmesi, backend `400 ERR_INVALID_PAYMENT_METHOD` reddi ve `updateAndRetryFailedOperation()` atomik transaction + rollback + FIFO + canlı Master Hub E2E kurtarma akışı doğrulandı; 235 otomatik test %100 yeşil; bkz. [`PHASE_1_2_PAYMENT_CONTRACT_FIX_REPORT.md`](./development/PHASE_1_2_PAYMENT_CONTRACT_FIX_REPORT.md), [`PHASE_1_2_LEGACY_OUTBOX_RECOVERY_REPORT.md`](./development/PHASE_1_2_LEGACY_OUTBOX_RECOVERY_REPORT.md), [`PHASE_1_2_PAYMENT_METHOD_GIT_EXECUTION_REPORT.md`](./development/PHASE_1_2_PAYMENT_METHOD_GIT_EXECUTION_REPORT.md))*.
+- **Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi):** **HENÜZ BAŞLAMADI — HAZIRLIK TAMAMLANDI, KODLAMA ONAYI BEKLİYOR** (`OD-01..OD-04`, `PaymentMethod` ve Legacy Outbox Recovery ön koşulları tamamlandı; kapsam, riskler ve test stratejisi [`PHASE_1_2_PREPARATION_REPORT.md`](./development/PHASE_1_2_PREPARATION_REPORT.md) ve [`PHASE_1_2_FINAL_PREFLIGHT_REPORT.md`](./development/PHASE_1_2_FINAL_PREFLIGHT_REPORT.md) belgelerinde sunuldu; `lib/` POS ekran kodlaması başlatılmadı).
 
 ---
 
@@ -21,6 +24,7 @@
 - **Ürün Konsepti:** **Market Management System (MMS)** — Profesyonel Market Yönetim SaaS Uygulaması. (Teknik klasör ve repo adı olarak `market-pos` korunmaktadır).
 - **Pilot Mimarisi:** **Windows Local Master Hub** mimarisi esastır. Windows bilgisayar üzerinde bağımsız bir Windows Service (Dart Shelf HTTPS API, `bin\mms_backend.exe`) merkezi API'yi ve merkezi SQLite veri tabanını (`%PROGRAMDATA%\MarketMMS\data\market_master.db`) tekil yazıcı (Single-Writer) olarak yönetir. Uç cihazlar (Windows Flutter masaüstünde `%LOCALAPPDATA%\MarketMMS\client_local.db`, Android ve iOS telefonlarda yerel `mms_client.db`) kendi yerel Drift + SQLite veri tabanlarına sahiptir ve yerel ağ (LAN) üzerinden Merkezi API ile senkronize olur. Gelecek çok şubeli SaaS aşaması için Supabase PostgreSQL/Auth hedefi korunur.
 - **Faz 1.1 Doğrulaması:** Flutter Windows masaüstü uygulaması (`market_pos.exe`) başarıyla derlenmiş, çalıştırılmış; `packages/mms_client_storage` (51 test), `test_spikes/spike_01_backend` (139 test) ve `market_pos` root istemci (31 test) olmak üzere **toplam 221 otomatik test %100 yeşil** olarak doğrulanmıştır. Clean Architecture sınırları ve merkezi DB doğrudan erişim yasağı eksiksiz korunmaktadır.
+- **Faz 1.2 Öncesi `PaymentMethod` & Legacy Outbox Recovery Doğrulaması (Commit `b069d5b`):** `PaymentMethod` (`'CASH'` / `'CARD'`) standardizasyonu, backend katı doğrulaması ve `ClientStorageRepository.updateAndRetryFailedOperation()` atomik transaction + rollback + FIFO + canlı Master Hub E2E kurtarması tamamlanarak `origin/main` dalına push edilmiştir (`market_pos` root `34` test, `packages/mms_client_storage` `57` test, `test_spikes/spike_01_backend` `144` test -> **toplam 235 otomatik test %100 yeşil**, 0 analyzer hatası). Faz 1.2 POS/Sepet geliştirme henüz başlamamıştır.
 - **Spike-01 Doğrulaması:** S5A serisi (S5A-1'den S5A-5'e kadar) tamamlanmış, Dart Shelf backend mimarisi ve SQLite WAL tekil yazıcı eşzamanlılığı 139 testle doğrulanmıştır. **S5A-5 Sonucu: KOŞULLU PİLOT HAZIRLIĞI (READY FOR PILOT WITH CONDITIONS)** seviyesindedir. Gerçek pilot henüz başlamamıştır.
 - **Açık Teknik Koşullar (Pilot Öncesi Zorunlu Maddeler):**
   1. **B-2:** Mobil istemcilerde (Android/iOS) Root CA sertifika sabitleme (Certificate Pinning) entegrasyonu.
@@ -43,9 +47,10 @@
 - **Senkronizasyon Teknik Doğrulama Raporu:** [`docs/architecture/OFFLINE_SYNC_TECHNICAL_VALIDATION.md`](./architecture/OFFLINE_SYNC_TECHNICAL_VALIDATION.md) protokolün bağımsız teknik denetim raporudur.
 - **Mantıksal Veri Modeli Taslağı:** [`docs/architecture/DATA_MODEL.md`](./architecture/DATA_MODEL.md) 25 tablodan oluşan operasyonel veri modelini tanımlar.
 - **Veri Modeli Karar Kayıtları:** [`docs/architecture/DATA_MODEL_DECISIONS.md`](./architecture/DATA_MODEL_DECISIONS.md) veri modeli mimari kararlarını gerekçelendirir.
-- **İş Kuralları Şartnamesi:** [`docs/requirements/BUSINESS_RULES_SPEC.md`](./requirements/BUSINESS_RULES_SPEC.md) pilot ve gelecek SaaS için 159 iş kuralı ve 21 NFR tanımlar.
+- **İş Kuralları Şartnamesi:** [`docs/requirements/BUSINESS_RULES_SPEC.md`](./requirements/BUSINESS_RULES_SPEC.md) (**v1.6**, 12 Kasım 2026 uzlaştırmalı) pilot ve gelecek SaaS iş kurallarını tanımlar *(v1.4 ile `OD-01` Half-Up yuvarlama + `12.50 TL`, `OD-02`/`BR-POS-05` Parked Carts `[OUT_OF_SCOPE]`, `OD-03`/`BR-PROD-05`/`BR-SYNC-04` offline bilinmeyen barkod eklenemez/oluşturulamaz, `OD-04` sanal numpad opsiyonel/kapalı ve `BR-STK-04..10` `[OUT_OF_SCOPE]`; v1.5 ile `'CASH'`/`'CARD'` sözleşmesi; v1.6 ile Legacy Outbox Recovery `b069d5b` uyumu ve Bölüm 12–13 uzlaştırması kesinleşmiştir)*.
+- **UI/UX Tasarım ve Karar Belgeleri (`docs/ui-ux/` — KABUL EDİLDİ / Git Commit Bekliyor):** [`UX_FINAL_DELIVERY_REPORT.md`](./ui-ux/UX_FINAL_DELIVERY_REPORT.md) (**v1.7**), [`UX_TARGETED_AUDIT_REPORT.md`](./ui-ux/UX_TARGETED_AUDIT_REPORT.md) (**v1.3**), [`UX_FINAL_VERIFICATION_AND_RECONCILIATION_REPORT.md`](./ui-ux/UX_FINAL_VERIFICATION_AND_RECONCILIATION_REPORT.md) (**v1.2**), [`DESIGN_DECISIONS.md`](./ui-ux/DESIGN_DECISIONS.md) (**v1.4**) ve [`UX_07_FLUTTER_HANDOFF.md`](./ui-ux/UX_07_FLUTTER_HANDOFF.md) (**v1.4**) HTML/CSS/JS görsel prototipleriyle birlikte **11 Kasım 2026 tarihinde Proje Sahibi tarafından kabul edilmiştir** *(Git'te açık commit talimatı beklenmektedir — untracked)*.
 - **İş Gereksinimleri Keşif Dokümanı:** [`docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md`](./requirements/PHASE_0_BUSINESS_DISCOVERY.md) iş kararlarını konsolide etmiştir.
-- **Çoklu Cihaz Yaklaşımı:** Windows bilgisayar ve mobil telefonlar aynı temel market yönetim işlevlerine (ürün, satış, stok, dashboard, raporlama) sahiptir. Barkod girişi PC'de USB HID, mobilde kamera ile sağlanır.
+- **Çoklu Cihaz Yaklaşımı:** Windows bilgisayar ve mobil telefonlar aynı temel market yönetim işlevlerine (ürün, satış, stok hareketleri/izleme, dashboard, raporlama — fiziksel stok sayımı MVP dışı) sahiptir. Barkod girişi PC'de USB HID, mobilde kamera ile sağlanır.
 - **Banka POS Kapsamı:** Banka POS terminali entegrasyonu ilk sürümün kapsamı dışındadır.
 
 ---
@@ -76,17 +81,19 @@
 - [x] Faz 0 kabul kriterlerinin eksiksiz tamamlanması ve kapanış onayı
 
 ### Faz 1 — Temel Altyapı ve MVP Uygulama (DEVAM EDİYOR)
-- [x] **Faz 1.1 — Windows Client Foundation:** TAMAMLANDI ve KABUL EDİLDİ (`mms_client_storage` paketi, Drift yerel SQLite, `market_pos.exe` Windows release derlemesi, 221 yeşil test).
-- [x] **DT-01.1 — Agent Governance Audit:** TAMAMLANDI (Merkezi talimat mimarisi analiz edildi).
-- [x] **DT-01.2 — Skills Security & License Review:** TAMAMLANDI (5 beceri incelendi, lisanslandı ve aktif edildi).
-- [x] **DT-01.3 — Documentation Reconciliation:** **TEKNİK ÇALIŞMA TAMAMLANDI** (Proje Sahibi Kabulü Bekleniyor).
-- [ ] **DT-01.4 — Instruction Infrastructure Integration:** Henüz Başlamadı (Planlandı).
-- [ ] **Faz 1.2 — Kasa Satış Ekranı & Sepet Yönetimi:** Planlandı (Kullanıcı Onayı Bekleniyor).
+- [x] **Faz 1.1 — Windows Client Foundation:** TAMAMLANDI ve KABUL EDİLDİ (`mms_client_storage` paketi, Drift yerel SQLite, `market_pos.exe` Windows release derlemesi; Faz 1.1 kapanışında 221 test, 11 Kasım kontrolünde kök `flutter test` 31/31 test doğrulandı, commit `8676586`).
+- [x] **DT-01.1 — Agent Governance Audit:** TAMAMLANDI (`docs/development/DT_01_1_AGENT_GOVERNANCE_AUDIT.md`).
+- [x] **DT-01.2 — Skills Security & License Review:** TAMAMLANDI ve PUSH EDİLDİ (Commit `50343d9`).
+- [x] **DT-01.3 — Documentation Reconciliation:** TAMAMLANDI ve PUSH EDİLDİ (Commit `6b7898c`).
+- [x] **DT-01.4 — Instruction Infrastructure Integration:** TAMAMLANDI ve PUSH EDİLDİ (Commitler `2db892d`, `32111b8`).
+- [x] **UI/UX Tasarım ve Prototip Programı (`docs/ui-ux/`):** **TAMAMLANDI ve KABUL EDİLDİ (11 Kasım 2026 — Proje Sahibi Onayı)**; `OD-01` (Half-Up, `12.50 TL`), `OD-02` (Parked Carts `OUT_OF_SCOPE`), `OD-03` (offline bilinmeyen barkod eklenemez/oluşturulamaz) ve `OD-04` (sanal numpad opsiyonel, varsayılan kapalı) kararları kesinleşti *(Git'te untracked — ayrı commit onayı bekliyor; saha/donanım testleri Faz 7 Pilot)*.
+- [x] **Faz 1.2 Öncesi `PaymentMethod` Standardizasyonu ve Legacy Outbox Recovery:** **TAMAMLANDI, KABUL EDİLDİ ve PUSH EDİLDİ (Commit `b069d5b` — 235 otomatik test %100 yeşil, `docs/development/PHASE_1_2_PAYMENT_CONTRACT_FIX_REPORT.md`, `PHASE_1_2_LEGACY_OUTBOX_RECOVERY_REPORT.md`, `PHASE_1_2_PAYMENT_METHOD_GIT_PREFLIGHT_REPORT.md`)**.
+- [ ] **Faz 1.2 — Kasa Satış Ekranı & Sepet Yönetimi:** **HENÜZ BAŞLAMADI** — Hazırlık raporu (`docs/development/PHASE_1_2_PREPARATION_REPORT.md`) ve `b069d5b` ön koşulları tamamlandı; **POS uygulama kodlaması için Proje Sahibi onayı bekleniyor**.
 
 ---
 
 ## 4. Bir Sonraki Görev
 
-1. **DT-01.3 Kabulü:** Proje sahibinin dokümantasyon mutabakatı ve son inceleme raporunu (`docs/development/DT_01_3_FINAL_REVIEW_REPORT.md`) incelemesi ve kabul onayı vermesi.
-2. **DT-01.4 Başlatılması:** Proje sahibi onayının ardından `AGENTS.md` ve `GEMINI.md` talimat dosyalarının mutabakata varılan yeni mimari kurallarla güncellenmesi.
-3. **Faz 1.2 Kullanıcı Onayı:** Talimat altyapısı tamamlandıktan sonra Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi) uygulama geliştirmesine geçilmesi.
+1. **Dokümantasyon Uzlaştırma Raporunun İncelenmesi:** Proje sahibinin [`docs/development/DOCUMENTATION_RECONCILIATION_REPORT.md`](./development/DOCUMENTATION_RECONCILIATION_REPORT.md) belgesindeki güncellemeleri ve tespit edilen açık yapısal tutarsızlıkları gözden geçirmesi.
+2. **Kalan UI/UX ve Dokümantasyon Commit Onayı (Proje Sahibi Onayı Sonrası):** Açık commit talimatı verildiğinde çalışma ağacında bekleyen karışıktan arındırılmış dokümanların (`PROJECT_STATUS.md`, `REQUIREMENTS.md`, `BUSINESS_RULES_SPEC.md`), untracked UI/UX paketinin (`docs/ui-ux/`) ve bekleyen raporların (`PHASE_1_1_GIT_EXECUTION_REPORT.md`, `PHASE_1_2_PREPARATION_REPORT.md`, `PHASE_1_2_FINAL_PREFLIGHT_REPORT.md`, `PHASE_1_2_PAYMENT_METHOD_GIT_EXECUTION_REPORT.md`, `DOCUMENTATION_RECONCILIATION_REPORT.md`) dosya bazlı (`git add <dosya>`) gözden geçirilip commitlenmesi.
+3. **Faz 1.2 POS & Sepet Geliştirme Başlatma Onayı:** Proje sahibinin [`docs/development/PHASE_1_2_PREPARATION_REPORT.md`](./development/PHASE_1_2_PREPARATION_REPORT.md) ve [`docs/development/PHASE_1_2_FINAL_PREFLIGHT_REPORT.md`](./development/PHASE_1_2_FINAL_PREFLIGHT_REPORT.md) kapsamıyla Faz 1.2 POS TDD uygulama kodlamasına geçilmesi için açık onay vermesi *(henüz başlatılmadı)*.

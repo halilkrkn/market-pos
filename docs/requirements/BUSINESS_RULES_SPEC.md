@@ -1,10 +1,10 @@
 # Market Management System (MMS) — İş Kuralları Şartnamesi (Business Rules Specification)
 
 **Doküman Kodu:** `BUSINESS_RULES_SPEC.md`  
-**Sürüm:** 1.2 (İş Kuralları Tutarlılık ve Hassasiyet Revizyonu)  
-**Tarih:** 31 Ekim 2026  
-**Durum:** Faz 0 — İş Kuralları Şartnamesi (Kodlama Yok)  
-**Ana Referans Doküman:** `MARKET_POS_AI_STUDIO_BUILD_PLANI.md` (v1.2.2)  
+**Sürüm:** 1.6 (Karar, `PaymentMethod` & Legacy Outbox Recovery Uzlaştırması)  
+**Tarih:** 12 Kasım 2026  
+**Durum:** Güncel Canonical Şartname (v1.5 üzerine 12 Kasım 2026 dokümantasyon uzlaştırması; Faz 1.2 POS kodlaması henüz başlamamıştır)  
+**Ana Referans Doküman:** `MARKET_POS_AI_STUDIO_BUILD_PLANI.md` (v1.4)  
 **Girdi Dokümanı:** `docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md` (v1.3)  
 **Teknik Proje / Klasör Adı:** `market-pos`  
 **Ürün Tanımı:** Market Management System (MMS) — Profesyonel Market Yönetim SaaS Uygulaması  
@@ -18,6 +18,10 @@
 | **v1.0** | 31 Ekim 2026 | İlk Yayın | Faz 0 keşif çıktılarının 10 modül altında ilk şartname haline getirilmesi. |
 | **v1.1** | 31 Ekim 2026 | Kapsamlı Revizyon | İptal ve kısmi iade ayrıştırıldı; 9 stok hareket türü netleştirildi; fiyat/maliyet geçmişi eklendi; sepet fiyat snapshot'ı ve manuel müdahale tanımlandı; hiyerarşik kategori ve barkod yaşam döngüsü eklendi; rapor takvim günü ve birim gruplama eklendi; XLSX katalog dışa aktarımı tanımlandı; izlenebilirlik matrisi oluşturuldu. |
 | **v1.2** | 31 Ekim 2026 | Tutarlılık ve Hassasiyet Revizyonu | Satış iptalindeki yapay zaman kısıtı kaldırıldı (herhangi bir zamanda gerekçe ve onayla iptal); ekmek hızlı tuşunun `product_barcodes` ilişkisizliğiyle modellendiği ve sepet içi manuel fiyat müdahalesiyle (`BR-POS-11`) tam uyumu netleştirildi; `BR-PROD-02` farklı paket miktarlarının ayrı ürün kaydı olması kuralına bağlandı; bilinmeyen barkod kayıt akışına birim ve kategori zorunluluğu eklendi (`BR-PROD-01` ile tam uyum); sayım uzlaştırmasında zaman damgasının ürün/kalem bazında ele alınması ve kesin algoritmanın PROPOSED olarak işaretlenmesi; MVP kullanıcısı için "kasiyer" yerine "işletme sahibi" terminolojisi uygulandı; hasarlı iade ürünlerinin satılabilir stoktan ayrı tutulması ve `FIRE_KAYIP` etkisi netleştirildi; `stock_movements` gerekçe zorunluluk matrisi tanımlandı; `barcode_history` tekillik ve yeniden kullanılamama kuralı açıklandı; ödeme yöntemi düzeltmesinin nakit/kart raporlarına etkisi belirlendi; haftalık raporların Pazartesi başlangıcı tanımlandı; iadelerin orijinal ödeme yöntemi cirosundan düşülmesi kurala bağlandı; geri yükleme sırasında bekleyen yerel kuyrukların silinmemesi ilkesi pekiştirildi; izlenebilirlik matrisi güncellendi. |
+| **v1.3** | 11 Kasım 2026 | Karar & Kapsam Uzlaştırması | Mevcut BR ID'leri korunarak proje kararları uzlaştırıldı: `BR-POS-05` (Askıya Alınan Sepetler / Parked Carts) `[PROPOSED / OPEN DECISION (OD-02)]` statüsüne çekildi; `BR-STK-04`..`BR-STK-10` (Fiziksel Stok Sayımı) MVP kapsam dışına (`[OUT_OF_SCOPE]`) alındı (`SAYIM_FARKI` Post-MVP olarak işaretlendi); `BR-PROD-07` alt kuruş yuvarlama politikası (`OD-01`) ve `BR-PROD-05` çevrimdışı bilinmeyen barkod akışı (`OD-03`) açık karar olarak işlendi; ana plan referansı `v1.4`'e güncellendi. |
+| **v1.4** | 11 Kasım 2026 | UX Kabulü & `OD-01..OD-04` Karar Kapanışı | Proje Sahibi kararıyla açık UX/ürün kararları kesinleştirildi (mevcut ID'ler ve tarihçe korundu): `OD-01` (`BR-PROD-07`: Half-Up alt kuruş yuvarlama, floating-point yasak, integer/decimal güvenli hesap, `12.50 TL`, dahili kuruş tamsayı); `OD-02` (`BR-POS-05` Parked Carts: MVP kapsam dışı / `[OUT_OF_SCOPE]`); `OD-03` (`BR-PROD-05`, `BR-SYNC-04`: yerel DB'de olmayan ürün offline oluşturulamaz ve offline satış sepetine eklenemez, ürün oluşturma Master Hub bağlantısı gerektirir, yerel DB'deki ürünler offline satılabilir); `OD-04` (sanal numpad opsiyonel, varsayılan kapalı). |
+| **v1.5** | 11 Kasım 2026 | `PaymentMethod` Sözleşme Standardizasyonu | `BR-PAY-01`, `BR-PAY-04` ve izlenebilirlik matrisine tüm katmanlar için bağlayıcı kanonik değerler (`'CASH'`, `'CARD'`) eklendi. Eski taslak yorumlarında ve test fixture'larında görülen `'CREDIT_CARD'` ve `'NAKIT'` ifadeleri yürürlükten kaldırıldı (*obsolete*); eksik veya geçersiz değerlerin backend'de sessizce `'CASH'` olarak yorumlanması yasaklandı. |
+| **v1.6** | 12 Kasım 2026 | Dokümantasyon Uzlaştırması & Legacy Outbox Recovery | `BR-PAY-01` ve `BR-SYNC-02` altına `b069d5b` ile tamamlanan **Legacy Outbox Recovery** (`updateAndRetryFailedOperation`, atomik SQLite transaction/rollback, FIFO bloklama & devamı) uyumu işlendi; Bölüm 12 izlenebilirlik matrisindeki çelişkili `BR-POS-05` `CONFIRMED` satırı `BR-POS-07` ile düzeltildi; Bölüm 13 kabul durumu ve `v1.4` plan referansı güncel repo durumuyla (UI/UX kabulü, `b069d5b` push edildi, Faz 1.2 POS henüz başlamadı) uzlaştırıldı. |
 
 ---
 
@@ -67,13 +71,14 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
   3. Fiyat değişikliği kural olarak ürün yönetim ekranından yapılır; geçmiş satış kayıtları kendi snapshot fiyatlarını aynen korur.
 - **Sepet İçi Fiyat Müdahalesi ile Uyum:** Ekmek satırı da genel sepet satırı fiyat müdahalesi kuralına (`BR-POS-11`) tabidir. İşletme sahibi dilerse sepet satırındaki ekmek birim fiyatını zorunlu gerekçe ve açık onayla değiştirebilir (ör. bayat ekmek indirimi veya ikram). Bu müdahale ana ürün kartındaki satış fiyatını kesinlikle değiştirmez; yalnızca o sepet ve fiş için geçerlidir.
 
-### `BR-PROD-05` [CONFIRMED] Bulunamayan Barkod İş Akışı ve Zorunlu Alan Doğrulaması
+### `BR-PROD-05` [CONFIRMED — OD-03 (11 Kasım 2026)] Bulunamayan Barkod İş Akışı ve Zorunlu Alan Doğrulaması
 - **Açıklama:** Kasada okutulan bir barkod yerel katalogda bulunamazsa sistem satışı durdurmaz; işletme sahibini kontrollü ürün kayıt akışına yönlendirir.
 - **İş Akışı:**
   1. "Ürün Bulunamadı" modalı açılır ve okutulan barkod otomatik dolu gelir.
   2. Cihazda aktif internet bağlantısı varsa arka planda Open Food Facts sorgusu yapılır.
   3. İnternet yoksa veya API ürünü bulamazsa manuel ürün kayıt formu açılır.
   4. **`BR-PROD-01` ile Tam Uyum:** Ürünün **Ürün Adı**, **Satış Fiyatı**, **Birim** ve **Kategori** alanlarının tamamı eksiksiz ve geçerli biçimde doldurulup yerel veritabanına başarıyla kaydedilmeden ürün sepete kesinlikle eklenemez. Yalnızca ad ve fiyat girilerek yarım/eksik ürün oluşturulması engellenir.
+- **`[CONFIRMED — OD-03 (11 Kasım 2026)]` Hub Çevrimdışıyken Bilinmeyen Barkod Davranışı:** Proje Sahibi kararıyla; yerel veritabanında bulunmayan ürün **offline olarak oluşturulamaz** ve bilinmeyen barkod **offline satış sepetine eklenemez** (geçici/muhtelif ürün olarak sepete ekleme yasaktır). Yeni ürün oluşturma işlemi Master Hub bağlantısı gerektirir. Yerel veritabanında kayıtlı bulunan ürünler ise offline satılabilir. *(Tarihçe: v1.3'te `OPEN DECISION — OD-03` statüsündeydi -> v1.4'te onaylandı.)*
 
 ### `BR-PROD-06` [CONFIRMED] Open Food Facts Öneri Mekanizması
 - **Açıklama:** Open Food Facts verileri yalnızca kullanıcı onayına sunulan bir öneridir; kesin işletme verisi değildir.
@@ -83,7 +88,7 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 - **Açıklama:** Desteklenen ölçü birimleri: Adet, kg, g, L, ml, paket, kutu.
 - **Kural:** Bir ürünün depodaki stok birimi ile reyondaki satış/fiyatlandırma birimi farklı olabilir (ör. stok birimi kg, satış fiyatı 100 g veya stok birimi Kutu, satış birimi Adet).
 - **Hassasiyet ve Para Kuralı:** Tartılı ve hacimli ürünlerde kesirli miktar (ondalıklı sayı) desteklenir. Fiyat hesaplamalarında floating-point (`double`) aritmetiği kesinlikle kullanılmaz; kuruş bazlı tamsayı veya sabit kesinlikli tür kullanılır. Tanımsız veya boyutlar arası keyfi birim dönüşümleri kesinlikle engellenir.
-- **`[PROPOSED]` Hassasiyet Parametreleri:** Miktar hassasiyeti (ör. tartıda 3 ondalık hane: 0.001 kg; fiyatta 2 ondalık hane: 0.01 TL) ve kesin yuvarlama fonksiyonu (Banker's rounding / Round Half Up) teknik tasarım aşamasında kodlanacaktır.
+- **`[CONFIRMED — OD-01 (11 Kasım 2026)]` Hassasiyet ve Alt Kuruş Yuvarlama Politikası:** Miktar hassasiyeti (ör. tartıda 3 ondalık hane: `0.001 kg`; fiyatta 2 ondalık hane: `0.01 TL`) ve alt kuruş yuvarlama yöntemi **`OD-01` Proje Sahibi Kararı** ile kesinleştirilmiştir: **Half-Up yuvarlama** uygulanır (`((unitPrice * quantity) + 500) ~/ 1000` vb.). Para hesaplamalarında floating-point (`double` / `float`) aritmetik kesinlikle yasaktır; hesaplamalar integer/decimal tabanlı güvenli yöntemle yürütülür, iç parasal veri tamsayı kuruş olarak saklanır ve kullanıcı arayüzü gösterim standardı `12.50 TL` olarak korunur. *(Tarihçe: v1.3'te `OPEN DECISION` statüsündeydi -> v1.4'te onaylandı.)*
 
 ### `BR-PROD-08` [CONFIRMED] Kutu / Paket Dönüşüm Çarpanı ve Boyut Uyumsuzluğu
 - **Açıklama:** Paket veya kutu dönüşüm çarpanı yalnızca gerçekten birim dönüşümü gerektiğinde ürün kartında tanımlanır; her ürün için zorunlu değildir.
@@ -151,10 +156,9 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 - **Açıklama:** Sepet ara toplamı ve genel toplamı her miktar değişiminde anında güncellenir.
 - **Kesinlik Kuralı:** Hesaplamalarda floating-point (`double`) aritmetiği kesinlikle yasaktır. Kuruş bazlı tamsayı (örn. 150.50 TL = 15050 kuruş) veya fixed-point kesinlik kullanılır.
 
-### `BR-POS-05` [CONFIRMED] Askıya Alınan Sepetler (Parked Carts)
-- **Açıklama:** Müşteri cüzdanını unuttuğunda veya reyonu terk ettiğinde işletme sahibi sepeti "Askıya Al" (Park Et) işlemiyle beklemeye alabilir ve sıradaki müşterinin satışına geçebilir.
-- **Kural:** Askıya alınan sepetler yerel veritabanında kalıcı olarak saklanır; uygulama kapansa veya cihaz yeniden başlatılsa dahi kaybolmaz. MVP için keyfî bir sepet sayısı üst sınırı uygulanmaz. Sepet tamamlanmadan stok miktarı kesinlikle düşürülmez.
-- **`[PROPOSED]` Sayfalama:** Bekleyen sepet listesinde performans için sayfalama mekanizması teknik tasarımda değerlendirilecektir.
+### `BR-POS-05` [OUT_OF_SCOPE — OD-02 (11 Kasım 2026)] Askıya Alınan Sepetler (Parked Carts)
+- **Statü Geçmişi & Kesinleşen Karar (`OD-02`, 11 Kasım 2026):** `v1.2`'de `[CONFIRMED]`, `v1.3`'te `[PROPOSED / OPEN DECISION (OD-02)]` olarak yer almış olup; **11 Kasım 2026 Proje Sahibi kararıyla MVP kapsamı dışına (`[OUT_OF_SCOPE]`) çıkarılmıştır**. Gelecek sürümlerde (`FUTURE SCOPE`) yeniden değerlendirilebilir; MVP ekranlarında onaylanmış özellik gibi sunulmaz ve `F4` kısayolu yer almaz. Kural ID'si (`BR-POS-05`) izlenebilirlik için korunmuştur.
+- **Tarihsel Tanım (Gelecek Sürüm Değerlendirmesi İçin):** İleride yeniden değerlendirilmek üzere tasarlanan konseptte müşteri bekletme sırasında sepet yerel taslak olarak saklanır ve sepet tamamlanmadan stok düşülmez; ancak ilk pilot/MVP sürümünde uygulanmayacaktır.
 
 ### `BR-POS-06` [CONFIRMED] Sepet Kilitleme (Cart Locking) ve Çoklu Cihaz
 - **Açıklama:** Bir sepet aynı anda yalnızca tek bir cihaz tarafından düzenlenebilir.
@@ -214,7 +218,9 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 ## 4. Modül 3: Ödeme, Kasa ve Para Üstü İş Kuralları (BR-PAY)
 
 ### `BR-PAY-01` [CONFIRMED] Satış Başına Tek Ödeme Yöntemi
-- **Açıklama:** MVP sürümünde satış başına tek bir ödeme yöntemi seçilir: **Nakit** veya **Kredi Kartı**.
+- **Açıklama:** MVP sürümünde satış başına tek bir ödeme yöntemi seçilir: **Nakit** (`'CASH'`) veya **Kredi Kartı** (`'CARD'`).
+- **Kanonik Tel ve Depolama Sözleşmesi (`[CONFIRMED]` — 11 Kasım 2026 / Commit `b069d5b`):** Tüm uygulama katmanlarında (`PaymentMethod` saf Dart modeli, Flutter istemcisi, SQLite/Drift `local_sales`, Outbox JSON yükü, SHA-256 hash girdisi ve Windows Master Hub `POST /api/v1/sales` doğrulaması) `payment_method` alanı yalnızca **`'CASH'`** veya **`'CARD'`** kanonik değerlerini kabul eder. Önceki taslak/test metinlerinde görülen `'CREDIT_CARD'` ve `'NAKIT'` dizgeleri yürürlükten kaldırılmıştır (*obsolete*). Eksik, `null` veya geçersiz değerler backend tarafından `400 ERR_INVALID_PAYMENT_METHOD` ile reddedilir ve asla sessizce `'CASH'` olarak yorumlanmaz.
+- **Legacy Outbox Kurtarma ve Idempotency Uyumu (12 Kasım 2026 — Commit `b069d5b`):** Hub'da önceden commit edilmiş eski `'CREDIT_CARD'` işlemlerinin birebir aynı payload ile ACK tekrarı `200` idempotent replay olarak korunur. İstemci Outbox kuyruğunda bekleyip `400 ERR_INVALID_PAYMENT_METHOD` ile `FAILED_PERMANENT` durumuna düşen eski `'CREDIT_CARD'` satışları ise yerel satış/stok hareketi silinmeden `ClientStorageRepository.updateAndRetryFailedOperation()` ile tek atomik SQLite transaction içinde `'CARD'`'a onarılır, SHA-256 `payload_hash` yeniden hesaplanır (`CREDIT_CARD -> CASH` aile değişimi ise engellenir) ve katı FIFO sırayla yeniden gönderilir.
 - **`[OUT_OF_SCOPE]`:** Parçalı / karma ödeme (bir kısmı nakit, bir kısmı kart) ve veresiye (müşteri cari defteri) MVP kapsamı dışındadır.
 
 ### `BR-PAY-02` [CONFIRMED] Nakit Satış ve Otomatik Para Üstü Hesabı
@@ -224,7 +230,7 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 - **Açıklama:** Alınan nakit tutar satış toplam tutarından az ise ($\text{Alınan Tutar} < \text{Toplam Tutar}$), "Tamamla" butonu kilitli kalır; satış kesinlikle tamamlanamaz.
 
 ### `BR-PAY-04` [CONFIRMED] Kredi Kartı Ödemesi ve Donanım Sınırı
-- **Açıklama:** Kredi kartı seçildiğinde satış tutarı sisteme "Kart ile Ödendi" olarak kaydedilir. Banka POS terminaline otomatik tutar gönderme MVP dışındadır (`OUT_OF_SCOPE`). Tutar harici banka POS cihazına gerekirse elle girilir.
+- **Açıklama:** Kredi kartı seçildiğinde satış tutarı sisteme kanonik `'CARD'` ödeme yöntemiyle ("Kart ile Ödendi") kaydedilir. Banka POS terminaline otomatik tutar gönderme MVP dışındadır (`OUT_OF_SCOPE`). Tutar harici banka POS cihazına gerekirse elle girilir.
 
 ### `BR-PAY-05` [CONFIRMED] Ödeme Yöntemi Düzeltme İşlemi ve Raporlama Etkisi
 - **Açıklama:** Yanlışlıkla "Nakit" yerine "Kart" (veya tam tersi) seçilerek satış kapatıldıysa, tamamlanmış geçmiş satış kaydı fiziksel olarak silinemez veya sessizce değiştirilemez.
@@ -249,29 +255,32 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 - **İş Kuralı:** Stok miktarı yetersiz veya sıfır olsa dahi işletme sahibi satışı tamamlayabilir; satış işlemi engellenmez. Ortaya çıkan stok uyuşmazlığı, negatif bakiye ve çakışmalar sisteme kaydedilir, denetim kayıtları (`audit_logs`) ve dashboard üzerinden izlenip raporlanır.
 - **Teknik Tasarım Şerhi (Aşama 6B-2):** Veritabanı seviyesinde pozitif stok CHECK kısıtının (`quantity >= 0`) bulunup bulunmayacağı, negatif değerlerin veri tabanında nasıl temsil edileceği ve SQLite/Drift veri tipi ayrıntıları teknik tasarım konusu olup kullanıcı iş kuralı değildir; Aşama 6B-2 kapsamında değerlendirilecektir.
 
-### `BR-STK-04` [CONFIRMED] Şube Başına Tek Aktif Stok Sayımı
-- **Açıklama:** Veri tutarsızlığını önlemek için bir şubede aynı anda yalnızca bir adet aktif (açık) sayım oturumu bulunabilir. Yeni bir sayım başlatılabilmesi için mevcut sayımın ya onaylanması ya da iptal edilmesi gerekir.
+> [!NOTE]
+> **Kapsam Uzlaştırma Notu (`BR-STK-04` .. `BR-STK-10` — v1.3, 11 Kasım 2026):** Aşağıdaki fiziksel stok sayım kuralları `v1.2`'de `[CONFIRMED]` olarak tanımlanmıştı; ancak pilot/MVP kapsam daraltması gereğince **Fiziksel Stok Sayımı modülü MVP kapsamı dışına (`[OUT_OF_SCOPE]` / Post-MVP)** alınmıştır. Kural ID'leri (`BR-STK-04`..`BR-STK-10`) ve özgün keşif gerekçeleri tarihsel izlenebilirlik için korunmaktadır. MVP stok ekranlarında yalnızca mevcut stok, eksi stok (`allow`), mal kabul/giriş-çıkış hareketleri ve `MANUEL_DUZELTME` / `FIRE_KAYIP` audit kayıtları yer alır.
 
-### `BR-STK-05` [CONFIRMED] Kalıcı Taslak Sayım ve Tam/Kısmi Sayım
-- **Açıklama:** Sayım kayıtları yerel veritabanında "DRAFT" durumunda kalıcı tutulur; uygulama kapatılıp açılsa da sayım kaldığı yerden devam eder. Hem tüm dükkânın sayıldığı "Tam Sayım", hem de reyon/kategori bazlı "Kısmi Sayım" desteklenir.
+### `BR-STK-04` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Şube Başına Tek Aktif Stok Sayımı
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Veri tutarsızlığını önlemek için bir şubede aynı anda yalnızca bir adet aktif (açık) sayım oturumu bulunabilir. Yeni bir sayım başlatılabilmesi için mevcut sayımın ya onaylanması ya da iptal edilmesi gerekir.
 
-### `BR-STK-06` [CONFIRMED] Sayım Sırasında Satışa Devam Edilebilmesi
-- **Açıklama:** Sayım oturumu açıkken kasada satış kesinlikle durdurulmaz. İşletme sahibi normal satış yapmaya devam eder; satış hareketleri arka planda veritabanına işlenir.
+### `BR-STK-05` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Kalıcı Taslak Sayım ve Tam/Kısmi Sayım
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Sayım kayıtları yerel veritabanında "DRAFT" durumunda kalıcı tutulur; uygulama kapatılıp açılsa da sayım kaldığı yerden devam eder. Hem tüm dükkânın sayıldığı "Tam Sayım", hem de reyon/kategori bazlı "Kısmi Sayım" desteklenir.
 
-### `BR-STK-07` [CONFIRMED] Çoklu Cihaz Sayım Kilidi (Tek Cihaz Düzenler)
-- **Açıklama:** Bir şubede açık olan taslak sayımı aynı anda yalnızca tek bir cihaz düzenleyebilir ve kalem girebilir. Diğer cihazlar taslak sayımı yalnızca salt okunur olarak inceler.
+### `BR-STK-06` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Sayım Sırasında Satışa Devam Edilebilmesi
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Sayım oturumu açıkken kasada satış kesinlikle durdurulmaz. İşletme sahibi normal satış yapmaya devam eder; satış hareketleri arka planda veritabanına işlenir.
+
+### `BR-STK-07` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Çoklu Cihaz Sayım Kilidi (Tek Cihaz Düzenler)
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Bir şubede açık olan taslak sayımı aynı anda yalnızca tek bir cihaz düzenleyebilir ve kalem girebilir. Diğer cihazlar taslak sayımı yalnızca salt okunur olarak inceler.
 - **`[PROPOSED]` Lease Modeli:** Sayım düzenleme yetkisinin sepet kilidine benzer bir heartbeat/lease mekanizmasıyla yönetilmesi teknik öneridir.
 
-### `BR-STK-08` [CONFIRMED] Sayım Onayında Bekleyen Senkronizasyon Kontrolü
-- **Açıklama:** Sayım onaylanmadan hemen önce sistem, diğer çevrimdışı cihazların henüz sunucuya aktarılmamış bekleyen stok hareketleri olup olmadığını kontrol eder. Bekleyen kuyruk varsa kullanıcı uyarılır.
+### `BR-STK-08` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Sayım Onayında Bekleyen Senkronizasyon Kontrolü
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Sayım onaylanmadan hemen önce sistem, diğer çevrimdışı cihazların henüz sunucuya aktarılmamış bekleyen stok hareketleri olup olmadığını kontrol eder. Bekleyen kuyruk varsa kullanıcı uyarılır.
 
-### `BR-STK-09` [CONFIRMED] Ara Stok Hareketlerinin Matematiksel Uzlaştırılması
-- **Açıklama:** Fiziksel sayımın zamanı ürün ve sayım kalemi bazında ele alınır. Bir ürünün rafta fiilen sayıldığı an ile sayım oturumunun onaylandığı an arasında kasada gerçekleşen satışlar ve mal girişleri formüle doğru biçimde katılarak uzlaştırılır:
+### `BR-STK-09` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Ara Stok Hareketlerinin Matematiksel Uzlaştırılması
+- **Açıklama:** *(Post-MVP Sayım Modülü)* Fiziksel sayımın zamanı ürün ve sayım kalemi bazında ele alınır. Bir ürünün rafta fiilen sayıldığı an ile sayım oturumunun onaylandığı an arasında kasada gerçekleşen satışlar ve mal girişleri formüle doğru biçimde katılarak uzlaştırılır:
   $$\text{Nihai Stok} = \text{Fiziksel Sayılan} - \text{Sayım Sonrası Satışlar} + \text{Sayım Sonrası Mal Girişleri}$$
-- **`[PROPOSED]` Kesin Uzlaştırma Algoritması:** Ürün bazlı sayım zaman damgasının (`counted_at`) kaydedilmesi, sayım sırasındaki ara hareketlerin mikro düzeyde ayrıştırılması ve eşzamanlı transaction algoritması teknik tasarım aşamasında hazırlanacaktır.
+- **`[PROPOSED]` Kesin Uzlaştırma Algoritması:** Ürün bazlı sayım zaman damgasının (`counted_at`) kaydedilmesi, sayım sırasındaki ara hareketlerin mikro düzeyde ayrıştırılması ve eşzamanlı transaction algoritması gelecek sayım fazı teknik tasarım aşamasında hazırlanacaktır.
 
-### `BR-STK-10` [CONFIRMED] Sayım Onayı, İptali ve Değiştirilemezlik
-- **Açıklama:**
+### `BR-STK-10` [OUT_OF_SCOPE (MVP Dışı — FUTURE SCOPE)] Sayım Onayı, İptali ve Değiştirilemezlik
+- **Açıklama:** *(Post-MVP Sayım Modülü)*
   1. Onaylanan ("COMPLETED") bir sayım belgesi geriye dönük olarak kesinlikle düzenlenemez veya silinemez. Sayım farkları `stock_movements` tablosuna "SAYIM_FARKI" tipiyle otomatik düzeltme hareketi olarak kaydedilir.
   2. İşletme sahibi taslak sayımı dilediği zaman iptal edebilir ("CANCELLED"). İptal edilen taslak sayım stok miktarlarında kesinlikle hiçbir değişiklik yapmaz.
 
@@ -288,7 +297,7 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 | `MUSTERI_IADESI` | Müşteri ürün iadesinde satılabilir ürünün stoğa girişi | **Gerekçe ZORUNLU** |
 | `FIRE_KAYIP` | Kırılan, bozulan, SKT'si geçen veya hasarlı iade edilen mallar | **Gerekçe ZORUNLU** |
 | `MANUEL_DUZELTME` | Sayım dışı tekil stok miktar düzeltmesi | **Gerekçe ZORUNLU** |
-| `SAYIM_FARKI` | Onaylanan sayım sonucu sistem stoğu fark düzeltmesi | **Otomatik** (`count_session_id` referansı yazılır) |
+| `SAYIM_FARKI` | *(OUT_OF_SCOPE — Post-MVP Sayım Fazı)* Onaylanan sayım sonucu sistem stoğu fark düzeltmesi | **Otomatik** (`count_session_id` referansı yazılır; MVP'de devre dışı) |
 
 - **Zorunlu Alanlar:** Her stok hareketinde Tarih/Saat (UTC + yerel), Kullanıcı (`user_id`), Cihaz (`device_id`), Ürün (`product_id`), Miktar (+ / -), Hareket Türü (`movement_type`) ve Açıklama/Gerekçe kaydedilir.
 - **Değiştirilemezlik:** Geçmiş stok hareketleri veritabanından sessizce silinemez veya geriye dönük değiştirilemez.
@@ -298,17 +307,18 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 ## 6. Modül 5: Çevrimdışı Çalışma ve Senkronizasyon İş Kuralları (BR-SYNC)
 
 ### `BR-SYNC-01` [CONFIRMED] Offline-First Yerel Bütünlük
-- **Açıklama:** İnternet bağlantısı tamamen kesik olsa dahi ürün arama, sepete ekleme, satış tamamlama, eksi stok satışı, taslak sayım ve raporlama yerel SQLite veritabanında kesintisiz çalışır.
+- **Açıklama:** İnternet bağlantısı tamamen kesik olsa dahi ürün arama, sepete ekleme, satış tamamlama, eksi stok satışı ve temel yerel raporlama yerel SQLite veritabanında kesintisiz çalışır *(taslak fiziksel sayım modülü MVP dışıdır — `BR-STK-05`)* .
 
-### `BR-SYNC-02` [CONFIRMED] Outbox Kuyruğu (`sync_operations`)
-- **Açıklama:** Çevrimdışıyken yapılan her işlem atomik transaction içinde yerel `sync_operations` tablosuna yazılır. Yerel ağ (LAN) bağlantısı sağlandığında kuyruk arka planda otomatik olarak Windows Local Master Hub API'sine aktarılır; internet bağlantısı zorunlu değildir.
+### `BR-SYNC-02` [CONFIRMED] Outbox Kuyruğu (`sync_operations` / `outbox_operations`)
+- **Açıklama:** Çevrimdışıyken yapılan her işlem atomik transaction içinde yerel Outbox (`sync_operations` / pilot istemcide `outbox_operations`) tablosuna yazılır. Yerel ağ (LAN) bağlantısı sağlandığında kuyruk katı FIFO (`client_seq ASC`) sırayla Windows Local Master Hub API'sine aktarılır; internet bağlantısı zorunlu değildir. Kalıcı hata (`FAILED_PERMANENT`) alan bir kayıt (ör. eski `'CREDIT_CARD'` sözleşmesi) yerel satışı silmeden sonraki kayıtların gönderimini durdurur; `updateAndRetryFailedOperation()` ile atomik transaction içinde onarılıp SHA-256 hash yenilendiğinde FIFO kaldığı sıradan devam eder.
 
 ### `BR-SYNC-03` [CONFIRMED] Idempotency Garantisi (`idempotency_key`)
 - **Açıklama:** Her satış ve stok işlemi istemci tarafından üretilen benzersiz bir idempotency anahtarı taşır. Ağ kesintisi veya mükerrer istek gönderiminde sunucu aynı işlemi ikinci kez işlemez; mükerrer stok düşümü engellenir.
 - **`[PROPOSED]` Format:** Anahtar formatı olarak UUIDv4 kullanılması teknik tasarım tercihidir.
 
-### `BR-SYNC-04` [CONFIRMED] Çevrimdışı Ürün Ekleme ve Barkod Tekilliği
-- **Açıklama:** İnternet yokken yerel veritabanında yeni ürün açılabilir. Cihaz internete bağlandığında sunucuda tenant düzeyinde barkod tekilliği kontrol edilir. Çakışan ürünler sistem tarafından otomatik olarak birleştirilmez veya ezilmez.
+### `BR-SYNC-04` [CONFIRMED — OD-03 İle Uzlaştırıldı] Ürün Ekleme Hub Zorunluluğu ve Barkod Tekilliği
+- **Kesinleşen Karar (`OD-03`, 11 Kasım 2026):** Pilot Windows Master Hub mimarisinde **ürün oluşturma işlemi Master Hub bağlantısı gerektirir**. Yerel veritabanında bulunmayan bir ürün offline olarak oluşturulamaz ve bilinmeyen barkod offline satış sepetine eklenemez. Yerel veritabanında kayıtlı ürünler ise offline satılabilir.
+- **Tarihsel Not & Çoklu Cihaz Barkod Tekilliği:** Önceki `v1.2` taslağında *"internet yokken yerel veritabanında yeni ürün açılabilir"* hükmü yer almış olup **`OD-03` Proje Sahibi kararıyla pilot kapsamı için yürürlükten kaldırılmıştır**. İleride Hub veya çevrimdışı senkronize edilen yetkili işlemlerden kaynaklı çakışmalarda sunucu tenant düzeyinde barkod tekilliği kontrol edilir ve çakışan kayıtlar sessizce birleştirilmez veya ezilmez.
 
 ### `BR-SYNC-05` [CONFIRMED] Çevrimdışı Fiyat Değişikliği ve Çakışma Koruma
 - **Açıklama:** Fiyat değişikliği yerel cihazda anında kaydedilir ve kuyruğa eklenir. Senkronizasyon gerçekleşene kadar diğer cihazlar kendi yerel fiyatını gösterebilir.
@@ -435,12 +445,14 @@ Aşağıdaki özellikler ilk sürümün (MVP) kapsamı dışındadır:
 10. Şubeye özel farklı fiyatlandırma.
 11. Push bildirimleri.
 12. Gider yönetimi ve net kâr hesabı.
+13. Fiziksel stok sayım oturumları ve sayım farkı uzlaştırma modülü (`BR-STK-04` .. `BR-STK-10` — `OUT_OF_SCOPE` / Post-MVP).
+14. *(Not — `OD-01..OD-04` Kapanış Özeti, 11 Kasım 2026)* Sepeti Askıya Alma / Parked Carts (`BR-POS-05` / `OD-02`) **MVP kapsamı dışındadır** (`OUT_OF_SCOPE`). Alt Kuruş Yuvarlama (`OD-01` -> Half-Up), Hub Çevrimdışı Bilinmeyen Barkod (`OD-03` -> offline ürün oluşturulamaz ve bilinmeyen barkod offline sepete eklenemez) ve Sanal Numpad (`OD-04` -> opsiyonel, varsayılan kapalı) kararları Proje Sahibi tarafından onaylanmıştır. `B-2` (Root CA Pinning) ve `B-3` (Secure Token Storage) ise mimari kararı kesinleşmiş pilot uygulama backlog kalemleridir.
 
 ---
 
 ## 12. Keşif Dokümanı ile İzlenebilirlik Matrisi (Traceability Matrix)
 
-Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Github/market-pos/docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md) (v1.3) belgesindeki her bir gereksinimin işbu şartnamedeki (v1.2) karşılığını doğrulamaktadır:
+Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Github/market-pos/docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md) (v1.3) belgesindeki her bir gereksinimin işbu şartnamedeki (v1.6) karşılığını doğrulamaktadır:
 
 | Keşif Dokümanı Bölümü | Konu / İş Gereksinimi | İlgili BR Kodu | Kural Durumu | Şartname Bölümü | Not / Doğrulama Durumu |
 |---|---|---|---|---|---|
@@ -452,25 +464,25 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 | **Bölüm 4.1** | Önerilen 5.000 satır sınırı | `BR-PROD-09` | `PROPOSED` | Bölüm 2 | Performans testi bekliyor |
 | **Bölüm 4.2** | Desteklenen birimler, stok-fiyat birim ayrımı | `BR-PROD-07` | `CONFIRMED` | Bölüm 2 | Depo vs reyon birimi ayrıldı |
 | **Bölüm 4.2** | Paket/kutu dönüşüm çarpanı ve farklı paket miktarları | `BR-PROD-02`, `BR-PROD-08` | `CONFIRMED` | Bölüm 2 | Farklı paket miktarları ayrı ürün |
-| **Bölüm 4.2** | Birim hassasiyeti ve yuvarlama kural seti | `BR-PROD-07` | `PROPOSED` | Bölüm 2 | Teknik tasarıma devredildi |
+| **Bölüm 4.2** | Birim hassasiyeti ve alt kuruş yuvarlama kural seti | `BR-PROD-07` (`OD-01`) | `CONFIRMED` | Bölüm 2 | **11 Kasım 2026 (`OD-01`):** Half-Up yuvarlama onaylandı; floating-point yasak, integer/decimal hesap, `12.50 TL`, dahili kuruş tamsayı |
 | **Bölüm 4.3** | Ekmek hızlı satış tuşu (barkodsuz) | `BR-PROD-04` | `CONFIRMED` | Bölüm 2 | `product_barcodes` ilişkisizliği ile |
-| **Bölüm 4.3** | Bulunamayan barkod zorunlu kayıt akışı | `BR-PROD-05` | `CONFIRMED` | Bölüm 2 | Ad, birim, kategori, fiyat zorunlu |
+| **Bölüm 4.3** | Bulunamayan barkod zorunlu kayıt akışı (çevrimdışı: `OD-03`) | `BR-PROD-05`, `BR-SYNC-04` | `CONFIRMED` | Bölüm 2 | **11 Kasım 2026 (`OD-03`):** Ad, birim, kategori, fiyat zorunlu; offline ürün oluşturulamaz ve bilinmeyen barkod offline sepete eklenemez (Hub gerekir; yerel katalogdakiler offline satılabilir) |
 | **Bölüm 4.3** | Open Food Facts öneri mekanizması | `BR-PROD-06` | `CONFIRMED` | Bölüm 2 | Fiyat/stok API'den gelmez |
 | **Bölüm 4.4** | Eksi stok satış izni, uyarı ve negatif stok takibi | `BR-STK-02` | `CONFIRMED` | Bölüm 5 | İşletme onaylı eksi stok |
 | **Bölüm 4.4** | Eksi stokta satışın engellenmemesi ve uyuşmazlık takibi | `BR-STK-03` | `CONFIRMED` | Bölüm 5 | Eksi stok iş kuralı; DDL kısıtı Aşama 6B-2 |
-| **Bölüm 4.4** | Şube başına tek aktif sayım oturumu | `BR-STK-04` | `CONFIRMED` | Bölüm 5 | Çakışma önleyici kural |
-| **Bölüm 4.4** | Kalıcı taslak sayım, tam/kısmi sayım | `BR-STK-05` | `CONFIRMED` | Bölüm 5 | DRAFT durumunda saklanır |
-| **Bölüm 4.4** | Sayım anında kasada satışa devam edebilme | `BR-STK-06` | `CONFIRMED` | Bölüm 5 | Kasa durdurulamaz |
-| **Bölüm 4.4** | Sayımda tek cihaz düzenleme kilidi | `BR-STK-07` | `CONFIRMED` | Bölüm 5 | Diğerleri salt okunur inceler |
-| **Bölüm 4.4** | Sayım onayı öncesi bekleyen sync kontrolü | `BR-STK-08` | `CONFIRMED` | Bölüm 5 | Kullanıcı uyarılır |
-| **Bölüm 4.4** | Ara stok hareketlerinin matematiksel uzlaştırılması | `BR-STK-09` | `CONFIRMED` | Bölüm 5 | Ürün bazlı zaman damgası; algoritma PROPOSED |
-| **Bölüm 4.4** | Sayım onayı değiştirilemezliği ve taslak iptali | `BR-STK-10` | `CONFIRMED` | Bölüm 5 | COMPLETED değiştirilemez, taslak iptal edilir |
-| **Bölüm 4.4** | 9 farklı stok hareket türü ve gerekçe matrisi | `BR-STK-11` | `CONFIRMED` | Bölüm 5 | Gerekçe zorunluluk matrisi netleşti |
+| **Bölüm 4.4** | Şube başına tek aktif sayım oturumu | `BR-STK-04` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Kalıcı taslak sayım, tam/kısmi sayım | `BR-STK-05` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Sayım anında kasada satışa devam edebilme | `BR-STK-06` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Sayımda tek cihaz düzenleme kilidi | `BR-STK-07` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Sayım onayı öncesi bekleyen sync kontrolü | `BR-STK-08` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Ara stok hareketlerinin matematiksel uzlaştırılması | `BR-STK-09` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | Sayım onayı değiştirilemezliği ve taslak iptali | `BR-STK-10` | `OUT_OF_SCOPE` | Bölüm 5 | v1.3: Fiziksel sayım Post-MVP / FUTURE SCOPE |
+| **Bölüm 4.4** | 9 farklı stok hareket türü ve gerekçe matrisi | `BR-STK-11` | `CONFIRMED` | Bölüm 5 | `SAYIM_FARKI` Post-MVP; diğer 8 hareket aktif |
 | **Bölüm 4.5** | Sepet kilitleme (tek cihaz düzenler, diğerleri salt okunur) | `BR-POS-06` | `CONFIRMED` | Bölüm 3 | Kilit devri desteklenir |
 | **Bölüm 4.5** | Sepet kilidi 30 sn heartbeat, 2 dk timeout | `BR-POS-06` | `PROPOSED` | Bölüm 3 | Ağ/batarya testi bekliyor |
-| **Bölüm 4.5** | Askıya alınan sepet kalıcılığı ve limitsiz sepet mantığı | `BR-POS-05` | `CONFIRMED` | Bölüm 3 | Sayfalama PROPOSED |
+| **Bölüm 4.5** | Askıya alınan sepet (Parked Carts) | `BR-POS-05` (`OD-02`) | `OUT_OF_SCOPE` | Bölüm 3 | **11 Kasım 2026 (`OD-02`):** Proje Sahibi kararıyla MVP kapsamı dışındadır |
 | **Bölüm 4.5** | Sepet snapshot'ı ve ekmek dahil manuel fiyat müdahalesi | `BR-POS-11` | `CONFIRMED` | Bölüm 3 | Gerekçe ve onay zorunlu |
-| **Bölüm 4.5** | Satış tamamlanmadan stok düşmeme kuralı | `BR-POS-05`, `BR-POS-07` | `CONFIRMED` | Bölüm 3 | Atomik transaction şartı |
+| **Bölüm 4.5** | Satış tamamlanmadan stok düşmeme kuralı | `BR-POS-07` | `CONFIRMED` | Bölüm 3 | Atomik transaction şartı (`BR-POS-05` `OD-02` ile `OUT_OF_SCOPE`) |
 | **Bölüm 4.6** | Çevrimdışı fiyat değişikliği ve anında yerel kayıt | `BR-SYNC-05` | `CONFIRMED` | Bölüm 6 | Kuyruğa yazılır |
 | **Bölüm 4.6** | Fiyat çakışmasında iki değerin korunması | `BR-SYNC-05` | `CONFIRMED` | Bölüm 6 | Sessizce ezilmez |
 | **Bölüm 4.6** | Fiyat çakışmasında işletme sahibi kararı ve audit | `BR-SYNC-05` | `CONFIRMED` | Bölüm 6 | Karar audit_logs'a yazılır |
@@ -488,7 +500,7 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 | **Bölüm 4.8** | Geri yükleme sonrası yerel bekleyen işlemlerin korunması | `BR-BAK-06` | `PROPOSED` | Bölüm 9 | Kuyruklar silinmez, uzlaştırılır |
 | **Bölüm 4.9** | Ürün görseli isteğe bağlılığı, PC/mobil yükleme | `BR-PROD-12` | `CONFIRMED` | Bölüm 2 | Görsel satışı engellemez |
 | **Bölüm 4.9** | Görsel boyutlandırma (1200x1200 px, ~1 MB, JPEG/WebP) | `BR-PROD-12` | `PROPOSED` | Bölüm 2 | İstemci sıkıştırma önerisi |
-| **Bölüm 4.10** | Satış başına tek ödeme (Nakit veya Kart) | `BR-PAY-01` | `CONFIRMED` | Bölüm 4 | Karma ödeme ve veresiye yok |
+| **Bölüm 4.10** | Satış başına tek ödeme: yalnızca kanonik `'CASH'` veya `'CARD'` sözleşmesi (eski `'CREDIT_CARD'`/`'NAKIT'` *obsolete*, sessiz fallback yok) | `BR-PAY-01` | `CONFIRMED` | Bölüm 4 | Karma ödeme ve veresiye yok |
 | **Bölüm 4.10** | Nakit para üstü hesabı ve eksik ödemede satış engeli | `BR-PAY-02`, `BR-PAY-03` | `CONFIRMED` | Bölüm 4 | Otomatik para üstü |
 | **Bölüm 4.10** | Banka POS cihaz entegrasyonu dışılığı | `BR-PAY-04` | `CONFIRMED` / `OUT_OF_SCOPE` | Bölüm 4 | Donanıma tutar gitmez |
 | **Bölüm 4.10** | Ödeme yöntemi düzeltme işlemi ve audit kaydı | `BR-PAY-05` | `CONFIRMED` | Bölüm 4 | Ciroya doğrudan yansır |
@@ -511,8 +523,8 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 
 ---
 
-## 13. Faz 0 Kabul Durumu ve Sonraki Adımlar
+## 13. Mevcut Kabul Durumu ve Sonraki Adımlar
 
-- Bu şartname `MARKET_POS_AI_STUDIO_BUILD_PLANI.md` (v1.2.2) ve `docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md` (v1.3) ile tam tutarlıdır.
-- İş kuralları şartnamesi v1.2 düzeyinde kesinleştirilmiştir.
-- **Faz 0 ve Faz 1.1 tamamlanmıştır.** Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi) uygulamasına geçmeden önce aktif DT-01 alt aşamalarının tamamlanması ve kullanıcıdan açık onay alınması esastır.
+- Bu şartname [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) (**v1.4**) ve [`PHASE_0_BUSINESS_DISCOVERY.md`](./PHASE_0_BUSINESS_DISCOVERY.md) (**v1.3**) ile tam tutarlıdır.
+- İş kuralları şartnamesi **v1.6** düzeyinde güncellenmiştir (`OD-01`..`OD-04`, `'CASH'`/`'CARD'` `PaymentMethod` sözleşmesi ve Legacy Outbox Recovery `b069d5b` uyumlu).
+- **Faz 0, Faz 1.1, DT-01.1..DT-01.4, UI/UX Tasarım Teslimatı (Proje Sahibi Onaylı) ve `PaymentMethod` + Legacy Outbox Recovery (`b069d5b`) tamamlanmıştır.** **Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi) POS geliştirmesi henüz başlamamıştır**; uygulama kodlamasına geçmeden önce Proje Sahibinin açık başlatma onayı alınacaktır.
