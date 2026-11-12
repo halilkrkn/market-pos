@@ -16,10 +16,21 @@ class CartItemInput {
   /// Milli-birim cinsinden miktar (Örn: 500 = 0.500 kg, 1250 = 1.250 L, 1000 = 1 adet)
   final int quantity;
 
+  /// Sepet oluşturulduğu andaki beklenen birim fiyat (kuruş cinsinden, opsiyonel).
+  final int? expectedUnitPrice;
+
+  /// Sepet oluşturulduğu andaki beklenen fiyat sürüm kimliği (opsiyonel).
+  final String? expectedPriceVersionId;
+
   CartItemInput({
     required this.productId,
     required this.quantity,
+    this.expectedUnitPrice,
+    this.expectedPriceVersionId,
   }) {
+    if (expectedUnitPrice != null && expectedUnitPrice! < 0) {
+      throw ArgumentError('Beklenen birim fiyat negatif olamaz: $expectedUnitPrice');
+    }
     if (productId.isEmpty) {
       throw ArgumentError('Ürün kimliği (productId) boş olamaz.');
     }
@@ -32,26 +43,51 @@ class CartItemInput {
   }
 
   /// Tam adet/birim bazlı oluşturucu (Örn: 2 adet ekmek -> quantity = 2000)
-  factory CartItemInput.units(String productId, int count) {
+  factory CartItemInput.units(
+    String productId,
+    int count, {
+    int? expectedUnitPrice,
+    String? expectedPriceVersionId,
+  }) {
     if (count <= 0) throw ArgumentError('Adet 0 veya negatif olamaz: $count');
     if (count > (maxQuantity ~/ scale)) {
       throw ArgumentError('Aşırı büyük adet miktarı: $count');
     }
-    return CartItemInput(productId: productId, quantity: count * scale);
+    return CartItemInput(
+      productId: productId,
+      quantity: count * scale,
+      expectedUnitPrice: expectedUnitPrice,
+      expectedPriceVersionId: expectedPriceVersionId,
+    );
   }
 
   /// Kesirli miktar için doğrudan milli-birim oluşturucu (Örn: 500 gram -> milliUnits = 500)
-  factory CartItemInput.fractional(String productId, int milliUnits) {
+  factory CartItemInput.fractional(
+    String productId,
+    int milliUnits, {
+    int? expectedUnitPrice,
+    String? expectedPriceVersionId,
+  }) {
     if (milliUnits <= 0) throw ArgumentError('Milli-birim 0 veya negatif olamaz: $milliUnits');
     if (milliUnits > maxQuantity) {
       throw ArgumentError('Aşırı büyük milli-birim miktarı: $milliUnits');
     }
-    return CartItemInput(productId: productId, quantity: milliUnits);
+    return CartItemInput(
+      productId: productId,
+      quantity: milliUnits,
+      expectedUnitPrice: expectedUnitPrice,
+      expectedPriceVersionId: expectedPriceVersionId,
+    );
   }
 
   /// Ondalık metin değerinden deterministik dönüştürücü (Örn: "0.1" -> 100, "0.3" -> 300, "1.25" -> 1250, "999.999" -> 999999)
   /// Floating-point aritmetiği KESİNLİKLE KULLANILMAZ.
-  factory CartItemInput.fromDecimalString(String productId, String decimalText) {
+  factory CartItemInput.fromDecimalString(
+    String productId,
+    String decimalText, {
+    int? expectedUnitPrice,
+    String? expectedPriceVersionId,
+  }) {
     final raw = decimalText.trim();
     if (raw.isEmpty) {
       throw ArgumentError('Miktar metni boş olamaz.');
@@ -89,7 +125,12 @@ class CartItemInput {
       throw ArgumentError('Miktar izin verilen üst sınırı aşıyor: "$decimalText"');
     }
 
-    return CartItemInput(productId: productId, quantity: milliUnits);
+    return CartItemInput(
+      productId: productId,
+      quantity: milliUnits,
+      expectedUnitPrice: expectedUnitPrice,
+      expectedPriceVersionId: expectedPriceVersionId,
+    );
   }
 
   Map<String, dynamic> toJson() => {

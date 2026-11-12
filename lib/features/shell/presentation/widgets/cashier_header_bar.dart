@@ -38,34 +38,43 @@ class CashierHeaderBar extends ConsumerWidget {
             ),
           ),
           const SizedBox(width: 14),
-          Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'MARKET MANAGEMENT SYSTEM',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  color: AppTheme.textMainLight,
-                  letterSpacing: 0.5,
+          Expanded(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'MARKET MANAGEMENT SYSTEM',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: AppTheme.textMainLight,
+                    letterSpacing: 0.5,
+                  ),
                 ),
-              ),
-              Text(
-                'Windows Masaüstü Kasa İstemcisi • ${status.deviceId}',
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppTheme.textMutedLight,
-                  fontWeight: FontWeight.w500,
+                Text(
+                  'Windows Masaüstü Kasa İstemcisi • ${status.deviceId}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppTheme.textMutedLight,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
-          const Spacer(),
+          const SizedBox(width: 12),
 
           // Sağ: Hub Bağlantı Rozeti ve Yenileme Butonu
-          StatusBadge(state: status.backendState),
-          const SizedBox(width: 16),
+          Flexible(
+            fit: FlexFit.loose,
+            child: StatusBadge(state: status.backendState),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             tooltip: 'Sistem Durumunu Yenile',
             icon: const Icon(Icons.refresh, color: AppTheme.textMutedLight),

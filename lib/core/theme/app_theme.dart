@@ -19,6 +19,16 @@ class AppTheme {
   static const Color statusOffline = Color(0xFFB91C1C); // Red 700 (Çevrimdışı / Hata)
   static const Color statusWarning = Color(0xFFB45309); // Amber 700 (Draining / Beklemede)
 
+  // POS Aksiyon & Semantik Yüksek Kontrast Renkleri (UX Handoff Uyumlu)
+  static const Color posCashAction = Color(0xFF047857);
+  static const Color posCashBg = Color(0xFFECFDF5);
+  static const Color posCashText = Color(0xFF166534);
+  static const Color posWarningBg = Color(0xFFFFFBEB);
+  static const Color posWarningText = Color(0xFF92400E);
+  static const Color posDangerBg = Color(0xFFFEF2F2);
+  static const Color posDangerText = Color(0xFF991B1B);
+  static const Color posInfoBg = Color(0xFFEFF6FF);
+
   // Sayısal / Monospace Font Özelliği (Tabular Figures)
   static const List<FontFeature> tabularFiguresFeature = [
     FontFeature.tabularFigures(),

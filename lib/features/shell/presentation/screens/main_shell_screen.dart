@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../diagnostics/presentation/screens/diagnostics_view.dart';
+import '../../../pos/presentation/screens/pos_screen.dart';
 import '../widgets/cashier_header_bar.dart';
 
 /// MARKET MMS - Windows Masaüstü Ana İskelet Ekranı (Main Shell)
@@ -13,7 +14,7 @@ class MainShellScreen extends StatefulWidget {
 }
 
 class _MainShellScreenState extends State<MainShellScreen> {
-  int _selectedIndex = 3; // Faz 1.1'de Sistem Tanılama varsayılan aktiftir
+  int _selectedIndex = 0; // Faz 1.2 itibarıyla Kasa (Satış) varsayılan açılış ekranıdır
 
   @override
   Widget build(BuildContext context) {
@@ -99,24 +100,19 @@ class _MainShellScreenState extends State<MainShellScreen> {
   Widget _buildContent(int index) {
     switch (index) {
       case 0:
-        return _buildModulePlaceholder(
-          title: 'Kasa / Satış Modülü (POS)',
-          phase: 'Faz 1.2 — Satış Ekranı & Sepet Yönetimi',
-          description: 'Bu modül Faz 1.2 kapsamında barkod okuyucu, dokunmatik sepet, kesirli miktar ve ödeme dialogu ile aktif edilecektir.',
-          icon: Icons.shopping_cart_outlined,
-        );
+        return const PosScreen();
       case 1:
         return _buildModulePlaceholder(
           title: 'Ürün ve Stok Yönetimi',
-          phase: 'Faz 2 — Ürün & Kategori Yönetimi',
-          description: 'Merkezi Shelf API üzerinden ürün ekleme, fiyat güncelleme, stok sayımı ve birim dönüşümü işlemleri Faz 2\'de gelecektir.',
+          phase: 'Sonraki Fazlar — Ürün CRUD & Stok Hareketleri',
+          description: 'Merkezi Master Hub API üzerinden ürün ekleme, fiyat güncelleme, stok hareketleri ve birim dönüşümü işlemleri sonraki fazlarda eklenecektir.',
           icon: Icons.inventory_2_outlined,
         );
       case 2:
         return _buildModulePlaceholder(
           title: 'Kasa ve Finansal Raporlar',
-          phase: 'Faz 3 — Raporlama & Dashboard',
-          description: 'Gün sonu Z-Raporu, KDV dökümü, nakit/kart dağılımı ve kârlılık metrikleri Faz 3\'te eklenecektir.',
+          phase: 'Sonraki Fazlar — Satış Geçmişi & Dashboard',
+          description: 'Nakit/kart satış dağılımı, geçmiş fiş inceleme, iade ve özet kârlılık metrikleri sonraki fazlarda eklenecektir.',
           icon: Icons.bar_chart_outlined,
         );
       case 3:
@@ -193,27 +189,59 @@ class _MainShellScreenState extends State<MainShellScreen> {
   }
 
   Widget _buildShortcutFooter(BuildContext context) {
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 20),
-      decoration: const BoxDecoration(
-        color: AppTheme.surfaceLight,
-        border: Border(top: BorderSide(color: AppTheme.borderSubtle, width: 1)),
-      ),
-      child: const Row(
-        children: [
-          _ShortcutItem(keyLabel: 'F1', text: 'Yardım'),
-          _ShortcutItem(keyLabel: 'F2', text: 'Miktar'),
-          _ShortcutItem(keyLabel: 'F9', text: 'Kart'),
-          _ShortcutItem(keyLabel: 'F10', text: 'Nakit'),
-          _ShortcutItem(keyLabel: 'Esc', text: 'İptal'),
-          Spacer(),
-          Text(
-            'MARKET MMS v1.0.0 • On-Premises Local Master Hub Mimarisi',
-            style: TextStyle(fontSize: 11, color: AppTheme.textMutedLight),
+    const brandText = Text(
+      'MARKET MMS v1.0.0 • On-Premises Local Master Hub Mimarisi',
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(fontSize: 11, color: AppTheme.textMutedLight),
+    );
+    const shortcutItems = [
+      _ShortcutItem(keyLabel: 'F1', text: 'Yardım'),
+      _ShortcutItem(keyLabel: 'F2', text: 'Miktar'),
+      _ShortcutItem(keyLabel: 'F9', text: 'Kart'),
+      _ShortcutItem(keyLabel: 'F10', text: 'Nakit'),
+      _ShortcutItem(keyLabel: 'Esc', text: 'İptal'),
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth >= 900) {
+          return Container(
+            height: 32,
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            decoration: const BoxDecoration(
+              color: AppTheme.surfaceLight,
+              border: Border(top: BorderSide(color: AppTheme.borderSubtle, width: 1)),
+            ),
+            child: const Row(
+              children: [
+                ...shortcutItems,
+                Spacer(),
+                brandText,
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          constraints: const BoxConstraints(minHeight: 32),
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: const BoxDecoration(
+            color: AppTheme.surfaceLight,
+            border: Border(top: BorderSide(color: AppTheme.borderSubtle, width: 1)),
           ),
-        ],
-      ),
+          child: Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: const [
+              ...shortcutItems,
+              brandText,
+            ],
+          ),
+        );
+      },
     );
   }
 }

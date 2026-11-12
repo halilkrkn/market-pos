@@ -1,15 +1,28 @@
 import 'dart:convert';
+import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:drift/drift.dart';
 
 import 'client_database.dart';
 import '../models/cart_item_input.dart';
 import '../models/payment_method.dart';
+import '../models/price_changed_exception.dart';
 import '../models/sale_transaction_result.dart';
 
 class ClientStorageRepository {
   static const int quantityScale = CartItemInput.scale; // 1000 (3 ondalık hane ölçeği)
   static const int _maxSafeInt = 9223372036854775807; // 2^63 - 1 (64-bit signed int max)
+  static const int _minSafeInt = -9223372036854775808; // -2^63 (64-bit signed int min)
+  static const int _maxAmountCents = 100000000000; // 1 milyar TL (10^11 kuruş) üst tutar sınırı
+  static final Random _secureRandom = Random.secure();
+  static int _idNonceCounter = 0;
+
+  static String _nextUniqueToken() {
+    _idNonceCounter = (_idNonceCounter + 1) & 0x7fffffff;
+    final randHex =
+        _secureRandom.nextInt(0x10000000).toRadixString(16).padLeft(7, '0');
+    return '${_idNonceCounter.toRadixString(36)}_$randHex';
+  }
 
   final ClientDatabase db;
 
@@ -73,7 +86,30 @@ class ClientStorageRepository {
     if (items.isEmpty) {
       throw ArgumentError('Satış en az bir ürün içermelidir.');
     }
+    if (deviceId.trim().isEmpty) {
+      throw ArgumentError('Cihaz kimliği boş olamaz.');
+    }
     final canonicalPaymentMethod = PaymentMethod.parse(paymentMethod).code;
+
+    // Transaction açılmadan önce yinelenen ürün ve miktar sınırlarını doğrula
+    final seenProductIds = <String>{};
+    for (final item in items) {
+      if (!seenProductIds.add(item.productId)) {
+        throw ArgumentError(
+          'Aynı ürün aynı satışta birden fazla kalem olarak eklenemez: ${item.productId}',
+        );
+      }
+      if (item.quantity <= 0 || item.quantity > CartItemInput.maxQuantity) {
+        throw ArgumentError(
+          'Geçersiz satış miktarı (${item.quantity}): ${item.productId}',
+        );
+      }
+      if (item.expectedUnitPrice != null && item.expectedUnitPrice! < 0) {
+        throw ArgumentError(
+          'Beklenen birim fiyat negatif olamaz: ${item.expectedUnitPrice}',
+        );
+      }
+    }
 
     final saleTimestamp = occurredAt ?? DateTime.now();
 
@@ -88,8 +124,11 @@ class ClientStorageRepository {
       }
 
       final nextSeq = syncState.currentClientSeq + 1;
-      final saleId = 'csale_${saleTimestamp.microsecondsSinceEpoch}_$nextSeq';
-      final operationId = customOperationId ?? 'op_${saleTimestamp.microsecondsSinceEpoch}_$nextSeq';
+      final uniqueToken = _nextUniqueToken();
+      final saleId =
+          'csale_${saleTimestamp.microsecondsSinceEpoch}_${nextSeq}_$uniqueToken';
+      final operationId = customOperationId ??
+          'op_${saleTimestamp.microsecondsSinceEpoch}_${nextSeq}_$uniqueToken';
 
       var calculatedTotalAmount = 0;
       final itemResults = <SaleTransactionItemResult>[];
@@ -110,7 +149,31 @@ class ClientStorageRepository {
         }
 
         final unitPrice = product.price; // Kuruş bazlı (Ör: 200 TL/kg = 20000 kuruş)
+        if (unitPrice < 0 || unitPrice > _maxAmountCents) {
+          throw ArgumentError(
+            'Geçersiz ürün birim fiyatı ($unitPrice): ${product.name} (${product.id})',
+          );
+        }
         final priceVersionId = product.priceVersionId; // S5A-3: Fiyat sürüm kimliği
+
+        // Faz 1.2 Güvenilirlik: Sepet snapshot'ı ile DB güncel fiyatı/sürümü tutarlılık kontrolü
+        final priceChanged =
+            item.expectedUnitPrice != null && unitPrice != item.expectedUnitPrice;
+        final versionChanged = item.expectedPriceVersionId != null &&
+            priceVersionId != item.expectedPriceVersionId;
+        if (priceChanged || versionChanged) {
+          throw PriceChangedException(
+            productId: product.id,
+            productName: product.name,
+            expectedUnitPrice: item.expectedUnitPrice,
+            actualUnitPrice: unitPrice,
+            expectedPriceVersionId: item.expectedPriceVersionId,
+            actualPriceVersionId: priceVersionId,
+            message:
+                '"${product.name}" ürününün fiyatı veya sürümü değiştiği için '
+                'satış mevcut tutarla tamamlanamaz. Lütfen sepeti güncelleyin.',
+          );
+        }
 
         // S5A-3: Çarpım öncesi Integer Overflow kontrolü
         if (unitPrice > 0 && item.quantity > (_maxSafeInt - (quantityScale ~/ 2)) ~/ unitPrice) {
@@ -119,10 +182,14 @@ class ClientStorageRepository {
 
         // Kesirli miktar hesabı: itemTotal = ((unitPrice * quantity) + 500) ~/ 1000 (Standart ticari yuvarlama)
         final itemTotal = ((unitPrice * item.quantity) + (quantityScale ~/ 2)) ~/ quantityScale;
+        if (itemTotal < 0 || itemTotal > _maxAmountCents) {
+          throw ArgumentError('Satır tutarı izin verilen üst sınırı aşıyor: $itemTotal');
+        }
 
-        // Toplam sepet tutarı taşma kontrolü
-        if (calculatedTotalAmount > _maxSafeInt - itemTotal) {
-          throw ArgumentError('Toplam sepet tutarı tamsayı sınırını aşıyor (Integer Overflow).');
+        // Toplam sepet tutarı taşma ve üst sınır kontrolü
+        if (calculatedTotalAmount > _maxSafeInt - itemTotal ||
+            calculatedTotalAmount + itemTotal > _maxAmountCents) {
+          throw ArgumentError('Toplam sepet tutarı tamsayı veya tutar sınırını aşıyor.');
         }
         calculatedTotalAmount += itemTotal;
 
@@ -145,6 +212,11 @@ class ClientStorageRepository {
           );
         }
         final stockDelta = prodMilli ~/ den;
+        if (stockDelta > 0 && product.stock < _minSafeInt + stockDelta) {
+          throw ArgumentError(
+            'Stok azaltma işlemi 64-bit tamsayı alt sınırını aşıyor (Integer Underflow): ${product.name}',
+          );
+        }
 
         itemResults.add(SaleTransactionItemResult(
           productId: product.id,
@@ -183,7 +255,7 @@ class ClientStorageRepository {
 
       // D. Kalemleri, stok hareketlerini ve ürün stok güncellemelerini işle
       for (final item in itemResults) {
-        final itemId = 'citem_${saleTimestamp.microsecondsSinceEpoch}_${item.productId}';
+        final itemId = 'citem_${saleId}_${item.productId}';
         await db.into(db.localSaleItems).insert(
               LocalSaleItemsCompanion(
                 id: Value(itemId),
@@ -198,7 +270,7 @@ class ClientStorageRepository {
               ),
             );
 
-        final movementId = 'csm_${saleTimestamp.microsecondsSinceEpoch}_${item.productId}';
+        final movementId = 'csm_${saleId}_${item.productId}';
         await db.into(db.localStockMovements).insert(
               LocalStockMovementsCompanion(
                 id: Value(movementId),
@@ -216,6 +288,12 @@ class ClientStorageRepository {
               ..where((p) => p.id.equals(item.productId)))
             .getSingle();
 
+        if ((item.stockDelta > 0 && currentProd.stock < _minSafeInt + item.stockDelta) ||
+            (item.stockDelta < 0 && currentProd.stock > _maxSafeInt + item.stockDelta)) {
+          throw ArgumentError(
+            'Stok güncelleme işlemi 64-bit tamsayı sınırını aşıyor: ${item.productName}',
+          );
+        }
         final updatedStock = currentProd.stock - item.stockDelta;
         await (db.update(db.localProducts)..where((p) => p.id.equals(item.productId))).write(
               LocalProductsCompanion(

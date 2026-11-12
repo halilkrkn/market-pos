@@ -76,13 +76,26 @@ void main() {
       expect(find.text('Raporlar'), findsOneWidget);
       expect(find.text('Sistem & Tanı'), findsOneWidget);
 
-      // Varsayılan açık olan Tanılama Kartı
+      // Varsayılan açılış ekranı: Kasa (Satış) POS
+      expect(find.byKey(const Key('barcode_input_field')), findsOneWidget);
+
+      // Onaylı alt kısayollar: yalnız F1, F2, F9, F10, Esc
+      expect(find.text('F1'), findsOneWidget);
+      expect(find.text('F2'), findsOneWidget);
+      expect(find.text('F9'), findsOneWidget);
+      expect(find.text('F10'), findsOneWidget);
+      expect(find.text('Esc'), findsOneWidget);
+
+      // Sistem & Tanı sekmesine geçince Tanılama Kartı render edilir
+      await tester.tap(find.text('Sistem & Tanı'));
+      await tester.pumpAndSettle();
+
       expect(find.text('Sistem Durumu ve Altyapı Tanılama'), findsOneWidget);
       expect(find.text('Merkezi Shelf HTTPS/HTTP Sunucusu (Master Hub)'), findsOneWidget);
       expect(find.text('İstemci Yerel Depolaması (client_local.db)'), findsOneWidget);
     });
 
-    testWidgets('2. Modül Geçişleri: Kasa ve Ürün sekmelerine tıklandığında placeholder gösterilir',
+    testWidgets('2. Modül Geçişleri: Ürünler ve Raporlar MVP kapsamıyla uyumlu placeholder gösterir',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1280, 720);
       tester.view.devicePixelRatio = 1.0;
@@ -91,28 +104,38 @@ void main() {
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      // 'Kasa (Satış)' sekmesine tıkla
+      // Açılışta Kasa (Satış) POS aktiftir
+      expect(find.byKey(const Key('barcode_input_field')), findsOneWidget);
+
+      // 'Ürünler' sekmesine tıkla -> MVP dışı 'stok sayımı' kalıntısı olmamalı
+      await tester.tap(find.text('Ürünler'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ürün ve Stok Yönetimi'), findsOneWidget);
+      expect(find.textContaining('stok sayımı'), findsNothing);
+
+      // 'Raporlar' sekmesine tıkla -> MVP dışı 'Z-Raporu' / 'KDV dökümü' olmamalı
+      await tester.tap(find.text('Raporlar'));
+      await tester.pumpAndSettle();
+      expect(find.text('Kasa ve Finansal Raporlar'), findsOneWidget);
+      expect(find.textContaining('Z-Raporu'), findsNothing);
+      expect(find.textContaining('KDV dökümü'), findsNothing);
+
+      // Tekrar 'Kasa (Satış)' sekmesine dön
       await tester.tap(find.text('Kasa (Satış)'));
       await tester.pumpAndSettle();
-
-      // Faz 1.2 placeholder'ı görüntülenmeli
-      expect(find.text('Kasa / Satış Modülü (POS)'), findsOneWidget);
-      expect(find.text('Faz 1.2 — Satış Ekranı & Sepet Yönetimi'), findsOneWidget);
-
-      // Tekrar 'Sistem & Tanı' sekmesine dön
-      await tester.tap(find.text('Sistem & Tanı'));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Sistem Durumu ve Altyapı Tanılama'), findsOneWidget);
+      expect(find.byKey(const Key('barcode_input_field')), findsOneWidget);
     });
 
-    testWidgets('3. Yenileme Butonu: Durumu Yenile butonuna tıklandığında sağlık kontrolü tetiklenir',
+    testWidgets('3. Yenileme Butonu: Sistem & Tanı sekmesinde sağlık kontrolü tetiklenir',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1280, 720);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.resetPhysicalSize);
 
       await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Sistem & Tanı'));
       await tester.pumpAndSettle();
 
       // Durumu Yenile butonuna tıkla

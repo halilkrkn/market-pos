@@ -3,6 +3,7 @@ library mms_client_storage;
 export 'src/database/client_database.dart';
 export 'src/database/client_storage_repository.dart';
 export 'src/models/cart_item_input.dart';
+export 'src/models/price_changed_exception.dart';
 export 'src/models/payment_method.dart';
 export 'src/models/sale_transaction_result.dart';
 export 'src/models/sync_response.dart';
