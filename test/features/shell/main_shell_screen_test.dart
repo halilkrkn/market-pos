@@ -35,7 +35,7 @@ void main() {
 
       apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceId: 'POS-WIN-01',
       );
     });
@@ -69,6 +69,9 @@ void main() {
 
       // Durum rozeti doğrula (Header ve Kart içerisinde 2 adet bulunur)
       expect(find.text('ÇEVRİMİÇİ (HUB CANLI)'), findsAtLeastNWidgets(1));
+
+      // Outbox senkronizasyon kuyruk rozeti doğrula (Header içerisinde)
+      expect(find.text('SENKRONİZE'), findsOneWidget);
 
       // Navigasyon Rayı elemanları
       expect(find.text('Kasa (Satış)'), findsOneWidget);

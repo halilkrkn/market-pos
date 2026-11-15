@@ -4,6 +4,7 @@ import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:market_pos/core/storage/local_database_service.dart';
+import 'package:mms_client_storage/mms_client_storage.dart';
 import 'package:path/path.dart' as p;
 
 /// DB close timeout testinde kullanılmak üzere close operasyonunu geciktiren test executor'ı
@@ -86,12 +87,50 @@ void main() {
       expect(localDbService.databasePath, ':memory:');
 
       final pendingOutbox = await localDbService.getPendingOutboxCount();
+      final outboxSummary = await localDbService.getOutboxSummary();
       final localSales = await localDbService.getLocalSalesCount();
       final localProducts = await localDbService.getLocalProductsCount();
 
       expect(pendingOutbox, 0);
+      expect(outboxSummary.totalUnsynced, 0);
+      expect(outboxSummary.hasPendingWork, isFalse);
+      expect(outboxSummary.hasErrors, isFalse);
       expect(localSales, 0);
       expect(localProducts, 0);
+    });
+
+    test('1.1. Outbox Ayrımı: getPendingOutboxCount yalnızca PENDING sayarken getOutboxSummary tüm durumları sayar', () async {
+      final db = localDbService.database;
+      // 1 PENDING, 1 RETRY, 1 IN_PROGRESS, 1 FAILED_PERMANENT, 1 SYNCED ekle
+      final statuses = ['PENDING', 'RETRY', 'IN_PROGRESS', 'FAILED_PERMANENT', 'SYNCED'];
+      for (var i = 0; i < statuses.length; i++) {
+        await db.into(db.outboxOperations).insert(
+              OutboxOperationsCompanion.insert(
+                operationId: 'op_$i',
+                deviceId: 'POS-WIN-01',
+                clientSeq: i + 1,
+                operationType: 'SALE_CREATE',
+                payload: '{"test": true}',
+                payloadHash: 'hash_$i',
+                occurredAt: DateTime.now(),
+                status: Value(statuses[i]),
+              ),
+            );
+      }
+
+      // getPendingOutboxCount YALNIZCA PENDING saymalı (davranış korunuyor)
+      final pendingCount = await localDbService.getPendingOutboxCount();
+      expect(pendingCount, 1);
+
+      // getOutboxSummary detaylı durumları ve toplamı saymalı
+      final summary = await localDbService.getOutboxSummary(deviceId: 'POS-WIN-01');
+      expect(summary.pending, 1);
+      expect(summary.retry, 1);
+      expect(summary.inProgress, 1);
+      expect(summary.failedPermanent, 1);
+      expect(summary.totalUnsynced, 4); // SYNCED hariç 4
+      expect(summary.hasErrors, isTrue);
+      expect(summary.hasPendingWork, isTrue);
     });
 
     test('2. Cihaz Kimliği Başlatma: Repository üzerinden istemci durumu oluşturulur', () async {
@@ -279,6 +318,50 @@ void main() {
 
       expect(ops, isEmpty);
       expect(service.isClosed, isTrue);
+    });
+
+    test('11.1. Senaryo 6.1: Aktif getOutboxSummary sorgusu sırasında Close — repository outbox summary sorgusu tek katmanlı drain ile tamamlanır ve sayaç 0 olur', () async {
+      tempDir = Directory.systemTemp.createTempSync('mms_s6_1_');
+      final dbPath = p.join(tempDir!.path, 'client_local.db');
+
+      final service = await LocalDatabaseService.initialize(customPath: dbPath);
+      await service.repository.initializeDevice('POS-OUTBOX-SUMMARY-DRAIN');
+
+      // getOutboxSummary çağrısını başlat ve hemen ardından close çağır
+      final summaryFuture = service.getOutboxSummary(deviceId: 'POS-OUTBOX-SUMMARY-DRAIN');
+      final closeFuture = service.close();
+
+      final summary = await summaryFuture;
+      await closeFuture;
+
+      expect(summary.totalUnsynced, 0);
+      expect(service.isClosed, isTrue);
+      expect(service.activeQueryCount, 0);
+    });
+
+    test('11.2. Senaryo 6.2: Eşzamanlı getOutboxSummary ve getPendingOutboxCount sorguları sırasında Close — tüm eşzamanlı sorgular drain ile tamamlanır', () async {
+      tempDir = Directory.systemTemp.createTempSync('mms_s6_2_');
+      final dbPath = p.join(tempDir!.path, 'client_local.db');
+
+      final service = await LocalDatabaseService.initialize(customPath: dbPath);
+      await service.repository.initializeDevice('POS-CONCURRENT-DRAIN');
+
+      // 3 eşzamanlı okuma başlat
+      final f1 = service.getOutboxSummary(deviceId: 'POS-CONCURRENT-DRAIN');
+      final f2 = service.getPendingOutboxCount();
+      final f3 = service.getLocalSalesCount();
+
+      // Hemen ardından close başlat
+      final closeFuture = service.close();
+
+      final results = await Future.wait([f1, f2, f3]);
+      await closeFuture;
+
+      expect((results[0] as OutboxSummary).totalUnsynced, 0);
+      expect(results[1] as int, 0);
+      expect(results[2] as int, 0);
+      expect(service.isClosed, isTrue);
+      expect(service.activeQueryCount, 0);
     });
 
     test('12. Senaryo 7: Drain timeout — operasyon drain süresini aşarsa uyarı loglanır ve zorla kapatmaya geçilir', () async {

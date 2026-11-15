@@ -19,6 +19,26 @@ class AppTheme {
   static const Color statusOffline = Color(0xFFB91C1C); // Red 700 (Çevrimdışı / Hata)
   static const Color statusWarning = Color(0xFFB45309); // Amber 700 (Draining / Beklemede)
 
+  // Rozet Semantik Renkleri (Light Tema - WCAG AAA > 7:1 Kontrast)
+  static const Color badgeSuccessBg = Color(0xFFDCFCE7); // Green 100
+  static const Color badgeSuccessText = Color(0xFF14532D); // Emerald 900 (8.30:1 - WCAG AAA)
+  static const Color badgeErrorBg = Color(0xFFFEE2E2); // Red 100
+  static const Color badgeErrorText = Color(0xFF7F1D1D); // Red 900 (8.20:1 - WCAG AAA)
+  static const Color badgeWarningBg = Color(0xFFFEF3C7); // Amber 100
+  static const Color badgeWarningText = Color(0xFF78350F); // Amber 900 (8.15:1 - WCAG AAA)
+  static const Color badgeNeutralBg = Color(0xFFE2E8F0); // Slate 200
+  static const Color badgeNeutralText = Color(0xFF1E293B); // Slate 800 (11.87:1 - WCAG AAA)
+
+  // Rozet Semantik Renkleri (Dark Tema - WCAG AAA >= 7.0:1 Kontrast)
+  static const Color badgeSuccessDarkBg = Color(0xFF052E16); // Green 950 (10.62:1 - WCAG AAA)
+  static const Color badgeSuccessDarkText = Color(0xFF86EFAC); // Green 300
+  static const Color badgeErrorDarkBg = Color(0xFF450A0A); // Red 950 (8.51:1 - WCAG AAA)
+  static const Color badgeErrorDarkText = Color(0xFFFCA5A5); // Red 300
+  static const Color badgeWarningDarkBg = Color(0xFF451A03); // Amber 950 (10.39:1 - WCAG AAA)
+  static const Color badgeWarningDarkText = Color(0xFFFCD34D); // Amber 300
+  static const Color badgeNeutralDarkBg = Color(0xFF0F172A); // Slate 900 (12.02:1 - WCAG AAA)
+  static const Color badgeNeutralDarkText = Color(0xFFCBD5E1); // Slate 300
+
   // POS Aksiyon & Semantik Yüksek Kontrast Renkleri (UX Handoff Uyumlu)
   static const Color posCashAction = Color(0xFF047857);
   static const Color posCashBg = Color(0xFFECFDF5);

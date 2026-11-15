@@ -11,6 +11,8 @@ dependencies:
   drift: ^2.20.0
   http: ^1.2.2
   meta: ^1.11.0
+  mms_contracts:
+    path: ../mms_contracts
   path: ^1.9.0
   sqlite3: ^2.4.6
 

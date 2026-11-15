@@ -124,7 +124,7 @@ void main() {
 
       apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceId: 'POS-WIN-01',
       );
     });

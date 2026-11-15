@@ -8,6 +8,7 @@ import '../models/cart_item_input.dart';
 import '../models/payment_method.dart';
 import '../models/price_changed_exception.dart';
 import '../models/sale_transaction_result.dart';
+import 'package:mms_contracts/mms_contracts.dart';
 
 class ClientStorageRepository {
   static const int quantityScale = CartItemInput.scale; // 1000 (3 ondalık hane ölçeği)
@@ -417,6 +418,56 @@ class ClientStorageRepository {
               (o.status.equals('PENDING') | o.status.equals('RETRY') | o.status.equals('IN_PROGRESS') | o.status.equals('FAILED_PERMANENT')))
           ..orderBy([(o) => OrderingTerm.asc(o.clientSeq)]))
         .get();
+  }
+
+  /// Senkronizasyon kuyruğundaki operasyonların durum bazlı özetini döner.
+  ///
+  /// Tüm tabloyu belleğe yüklemeden doğrudan SQLite üzerinde `GROUP BY status`
+  /// ve `COUNT(operation_id)` çalıştırarak yüksek performanslı ve verimli sayım yapar.
+  Future<OutboxSummary> getOutboxSummary({String? deviceId}) async {
+    final countExp = db.outboxOperations.operationId.count();
+    final statusCol = db.outboxOperations.status;
+
+    final query = db.selectOnly(db.outboxOperations)
+      ..addColumns([statusCol, countExp])
+      ..groupBy([statusCol]);
+
+    if (deviceId != null && deviceId.isNotEmpty) {
+      query.where(db.outboxOperations.deviceId.equals(deviceId));
+    }
+
+    final rows = await query.get();
+
+    var pending = 0;
+    var retry = 0;
+    var inProgress = 0;
+    var failedPermanent = 0;
+
+    for (final row in rows) {
+      final status = row.read(statusCol);
+      final count = row.read(countExp) ?? 0;
+      switch (status) {
+        case 'PENDING':
+          pending = count;
+          break;
+        case 'RETRY':
+          retry = count;
+          break;
+        case 'IN_PROGRESS':
+          inProgress = count;
+          break;
+        case 'FAILED_PERMANENT':
+          failedPermanent = count;
+          break;
+      }
+    }
+
+    return OutboxSummary(
+      pending: pending,
+      retry: retry,
+      inProgress: inProgress,
+      failedPermanent: failedPermanent,
+    );
   }
 
   /// Outbox operasyonunu IN_PROGRESS olarak işaretler

@@ -25,7 +25,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceId: 'POS-WIN-01',
       );
 
@@ -50,7 +50,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       final response = await apiClient.checkHealth();
@@ -67,7 +67,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       final response = await apiClient.checkHealth();
@@ -88,7 +88,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceId: 'POS-WIN-01',
         deviceToken: 'test_token_xyz_123',
       );
@@ -107,7 +107,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       expect(
@@ -138,7 +138,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceToken: secretToken,
       );
 
@@ -169,7 +169,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
         deviceToken: sensitiveSecret,
       );
 
@@ -197,7 +197,7 @@ void main() {
 
       final apiClientValid = MmsApiClient(
         client: mockClientValid,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       try {
@@ -218,7 +218,7 @@ void main() {
 
       final apiClientInvalid = MmsApiClient(
         client: mockClientInvalid,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       try {
@@ -249,7 +249,7 @@ void main() {
 
       final apiClient = MmsApiClient(
         client: mockClient,
-        baseUrl: 'http://127.0.0.1:8080',
+        baseUrl: 'https://127.0.0.1:8443',
       );
 
       try {

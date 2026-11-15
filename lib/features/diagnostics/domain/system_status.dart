@@ -1,3 +1,5 @@
+import 'package:mms_contracts/mms_contracts.dart';
+
 enum BackendConnectionState { checking, online, offline, draining }
 
 enum LocalDatabaseState { initializing, ready, error }
@@ -11,6 +13,7 @@ class SystemStatus {
   final String backendSqliteVersion;
   final String deviceId;
   final int pendingOutboxCount;
+  final OutboxSummary outboxSummary;
   final int localSalesCount;
   final int localProductsCount;
   final DateTime lastChecked;
@@ -25,6 +28,7 @@ class SystemStatus {
     required this.backendSqliteVersion,
     required this.deviceId,
     required this.pendingOutboxCount,
+    required this.outboxSummary,
     required this.localSalesCount,
     required this.localProductsCount,
     required this.lastChecked,
@@ -33,9 +37,10 @@ class SystemStatus {
   });
 
   factory SystemStatus.initial({
-    String backendUrl = 'http://127.0.0.1:8080',
+    String backendUrl = 'https://127.0.0.1:8443',
     String deviceId = 'POS-WIN-01',
     String localDbPath = '',
+    OutboxSummary? outboxSummary,
   }) {
     return SystemStatus(
       backendState: BackendConnectionState.checking,
@@ -45,6 +50,7 @@ class SystemStatus {
       backendSqliteVersion: 'Bilinmiyor',
       deviceId: deviceId,
       pendingOutboxCount: 0,
+      outboxSummary: outboxSummary ?? OutboxSummary.empty(),
       localSalesCount: 0,
       localProductsCount: 0,
       lastChecked: DateTime.now(),
@@ -60,6 +66,7 @@ class SystemStatus {
     String? backendSqliteVersion,
     String? deviceId,
     int? pendingOutboxCount,
+    OutboxSummary? outboxSummary,
     int? localSalesCount,
     int? localProductsCount,
     DateTime? lastChecked,
@@ -74,6 +81,7 @@ class SystemStatus {
       backendSqliteVersion: backendSqliteVersion ?? this.backendSqliteVersion,
       deviceId: deviceId ?? this.deviceId,
       pendingOutboxCount: pendingOutboxCount ?? this.pendingOutboxCount,
+      outboxSummary: outboxSummary ?? this.outboxSummary,
       localSalesCount: localSalesCount ?? this.localSalesCount,
       localProductsCount: localProductsCount ?? this.localProductsCount,
       lastChecked: lastChecked ?? this.lastChecked,

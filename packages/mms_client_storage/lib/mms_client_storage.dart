@@ -6,6 +6,7 @@ export 'src/models/cart_item_input.dart';
 export 'src/models/price_changed_exception.dart';
 export 'src/models/payment_method.dart';
 export 'src/models/sale_transaction_result.dart';
+export 'package:mms_contracts/mms_contracts.dart';
 export 'src/models/sync_response.dart';
 export 'src/sync/sync_transport.dart';
 export 'src/sync/client_sync_service.dart';

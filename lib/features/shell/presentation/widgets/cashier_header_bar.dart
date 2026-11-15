@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/theme/app_theme.dart';
 import '../../../diagnostics/application/system_status_notifier.dart';
+import '../../../diagnostics/domain/system_status.dart';
+import '../../../diagnostics/presentation/widgets/outbox_status_badge.dart';
 import '../../../diagnostics/presentation/widgets/status_badge.dart';
 
 /// Windows Masaüstü Üst Kasa Başlık Çubuğu
@@ -69,10 +71,18 @@ class CashierHeaderBar extends ConsumerWidget {
           ),
           const SizedBox(width: 12),
 
-          // Sağ: Hub Bağlantı Rozeti ve Yenileme Butonu
+          // Sağ: Hub Bağlantı Rozeti, Outbox Kuyruk Rozeti ve Yenileme Butonu
           Flexible(
             fit: FlexFit.loose,
             child: StatusBadge(state: status.backendState),
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            fit: FlexFit.loose,
+            child: OutboxStatusBadge(
+              summary: status.outboxSummary,
+              isDatabaseError: status.localDbState == LocalDatabaseState.error,
+            ),
           ),
           const SizedBox(width: 8),
           IconButton(

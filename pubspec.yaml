@@ -17,6 +17,8 @@ dependencies:
   path: ^1.9.0
   mms_client_storage:
     path: packages/mms_client_storage
+  mms_contracts:
+    path: packages/mms_contracts
 
 dev_dependencies:
   flutter_test:

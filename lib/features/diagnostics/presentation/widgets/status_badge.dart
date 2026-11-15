@@ -11,6 +11,7 @@ class StatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final Color bgColor;
     final Color textColor;
     final IconData icon;
@@ -18,26 +19,26 @@ class StatusBadge extends StatelessWidget {
 
     switch (state) {
       case BackendConnectionState.online:
-        bgColor = const Color(0xFFDCFCE7); // Green 100
-        textColor = AppTheme.statusOnline;
+        bgColor = isDark ? AppTheme.badgeSuccessDarkBg : AppTheme.badgeSuccessBg;
+        textColor = isDark ? AppTheme.badgeSuccessDarkText : AppTheme.badgeSuccessText;
         icon = Icons.cloud_done;
         label = 'ÇEVRİMİÇİ (HUB CANLI)';
         break;
       case BackendConnectionState.offline:
-        bgColor = const Color(0xFFFEE2E2); // Red 100
-        textColor = AppTheme.statusOffline;
+        bgColor = isDark ? AppTheme.badgeErrorDarkBg : AppTheme.badgeErrorBg;
+        textColor = isDark ? AppTheme.badgeErrorDarkText : AppTheme.badgeErrorText;
         icon = Icons.cloud_off;
         label = 'ÇEVRİMDIŞI (LOKAL ÇALIŞIYOR)';
         break;
       case BackendConnectionState.draining:
-        bgColor = const Color(0xFFFEF3C7); // Amber 100
-        textColor = AppTheme.statusWarning;
+        bgColor = isDark ? AppTheme.badgeWarningDarkBg : AppTheme.badgeWarningBg;
+        textColor = isDark ? AppTheme.badgeWarningDarkText : AppTheme.badgeWarningText;
         icon = Icons.hourglass_top;
         label = 'BAKIMDA (503 DRAINING)';
         break;
       case BackendConnectionState.checking:
-        bgColor = const Color(0xFFE2E8F0); // Slate 200
-        textColor = const Color(0xFF475569);
+        bgColor = isDark ? AppTheme.badgeNeutralDarkBg : AppTheme.badgeNeutralBg;
+        textColor = isDark ? AppTheme.badgeNeutralDarkText : AppTheme.badgeNeutralText;
         icon = Icons.sync;
         label = 'KONTROL EDİLİYOR...';
         break;

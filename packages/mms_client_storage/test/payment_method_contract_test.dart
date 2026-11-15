@@ -198,7 +198,7 @@ void main() {
         transport: transportReject,
         deviceId: 'POS-WIN-01',
         deviceToken: 'tok',
-        hubUrl: 'https://127.0.0.1:8080',
+        hubUrl: 'https://127.0.0.1:8443',
       );
 
       final failResult = await syncReject.syncPendingOutbox();
@@ -225,7 +225,7 @@ void main() {
         transport: transportReplay,
         deviceId: 'POS-WIN-01',
         deviceToken: 'tok',
-        hubUrl: 'https://127.0.0.1:8080',
+        hubUrl: 'https://127.0.0.1:8443',
       );
       final okResult = await syncReplay.syncPendingOutbox();
       expect(okResult.syncedCount, equals(1));
@@ -526,7 +526,7 @@ void main() {
         transport: transport,
         deviceId: 'POS-WIN-01',
         deviceToken: 'tok',
-        hubUrl: 'https://127.0.0.1:8080',
+        hubUrl: 'https://127.0.0.1:8443',
       );
 
       // 1. İlk sync: seq 1 400 ERR_INVALID_PAYMENT_METHOD alır ve FAILED_PERMANENT olur; seq 2 gönderilemez

@@ -299,7 +299,7 @@ class LocalDatabaseService {
     dbCloseTimeout = defaultDbCloseTimeout;
   }
 
-  /// Bekleyen senkronize edilmemiş outbox kayıt sayısı
+  /// Bekleyen senkronize edilmemiş outbox kayıt sayısı (Yalnızca PENDING durumundakiler)
   Future<int> getPendingOutboxCount() {
     return _runQuery(() async {
       final countExp = _db.outboxOperations.operationId.count();
@@ -309,6 +309,11 @@ class LocalDatabaseService {
       final result = await query.getSingle();
       return result.read(countExp) ?? 0;
     });
+  }
+
+  /// Senkronizasyon kuyruğundaki operasyonların durum bazlı detaylı özeti (PENDING, RETRY, IN_PROGRESS, FAILED_PERMANENT)
+  Future<OutboxSummary> getOutboxSummary({String? deviceId}) {
+    return _repository.getOutboxSummary(deviceId: deviceId);
   }
 
   /// Yerel satış sayısı
@@ -536,4 +541,8 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
   @override
   Future<int> recoverStuckInProgressOperations(String deviceId) =>
       _service.runOperation(() => super.recoverStuckInProgressOperations(deviceId));
+
+  @override
+  Future<OutboxSummary> getOutboxSummary({String? deviceId}) =>
+      _service.runOperation(() => super.getOutboxSummary(deviceId: deviceId));
 }
