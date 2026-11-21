@@ -47,6 +47,8 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
   final MmsDriveLiveSyncEngine? driveLiveSyncEngine;
   final bool isDriveFallbackStandby;
   final FutureOr<void> Function(SyncBatchResult? result)? onSyncCompleted;
+  final FutureOr<void> Function(String failedUrl, String? errorMessage)?
+      onHubNetworkUnreachable;
   final Duration periodicInterval;
   final bool autoStartTimer;
   final bool enableLifecycleListener;
@@ -83,6 +85,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
     this.driveLiveSyncEngine,
     this.isDriveFallbackStandby = false,
     this.onSyncCompleted,
+    this.onHubNetworkUnreachable,
     this.periodicInterval = const Duration(seconds: 30),
     this.autoStartTimer = true,
     this.enableLifecycleListener = true,
@@ -328,6 +331,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
 
       String? executionError;
       String? downlinkError;
+      String? attemptedHubUrl;
       var downlinkAttempted = false;
       var pulledProductsCount = 0;
       var pulledSalesCount = 0;
@@ -341,6 +345,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
           executionError = cycleHubCheck.readError ??
               'Hub adresi henüz yapılandırılmadı veya platform politikasınca engellendi.';
         } else {
+          attemptedHubUrl = effectiveHubUrl;
           // 1. Service factory veya constructor oluşturulması try-catch kapsamında
           final ClientSyncService service;
           if (syncServiceFactory != null) {
@@ -438,6 +443,33 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         newStatus = SyncCoordinatorStatus.idle;
       }
 
+      final bool isSecurityHold =
+          downlinkPinMismatch ||
+          downlinkCertError ||
+          (result?.tlsPinMismatch == true) ||
+          (result?.tlsCertError == true);
+      final bool isAuthHold =
+          hasTokenReadError ||
+          isTokenMissing ||
+          (result?.lastError?.contains('Yetki/TLS bekletmesi') == true &&
+              !isSecurityHold);
+      final bool isDownlinkAuthError =
+          downlinkError != null &&
+          (downlinkError.contains('401') ||
+              downlinkError.contains('403') ||
+              downlinkError.contains('426') ||
+              downlinkError.contains('Yetki'));
+      final bool isDownlinkNetworkError =
+          downlinkError != null &&
+          !downlinkPinMismatch &&
+          !downlinkCertError &&
+          !isDownlinkAuthError &&
+          (downlinkError.contains('SocketException') ||
+              downlinkError.contains('TimeoutException') ||
+              downlinkError.contains('ClientException') ||
+              downlinkError.contains('Ağ bağlantı hatası') ||
+              downlinkError.contains('zaman aşımı'));
+
       final now = DateTime.now();
       var nextDriveUiStatus = state.driveSyncUiStatus;
       var nextDriveConflictCount = state.driveConflictCount;
@@ -446,16 +478,6 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
 
       final engine = driveLiveSyncEngine;
       if (engine != null) {
-        final bool isSecurityHold =
-            downlinkPinMismatch ||
-            downlinkCertError ||
-            (result?.tlsPinMismatch == true) ||
-            (result?.tlsCertError == true);
-        final bool isAuthHold =
-            hasTokenReadError ||
-            isTokenMissing ||
-            (result?.lastError?.contains('Yetki/TLS bekletmesi') == true &&
-                !isSecurityHold);
         final bool hubReachable =
             executionError == null &&
             !isSecurityHold &&
@@ -569,6 +591,18 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
 
       // 2. Callback izolasyonu: onSyncCompleted hatası veya gecikmesi coordinator'ı kilitlememelidir
       _dispatchSyncCompletedCallback(result);
+      if (attemptedHubUrl != null &&
+          !isSecurityHold &&
+          !isAuthHold &&
+          !isDownlinkAuthError &&
+          newStatus != SyncCoordinatorStatus.permanentError &&
+          (newStatus == SyncCoordinatorStatus.networkError ||
+              isDownlinkNetworkError)) {
+        _dispatchHubUnreachableCallback(
+          attemptedHubUrl,
+          executionError ?? result?.lastError ?? downlinkError,
+        );
+      }
 
       // 3. Aktif çağırıcıyı MUTLAKA tamamla
       if (!currentCompleter.isCompleted) {
@@ -689,22 +723,39 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
     }
   }
 
-  void _dispatchSyncCompletedCallback(SyncBatchResult? result) {
-    if (onSyncCompleted == null) return;
+  void _dispatchIsolatedCallback(
+    FutureOr<void> Function() action,
+    String callbackName,
+  ) {
     try {
-      final callbackResult = onSyncCompleted!(result);
+      final callbackResult = action();
       if (callbackResult is Future) {
         callbackResult.catchError((Object error, StackTrace stack) {
           debugPrint(
-            '[BackgroundSyncCoordinator] onSyncCompleted asenkron hata: $error\n$stack',
+            '[BackgroundSyncCoordinator] $callbackName asenkron hata: $error\n$stack',
           );
         });
       }
     } catch (e, stack) {
       debugPrint(
-        '[BackgroundSyncCoordinator] onSyncCompleted senkron hata: $e\n$stack',
+        '[BackgroundSyncCoordinator] $callbackName senkron hata: $e\n$stack',
       );
     }
+  }
+
+  void _dispatchSyncCompletedCallback(SyncBatchResult? result) {
+    final cb = onSyncCompleted;
+    if (cb == null) return;
+    _dispatchIsolatedCallback(() => cb(result), 'onSyncCompleted');
+  }
+
+  void _dispatchHubUnreachableCallback(String failedUrl, String? errorMessage) {
+    final cb = onHubNetworkUnreachable;
+    if (cb == null) return;
+    _dispatchIsolatedCallback(
+      () => cb(failedUrl, errorMessage),
+      'onHubNetworkUnreachable',
+    );
   }
 
   /// Faz 7A — Restore güvenliği: Geri yükleme öncesi çağrılır.

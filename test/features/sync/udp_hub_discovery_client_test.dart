@@ -619,5 +619,259 @@ void main() {
       expect(notifier.state.activeHubUrl, 'http://127.0.0.1:${liveServer.port}');
       expect(notifier.state.source, HubUrlSource.discovered);
     });
+
+    test('WP-1: connected fazındayken reportTransportUnreachable yeni IP keşfini tetikler ve bayat URL hatalarını yok sayar', () async {
+      final newServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => newServer.close(force: true));
+      newServer.listen((HttpRequest req) async {
+        req.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType.json
+          ..write(
+            jsonEncode(<String, dynamic>{
+              'status': 'UP',
+              'service': 'MARKET_MMS_HUB',
+              'sqlite_version': '3.45.1',
+            }),
+          );
+        await req.response.close();
+      });
+
+      final responder = await _TestUdpResponder.start(
+        httpPort: newServer.port,
+        hubId: 'MMS-HUB-DHCP-NEW',
+        serverIps: const <String>['127.0.0.1'],
+      );
+      addTearDown(responder.close);
+
+      final deadPort = await _reserveDeadLocalPort();
+      final oldUrl = 'http://127.0.0.1:$deadPort';
+      final newUrl = 'http://127.0.0.1:${newServer.port}';
+
+      final udpClient = UdpHubDiscoveryClient(
+        discoveryPort: responder.port,
+        bindAddress: InternetAddress.loopbackIPv4,
+        overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
+        settleAfterFirstMatch: const Duration(milliseconds: 100),
+      );
+
+      final apiClient = MmsApiClient(allowLoopback: true);
+      final notifier = HubConnectionNotifier(
+        repository: localDb.repository,
+        checkUrlHealth: apiClient.checkHealthForUrl,
+        discoveryClient: udpClient,
+        allowLoopback: true,
+        enableAutoLifecycle: true,
+        reconnectCooldown: Duration.zero,
+        reconnectInterval: const Duration(hours: 1),
+        initialState: HubConnectionState(
+          phase: HubConnectionPhase.connected,
+          activeHubUrl: oldUrl,
+          hubId: 'MMS-HUB-OLD',
+          source: HubUrlSource.discovered,
+          isInitialized: true,
+        ),
+      );
+      addTearDown(notifier.dispose);
+
+      // Başlangıç lifecycle auto-keşfinin yeni sunucuyu bulmasını beklemeden önce
+      // yeni test için ayrı bir instance ile temiz senaryo da doğrulayalım:
+      final deadline1 = DateTime.now().add(const Duration(seconds: 4));
+      while (DateTime.now().isBefore(deadline1) &&
+          notifier.state.activeHubUrl != newUrl) {
+        await Future<void>.delayed(const Duration(milliseconds: 40));
+      }
+      expect(notifier.state.activeHubUrl, newUrl);
+      expect(notifier.state.phase, HubConnectionPhase.connected);
+
+      // 1. Bayat URL'den (oldUrl) gelen hata yeni bağlı URL'yi (newUrl) BOZMAMALI
+      notifier.reportTransportUnreachable(
+        failedUrl: oldUrl,
+        errorMessage: 'Bayat hata',
+      );
+      expect(notifier.state.phase, HubConnectionPhase.connected);
+      expect(notifier.state.activeHubUrl, newUrl);
+
+      // 2. Şimdi yeni sunucu da kapanıp 3. sunucu açılsın -> aktif URL hatasıyla offline + yeniden keşif
+      await newServer.close(force: true);
+      final thirdServer = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => thirdServer.close(force: true));
+      thirdServer.listen((HttpRequest req) async {
+        req.response
+          ..statusCode = 200
+          ..headers.contentType = ContentType.json
+          ..write(
+            jsonEncode(<String, dynamic>{
+              'status': 'UP',
+              'service': 'MARKET_MMS_HUB',
+              'sqlite_version': '3.45.1',
+            }),
+          );
+        await req.response.close();
+      });
+
+      final responder2 = await _TestUdpResponder.start(
+        httpPort: thirdServer.port,
+        hubId: 'MMS-HUB-DHCP-3',
+        serverIps: const <String>['127.0.0.1'],
+      );
+      addTearDown(responder2.close);
+
+      // responder2'yi kullanacak ikinci notifier:
+      final notifier2 = HubConnectionNotifier(
+        repository: localDb.repository,
+        checkUrlHealth: apiClient.checkHealthForUrl,
+        discoveryClient: UdpHubDiscoveryClient(
+          discoveryPort: responder2.port,
+          bindAddress: InternetAddress.loopbackIPv4,
+          overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
+          settleAfterFirstMatch: const Duration(milliseconds: 100),
+        ),
+        allowLoopback: true,
+        enableAutoLifecycle: false,
+        reconnectCooldown: Duration.zero,
+        initialState: HubConnectionState(
+          phase: HubConnectionPhase.connected,
+          activeHubUrl: newUrl,
+          hubId: 'MMS-HUB-DHCP-NEW',
+          source: HubUrlSource.discovered,
+          isInitialized: true,
+        ),
+      );
+      addTearDown(notifier2.dispose);
+
+      notifier2.reportTransportUnreachable(
+        failedUrl: newUrl,
+        errorMessage: 'SocketException',
+      );
+      expect(notifier2.state.phase, HubConnectionPhase.offline);
+
+      final reconnected = await notifier2.ensureConnectedOrDiscover(force: true);
+      expect(reconnected, isTrue);
+      expect(notifier2.state.phase, HubConnectionPhase.connected);
+      expect(notifier2.state.activeHubUrl, 'http://127.0.0.1:${thirdServer.port}');
+    });
+
+    test('WP-1 ProviderContainer: BackgroundSyncCoordinator networkError sonrası HubConnectionNotifier offline olur', () async {
+      final deadPort = await _reserveDeadLocalPort();
+      final oldUrl = 'http://127.0.0.1:$deadPort';
+
+      await localDb.repository.saveStoredHubConnection(
+        hubUrl: oldUrl,
+        hubId: 'MMS-HUB-OLD',
+        source: HubUrlSource.discovered,
+        allowLoopback: true,
+      );
+      await localDb.repository.createOfflineSale(
+        deviceId: 'POS-AND-01',
+        paymentMethod: 'CASH',
+        items: <CartItemInput>[CartItemInput.units('prod_su', 1)],
+      );
+
+      final container = ProviderContainer(
+        overrides: [
+          localDatabaseServiceProvider.overrideWithValue(localDb),
+          hubAllowLoopbackPolicyProvider.overrideWithValue(true),
+          hubAutoDiscoveryLifecycleEnabledProvider.overrideWithValue(false),
+          initialHubConnectionStateProvider.overrideWithValue(
+            HubConnectionState(
+              phase: HubConnectionPhase.connected,
+              activeHubUrl: oldUrl,
+              hubId: 'MMS-HUB-OLD',
+              source: HubUrlSource.discovered,
+              isInitialized: true,
+            ),
+          ),
+          syncTransportProvider.overrideWithValue(
+            _NetworkErrorSyncTransport(),
+          ),
+          apiClientProvider.overrideWith(
+            (ref) => MmsApiClient(
+              readBaseUrl: () => ref.read(hubConnectionProvider).activeHubUrl,
+              allowLoopback: true,
+              deviceId: 'POS-AND-01',
+              deviceToken: 'tok_sync_test',
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      await container
+          .read(backgroundSyncCoordinatorProvider.notifier)
+          .triggerSync(reason: SyncTriggerReason.manual);
+
+      expect(
+        container.read(backgroundSyncCoordinatorProvider).status,
+        SyncCoordinatorStatus.networkError,
+      );
+      expect(
+        container.read(hubConnectionProvider).phase,
+        HubConnectionPhase.offline,
+      );
+    });
   });
+}
+
+class _NetworkErrorSyncTransport implements SyncTransport {
+  static final SyncResponse _netErr = SyncResponse.networkError(
+    'Ağ bağlantı hatası (SocketException): Connection refused',
+  );
+
+  @override
+  Future<SyncResponse> postSale({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  Future<SyncResponse> postProductUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  Future<SyncResponse> postStockReceipt({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  Future<SyncResponse> getProducts({
+    required String hubUrl,
+    required String token,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  Future<SyncResponse> getSales({
+    required String hubUrl,
+    required String token,
+    int cursor = 0,
+    int limit = 50,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  Future<SyncResponse> postSyncAck({
+    required String hubUrl,
+    required String token,
+    required String syncSessionId,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      _netErr;
+
+  @override
+  void close() {}
 }

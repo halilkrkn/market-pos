@@ -13,6 +13,7 @@ import '../lib/db/write_queue.dart';
 import '../lib/security/auth_middleware.dart';
 import '../lib/security/body_limit_middleware.dart';
 import '../lib/security/certificate_manager.dart';
+import '../lib/security/live_drive_secret_manager.dart';
 import '../lib/security/pairing_delivery_buffer.dart';
 import '../lib/security/pairing_manager.dart';
 import '../lib/security/pepper_manager.dart';
@@ -87,6 +88,7 @@ class SpikeServer {
   final String? backupDirectory;
   final String? adminSecret;
   final PepperManager pepperManager;
+  final LiveDriveSecretManager liveDriveSecretManager;
   final SecurityContext? securityContext;
   final bool requireTls;
   final PairingManager pairingManager;
@@ -148,6 +150,7 @@ class SpikeServer {
     this.backupDirectory,
     this.adminSecret,
     PepperManager? pepperManager,
+    LiveDriveSecretManager? liveDriveSecretManager,
     this.securityContext,
     this.requireTls = false,
     PairingManager? pairingManager,
@@ -166,6 +169,11 @@ class SpikeServer {
     Map<String, String>? environment,
   })  : _environment = environment,
         pepperManager = _resolvePepperManager(pepperManager),
+        liveDriveSecretManager = _resolveLiveDriveSecretManager(
+          liveDriveSecretManager,
+          pepperManager?.file,
+          dbFile,
+        ),
         pairingManager = pairingManager ?? PairingManager(),
         lifecycle = lifecycle ?? LifecycleManager(db: db, writeQueue: writeQueue),
         tenantId = (tenantId != null && tenantId.trim().isNotEmpty)
@@ -193,6 +201,36 @@ class SpikeServer {
     final pm = PepperManager(File(pepperPath));
     pm.initialize();
     return pm;
+  }
+
+  static LiveDriveSecretManager _resolveLiveDriveSecretManager(
+    LiveDriveSecretManager? provided,
+    File? pepperFileHint,
+    File? dbFile,
+  ) {
+    if (provided != null) {
+      try {
+        final _ = provided.secret;
+      } catch (_) {
+        provided.initialize();
+      }
+      return provided;
+    }
+    if (dbFile == null) {
+      final mgr = LiveDriveSecretManager.inMemory();
+      mgr.initialize();
+      return mgr;
+    }
+    final usePepperDir = pepperFileHint != null &&
+        (pepperFileHint.isAbsolute || pepperFileHint.path != 'pepper.dpapi');
+    final baseDir = usePepperDir
+        ? pepperFileHint.parent.path
+        : dbFile.parent.path;
+    final mgr = LiveDriveSecretManager(
+      File(p.join(baseDir, 'live_drive_sync_secret.dpapi')),
+    );
+    mgr.initialize();
+    return mgr;
   }
 
   /// Zamanlama saldırılarını (timing attack) önleyen sabit zamanlı byte karşılaştırması
@@ -1412,6 +1450,39 @@ class SpikeServer {
           'device_id': targetDeviceId,
         }),
         headers: {'content-type': 'application/json'},
+      );
+    });
+
+    // 4.1. K-05: Live Drive Senkronizasyon Sırrı Rotasyonu (Loopback + Admin Secret)
+    _router.post('/api/v1/admin/live-drive-secret/rotate', (Request req) async {
+      final authError = _verifyLoopbackAndAdmin(
+        req,
+        actionName: 'Live Drive sır rotasyonu',
+      );
+      if (authError != null) return authError;
+
+      final rotatedAt = DateTime.now().toUtc();
+      await writeQueue.enqueue(() async {
+        liveDriveSecretManager.rotate();
+        await db.into(db.deviceAuditLogs).insert(
+              DeviceAuditLogsCompanion(
+                deviceId: const Value('HUB_ADMIN'),
+                action: const Value('LIVE_DRIVE_SECRET_ROTATE'),
+                details: const Value('Live Drive sync secret rotated by admin'),
+                createdAt: Value(rotatedAt),
+              ),
+            );
+      });
+
+      return Response.ok(
+        jsonEncode({
+          'status': 'ROTATED',
+          'rotated_at': rotatedAt.toIso8601String(),
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
       );
     });
 
@@ -3383,6 +3454,52 @@ class SpikeServer {
       );
     });
 
+    // 5.1b. K-05: Authenticated & TLS-Pinned Live Drive Sync Konfigürasyonu Teslimi
+    _router.get('/api/v1/sync/live-drive-config', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Live Drive yapılandırması için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final devices = await (db.select(db.devices)
+            ..orderBy([(d) => OrderingTerm.asc(d.deviceId)]))
+          .get();
+      final devicesJson = devices
+          .map((d) => <String, dynamic>{
+                'device_id': d.deviceId,
+                'tenant_id': tenantId,
+                'store_id': storeId,
+                'status': (d.isActive && d.isConfirmed) ? 'ACTIVE' : 'REVOKED',
+                'updated_at':
+                    (d.lastUsedAt ?? d.createdAt).toUtc().toIso8601String(),
+              })
+          .toList();
+
+      return Response.ok(
+        jsonEncode({
+          'version': 1,
+          'tenant_id': tenantId,
+          'store_id': storeId,
+          'hub_id': hubId,
+          'live_sync_secret': liveDriveSecretManager.secret,
+          'authorized_devices': devicesJson,
+          'server_time': DateTime.now().toUtc().toIso8601String(),
+        }),
+        headers: {
+          'content-type': 'application/json',
+          'cache-control': 'no-store',
+        },
+      );
+    });
+
     // 5.2. BK-02.1: Authenticated İşlem Makbuzları Sorgulama (Salt-Okunur, Cihaz İzolasyonlu)
     _router.post('/api/v1/sync/receipts', (Request req) async {
       final deviceId = req.context['authenticated_device_id'] as String?;
@@ -4020,6 +4137,7 @@ class SpikeServer {
             '/api/v1/admin/restore',
             '/api/v1/admin/backup/prune',
             '/api/v1/admin/backup/status',
+            '/api/v1/admin/live-drive-secret/rotate',
             '/api/v1/devices/revoke',
             '/api/v1/pairing/session',
             '/api/v1/pairing/requests',

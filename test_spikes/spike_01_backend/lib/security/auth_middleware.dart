@@ -19,6 +19,7 @@ Middleware createAuthMiddleware({
   List<String> strictTenantStorePaths = const [
     '/api/v1/sync/device-state',
     '/api/v1/sync/receipts',
+    '/api/v1/sync/live-drive-config',
   ],
   List<String> storeDataPrefixes = const [
     '/api/v1/sales',

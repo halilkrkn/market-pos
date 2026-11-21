@@ -6,6 +6,7 @@ import 'package:path/path.dart' as p;
 import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:sqlite3/sqlite3.dart' as sqlite;
 import 'package:market_pos/core/storage/local_database_service.dart';
+import 'package:market_pos/features/sync/infrastructure/udp_hub_discovery_client.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
 void main() {
@@ -18,9 +19,36 @@ void main() {
 
   const testDeviceId = 'POS-ANDROID-01';
   const rawToken = 'android_e2e_secret_token_8899';
-  const hubUrl = 'http://127.0.0.1:8945';
+  const configuredHubUrl = String.fromEnvironment('MMS_E2E_HUB_URL');
+  late final String hubUrl;
 
   setUpAll(() async {
+    final allowLoopback = !Platform.isAndroid;
+    if (configuredHubUrl.trim().isNotEmpty) {
+      hubUrl = HubUrlValidator.normalizeAndValidate(
+        configuredHubUrl,
+        allowLoopback: allowLoopback,
+      );
+    } else {
+      final candidates = await const UdpHubDiscoveryClient().discover(
+        deviceId: testDeviceId,
+      );
+      String? discoveredUrl;
+      for (final candidate in candidates) {
+        final urls = candidate.candidateBaseUrls(allowLoopback: allowLoopback);
+        if (urls.isNotEmpty) {
+          discoveredUrl = urls.first;
+          break;
+        }
+      }
+      if (discoveredUrl == null) {
+        throw StateError(
+          'MMS_E2E_HUB_URL tanımlı değil ve yerel ağda Hub keşfedilemedi.',
+        );
+      }
+      hubUrl = discoveredUrl;
+    }
+
     dbService = await LocalDatabaseService.initialize();
     repo = dbService.repository;
     dbFile = File(dbService.databasePath);

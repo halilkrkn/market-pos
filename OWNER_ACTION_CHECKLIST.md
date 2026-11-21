@@ -1,17 +1,17 @@
 # MARKET MMS — Owner (Proje Sahibi) İşlem Listesi
 
-*Tarih: 22 Kasım 2026 (Release 1.0 + Phase 1.1 Finalization) · Kaynaklar: [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md`](docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md), [`docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`](docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md)*
+*Tarih: 22 Kasım 2026 (Release 1.0 + Phase 1.1 + Aşama 1/3/4/2 Tamamlama) · Kaynaklar: [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md`](docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md), [`docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`](docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md), [`docs/LIVE_PROJECT_STATUS.md`](docs/LIVE_PROJECT_STATUS.md)*
 
-Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test gerektiren maddeleriniz yer alır. Release 1.0 yazılım geliştirme kapsamı (`P-BLOCK-1..3` / `DEC-REV-1..5`, Android kapalıyken arka plan yedeği `ADR-020` [`JOB_ID = 70201`], Google Drive listeleme/indirme/kontrollü geri yükleme `Faz C` ve Hub öncelikli Google Drive hibrit canlı senkronizasyon `ADR-021`) teknik olarak uygulanmış ve otomatik testlerle doğrulanmıştır. Phase 1.1 Finalization kapsamında Android sürümü `1.0.0+1` olarak sabitlenmiş, Android NDK `28.2.13676358` kurulup doğrulanmış ve Android Google Drive OAuth için **Seçenek A (`google_sign_in`)** + **pilot kapsamına dahil edilmesi** Owner kararıyla **`ADR-022`** içinde tasarımsal olarak kesinleştirilmiştir (OAuth implementasyonu Phase 2 kapsamındadır). Ancak fiziksel kabul testleri (`PAT-01…PAT-18`), üretim Android imza anahtarı (`B1`), üretim Hub TLS sertifikaları (`B2`), Google Cloud OAuth kurulumu (`C1/C2`) ve `ADR-022` Phase 2 implementasyonu henüz tamamlanmadığı için sistem sahaya / üretime tam hazır ilan edilmemiştir (**`PHASE 1.1 COMPLETE — SOFTWARE VALIDATION PASSED` · `PAT-01…18 BLOCKED`**).
+Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test gerektiren maddeleriniz yer alır. Release 1.0 + Phase 1.1 + 22 Kasım Aşama 1/3/4/2 yazılım geliştirme kapsamı (`P-BLOCK-1..3` / `DEC-REV-1..5`, `WP-1` DHCP reconnect & mobil ergonomi & tema kalıcılığı, `A7` Windows `qr_flutter` QR görseli, `K-05` Hub TLS-pinned canlı Drive sır/kayıt defteri provizyonu, Android kapalıyken arka plan yedeği `ADR-020` [`JOB_ID = 70201`], Google Drive listeleme/indirme/kontrollü geri yükleme `Faz C` ve Hub öncelikli Google Drive hibrit canlı senkronizasyon `ADR-021`) teknik olarak uygulanmış ve **790/790 otomatik test** + **Windows/Android debug build** ile doğrulanmıştır. Phase 1.1 kapsamında Android sürümü `1.0.0+1` olarak sabitlenmiş, Android NDK `28.2.13676358` doğrulanmış ve Android Google Drive OAuth için **Seçenek A (`google_sign_in`)** + **pilot kapsamına dahil edilmesi** Owner kararıyla **`ADR-022`** içinde tasarımsal olarak kesinleştirilmiştir (OAuth implementasyonu Phase 2 kapsamındadır). Ancak fiziksel kabul testleri (`PAT-01…PAT-18`), üretim Android imza anahtarı (`B1`), üretim Hub TLS sertifikaları (`B2`), Google Cloud OAuth kurulumu (`C1/C2`), ortam temizliği (`D1–D4`) ve `ADR-022` Phase 2 implementasyonu henüz tamamlanmadığı için sistem sahaya / üretime tam hazır ilan edilmemiştir (**`SOFTWARE VALIDATED (790/790) — PAT-01…18 BLOCKED`**).
 
 > **Bu belgede hiçbir gerçek parola, token, sertifika veya özel anahtar yoktur; eklemeyin.**
 
 **Önerilen sıra:**
-1. Kararlar (A) — özellikle `A1`, `A6` (`ADR-022` Android Drive OAuth kararı), `A7`, `A8`.
+1. Kararlar (A) — `A1`, `A6` (`C1/C2` hazırlığı ve `ADR-022` Phase 2 takvimi), `A8`. (`A7` QR görseli `qr_flutter` ile ve `A6` `K-05` Seçenek 1 Hub TLS-pinned dağıtım modeliyle kodlanmıştır.)
 2. Üretim anahtarları ve sertifikalar (B) — `B1` (Android Keystore) ve `B2` (Hub TLS `ca.crt` + `IP:127.0.0.1` ve LAN IP SAN'lı `server.crt`).
 3. Temizlik (D) — `D1` (`MarketMmsSpike01`) ve `D2–D4` test kalıntıları.
 4. Pilot donanımı ve fiziksel kabul testleri (E) — `PAT-01…PAT-18`.
-5. Google Drive OAuth (`C1/C2`) ve `drive_live_sync_secret_v1` saha dağıtımı — salt yerel Hub+USB başlangıç pilotu için en sona kalabilir; ancak `PAT-13`, `PAT-17` ve `PAT-18` (hibrit Drive canlı senkronizasyon) için ön koşuldur.
+5. Google Drive OAuth (`C1/C2`) ve `ADR-022` (`google_sign_in`, Phase 2) — salt yerel Hub+USB başlangıç pilotu için en sona kalabilir; ancak `PAT-13`, `PAT-17` ve `PAT-18` (hibrit Drive canlı senkronizasyon) için ön koşuldur. (`drive_live_sync_secret_v1` dağıtımı `K-05` ile Hub üzerinden otomatize edilmiştir.)
 
 ---
 
@@ -20,12 +20,12 @@ Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test g
 | # | Madde | Tür | Durum / Engellediği iş | Öncelik |
 |---|---|---|---|---|
 | A1 | ADR-015…022 kararları | **Teknik Tamam / Tasarım Onaylı** | `ADR-015, 016, 018, 020, 021` teknik olarak uygulandı (`PAT-01…18` saha doğrulaması **BLOCKED**); `ADR-017` `PAT-12` sonrası kesin onay, `ADR-019` pilot sonrası, `ADR-022` **DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION** (Seçenek A `google_sign_in`, pilot kapsamına dahil) | **Orta** |
-| A2 | Git commit ve sürüm takibi | **Phase 1.1 Commit Onaylandı** | Release 1.0 bazı `a02a3c6` üzerine Owner onayıyla Phase 1.1 Finalization commit/push'u yapılır; 4 yerel dosya (`.vscode/settings.json`, `*.bat`) commit dışı korunur | Tamamlandı / İzleme |
+| A2 | Git commit ve sürüm takibi | **Phase 1.1 Commit Onaylandı (`a118434`); Yeni Paket Unstaged** | Release 1.0 (`a02a3c6`) ve Phase 1.1 (`a118434`) push edildi; 22 Kasım Aşama 1/3/4/2 değişiklikleri çalışma ağacında unstaged durumda (Owner commit onayı bekler); 4 yerel dosya (`.vscode/settings.json`, `*.bat`) commit dışı korunur | İzleme / Commit Onayı |
 | A3 | Kategori/KDV senkronu (ADR-019) | **DEFERRED_POST_PILOT** | Pilotta 7 geçici %20 KDV kısıtıyla kabul; pilot sonrası migrasyon | Orta (pilot sonrası) |
-| A4 | Discovery TLS (ADR-018 §2.2) & `P-BLOCK-1..3` | **IMPLEMENTED (Otomatik Testli)** | `DEC-REV-1..5` kodlandı (`X.509/DER`, `ALT-BOOT-2`, `ACK_PENDING`, Win FFI, `advertise_host`); fiziksel doğrulama **`PAT-03` & `PAT-12`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-03`, `PAT-12`)** |
+| A4 | Discovery TLS (ADR-018 §2.2) & `P-BLOCK-1..3` | **IMPLEMENTED (Otomatik Testli)** | `DEC-REV-1..5` + `WP-1` (`networkError` DHCP/Wi-Fi reconnect) kodlandı; fiziksel doğrulama **`PAT-03` & `PAT-12`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-03`, `PAT-12`)** |
 | A5 | Android kapalıyken arka plan yedek (`ADR-020`) | **IMPLEMENTED (`JobScheduler`, `JOB_ID = 70201`)** | `MmsBackgroundBackupJobService` + headless `FlutterEngine` + Keystore ile harici bağımlılıksız uygulandı; fiziksel doğrulama **`PAT-16`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-16`)** |
-| A6 | Google Drive Yedek + Hibrit Canlı Senkron (`ADR-021`) + Android OAuth (`ADR-022`) | **Kısmi IMPLEMENTED / Phase 2 Bekler** | Drive `listRemoteBackups`, `.part` indirme/restore (`PAT-17`) ve `MMSENV01` hibrit canlı senkron (`PAT-18`, `MARKET MMS LiveSync`) kodlandı; Android Drive OAuth (`ADR-022`, Seçenek A `google_sign_in`) pilot kapsamına alındı ancak **Phase 2'de implemente edilecek**. `C1/C2` + `drive_live_sync_secret_v1` dağıtım kararı (`K-05`) bekleniyor | **Yüksek (`ADR-022` Phase 2, `C1/C2`, `PAT-13/17/18`)** |
-| A7 | QR görseli paketi | Karar + bağımlılık | Windows ekranında QR görüntüsü | Düşük |
+| A6 | Google Drive Yedek + Hibrit Canlı Senkron (`ADR-021`, `K-05`) + Android OAuth (`ADR-022`) | **Hibrit + `K-05` IMPLEMENTED / `ADR-022` Phase 2 Bekler** | `MMSENV01` hibrit canlı senkron + `K-05` Hub TLS-pinned `GET /api/v1/sync/live-drive-config`, admin secret rotation ve kalıcı `FileDriveAuthorizedRegistryStore` uygulandı; **yalnızca `ADR-022` (`google_sign_in`) Phase 2**, **`C1/C2`** Google Cloud kurulumu ve **`PAT-13/17/18`** saha doğrulaması bekleniyor | **Yüksek (`ADR-022` Phase 2, `C1/C2`, `PAT-13/17/18`)** |
+| A7 | QR görseli paketi (`qr_flutter`) | **IMPLEMENTED (`qr_flutter: ^4.1.0`)** | Windows `PairingApprovalPanel` içinde canlı kare QR (`Key('pairing_qr_image')`) eklendi; fiziksel doğrulama **`PAT-03`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-03`)** |
 | A8 | Güncelleme paketi imzalama ve merkezi hata izleme | Karar + sertifika | İmzalı güncelleme / merkezi tanı | Orta |
 | B1 | Android üretim imza anahtarı | Gizli anahtar | Release APK (`pubspec.yaml` `1.0.0+1`, `PAT-11`) | **Engelleyici** |
 | B2 | Hub TLS sertifikaları (CA + `IP:127.0.0.1` & LAN IP SAN'lı sunucu) | Sertifika | Üretim Hub'ı startup (`exit 78` koruması), eşleştirme (`PAT-03`, `PAT-12`) | **Engelleyici** |
@@ -56,19 +56,19 @@ Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test g
   | 018 (+`DEC-REV-1..5`) | Eşleştirilmiş keşifte `https://` zorunluluğu (§2.1), UDP Seçenek C (§2.2) ve **`P-BLOCK-1..3`** (`X.509/DER`, `ALT-BOOT-2`, `ACK_PENDING`, Win FFI, `advertise_host`) | **CONFIRMED — IMPLEMENTED (Otomatik Testli)** (`PAT-03`, `PAT-12` **BLOCKED**) | Gerçek donanım/LAN doğrulaması (`PAT-03`, `PAT-12`) |
   | 019 | Kategori/KDV senkronu (`SYNC-CAT`) | **DEFERRED_POST_PILOT** (kod/şema değişmedi) | Pilot boyunca 7 geçici %20 KDV kısıtını operasyonel olarak uygulayın |
   | 020 | Android kapalıyken arka plan yedekleme (saf SDK `JobScheduler`, **`JOB_ID = 70201`** + headless `FlutterEngine` + Keystore) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (`PAT-16` **BLOCKED**) | Fiziksel Android cihazda uygulama kapalıyken yedek + reboot doğrulaması (`PAT-15`, `PAT-16`) |
-  | 021 | Hub öncelikli, Google Drive destekli hibrit canlı senkronizasyon (`MMSENV01`, klasör: `MARKET MMS LiveSync`, non-LWW) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (26 otomatik senaryo geçti; `PAT-18` **BLOCKED**) | `C1/C2` + `drive_live_sync_secret_v1` kurulumu sonrası 2 cihaz saha doğrulaması (`PAT-18`) |
-  | 022 | Android Google Drive OAuth Tasarımı (**Seçenek A — `google_sign_in`**) | **`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`** (Phase 1.1'de kodlanmadı) | Phase 2 implementasyonu öncesi `C1/C2` (Web `serverClientId` + Android SHA-1 + "In production") ve `drive_live_sync_secret_v1` dağıtım modelini (`K-05`) hazırlayın/onaylayın |
+  | 021 | Hub öncelikli, Google Drive destekli hibrit canlı senkronizasyon (`MMSENV01`, klasör: `MARKET MMS LiveSync`, non-LWW, **`K-05` Hub provizyonu**) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (26 motor senaryosu + `K-05` Hub/istemci provizyon testleri geçti; `PAT-18` **BLOCKED**) | `C1/C2` kurulumu sonrası 2 cihaz saha doğrulaması (`PAT-18`) |
+  | 022 | Android Google Drive OAuth Tasarımı (**Seçenek A — `google_sign_in`**) | **`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`** (Phase 1.1 ve Aşama 1/3/4/2'de kodlanmadı) | Phase 2 implementasyonu öncesi `C1/C2` (Web `serverClientId` + Android SHA-1 + "In production") yapılandırın |
 
-- **Etkilenen dosyalar:** `docs/decisions/015…022-*.md`, `docs/decisions/README.md`, `docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`.
+- **Etkilenen dosyalar:** `docs/decisions/015…022-*.md`, `docs/decisions/README.md`, `docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`, `docs/LIVE_PROJECT_STATUS.md`.
 - **Tamamlandığında yapılacak test:** Fiziksel kabul testleri **`PAT-01…PAT-18`** (şu an tamamı **BLOCKED**).
 
 ### A2. Değişikliklerin commit edilmesi ve sürüm takibi
 - **Mevcut Durum:**
-  - Release 1.0 yazılım geliştirme paketi (`54` dosya) **`a02a3c66edb3d580c047a02557057acf7d6fa573`** (`feat(market-mms): complete release 1.0 software implementation`) üzerine, Owner'ın Phase 1.1 Finalization yetkisiyle yalnızca Phase 1.1 kapsamındaki dosyalar (`feat(market-mms): finalize phase 1.1 remediation`) `origin/main`'e commit ve push edilmektedir.
+  - Release 1.0 (`a02a3c6`) ve Phase 1.1 (`a118434`) commit'leri `origin/main` üzerinde kayıtlıdır; **22 Kasım 2026 Aşama 1/3/4/2 değişiklikleri `HEAD = a118434` üzerinde çalışma ağacında unstaged beklemektedir** (Owner onayı olmadan stage/commit/push yapılmaz).
   - Bilinçli olarak commit dışı bırakılan 4 korunan yerel dosya (`.vscode/settings.json`, `run_windows_client.bat`, `start_master_hub.bat`, `stop_master_hub.bat`) ve çalışma zamanı verileri/servisleri dokunulmadan korunur.
 - **Güvenlik kontrolü:**
-  - `git status --ignored` / `git diff --cached` içinde şu dosyalar **asla bulunmaz**: `manual_test_env/`, `*.db`, `*.key`, `pepper.dpapi`, `android/key.properties`, `*.jks`.
-- **Tamamlandığında yapılacak test:** Dört test süitinin (`774/774`) ve statik analizlerin tam yeşil olduğu doğrulanmıştır.
+  - `git status --ignored` / `git diff --cached` içinde şu dosyalar **asla bulunmaz**: `manual_test_env/`, `*.db`, `*.key`, `pepper.dpapi`, `live_drive_sync_secret.dpapi`, `android/key.properties`, `*.jks`.
+- **Tamamlandığında yapılacak test:** Dört test süitinin (**`790/790`**) ve statik analizlerin + Windows/Android debug derlemelerinin tam yeşil olduğu doğrulanmıştır.
 
 ### A3. Kategori / KDV senkronizasyonu kararı (SYNC-CAT, ADR-019 — **DEFERRED_POST_PILOT**)
 - **Karar Durumu:** Owner kararıyla pilot sonrasına **ertelendi**. Şema v3 → v4, `CATEGORY_UPSERT`, `PRODUCT_UPSERT` değişiklikleri ve kısmi KDV senkronizasyonu pilotta uygulanmayacaktır.
@@ -90,29 +90,29 @@ Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test g
 - **Karar & Uygulama Durumu:** Harici pub paketi (`workmanager`) olmadan saf Android SDK `JobScheduler` (`MmsBackgroundBackupJobService`, kanonik **`JOB_ID = 70201`**) + headless `FlutterEngine` + paylaşılan `MmsSecureStorageChannelHandler` (`AndroidKeyStore`) + `BackgroundBackupWorkerExecutor` uygulandı; `BackupOperationLock` ve üstel geri çekilme (exponential backoff) entegre edildi ve otomatik testlerle doğrulandı.
 - **Sizden İstenen:** Fiziksel Android cihazda **`PAT-16`** ile uygulama kapalıyken yedekleme (`adb shell cmd jobscheduler run -f com.marketmms.market_pos 70201`) + yeniden başlatma (`setPersisted(true)`) kalıcılığının doğrulanması.
 
-### A6. Google Drive Yedekleme, Hibrit Canlı Senkronizasyon (`ADR-021`) ve Android OAuth Kararı (`ADR-022`)
+### A6. Google Drive Yedekleme, Hibrit Canlı Senkronizasyon (`ADR-021`, `K-05`) ve Android OAuth Kararı (`ADR-022`)
 - **Mevcut Durum:**
-  - **Uygulananlar (Otomatik Testli):** Uzak şifreli yedek listeleme/indirme/ön doğrulamalı geri yükleme (`Faz C`, `PAT-17`) ve Hub-öncelikli `MMSENV01` hibrit canlı senkronizasyon motoru (`ADR-021`, `MARKET MMS LiveSync` klasörü, 26 otomatik senaryo, `PAT-18`).
-  - **Owner Kararı & Phase 2 Kapsamı (`ADR-022`):** Owner, Android Drive entegrasyonunu **pilot kapsamına dahil etmiş** ve yöntem olarak **Seçenek A (`google_sign_in`)** tasarımını onaylamıştır (`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`). Phase 1.1 kapsamında OAuth kodu yazılmamış ve `google_sign_in` eklenmemiştir; şu an Android'de `connect()` çağrısı hâlâ **`ERR_DRIVE_PLATFORM_UNSUPPORTED`** döndürmektedir.
-  - **Paylaşılan Sır İhtiyacı:** İki veya daha fazla cihaz arasında `ADR-021` hibrit canlı senkronizasyonun çalışması için cihazlarda ortak **`drive_live_sync_secret_v1`** gizlisinin ve `DriveAuthorizedDeviceRegistry` yetkilendirmesinin kurulması gerekir.
+  - **Uygulananlar (Otomatik Testli):** Uzak şifreli yedek listeleme/indirme/ön doğrulamalı geri yükleme (`Faz C`, `PAT-17`), Hub-öncelikli `MMSENV01` hibrit canlı senkronizasyon motoru (`ADR-021`, `MARKET MMS LiveSync` klasörü, 26 otomatik senaryo, `PAT-18`) ve **Seçenek 1 (`K-05`) Hub TLS-pinned provizyonu**:
+    - Hub tarafında Windows DPAPI korumalı `LiveDriveSecretManager` (`live_drive_sync_secret.dpapi`), `strictTenantStorePaths` korumalı `GET /api/v1/sync/live-drive-config` (`Cache-Control: no-store`, `ACTIVE`/`REVOKED` cihaz listesi + `live_sync_secret`) ve loopback + admin korumalı `POST /api/v1/admin/live-drive-secret/rotate`.
+    - İstemci tarafında atomik `FileDriveAuthorizedRegistryStore` (`drive_authorized_devices.json`), `HubLiveDriveConfigClient`, `DriveAuthorizedRegistryNotifier` ve başarılı Hub sync sonrası 5 dk throttle'lı provizyon (`live_sync_secret` güvenli depoya, `ACTIVE`/`REVOKED` cihaz kayıt defteri diske yazılır).
+  - **Owner Kararı & Phase 2 Kapsamı (`ADR-022`):** Owner, Android Drive entegrasyonunu **pilot kapsamına dahil etmiş** ve yöntem olarak **Seçenek A (`google_sign_in`)** tasarımını onaylamıştır (`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`). Mevcut aşamada Android OAuth kodu yazılmamış ve `google_sign_in` eklenmemiştir; şu an Android'de `connect()` çağrısı hâlâ **`ERR_DRIVE_PLATFORM_UNSUPPORTED`** döndürmektedir.
 - **Ne yapmalısınız?**
   1. `B1` Release keystore oluşturduktan sonra **SHA-1** ve **SHA-256** parmak izlerini `C1/C2` Google Cloud OAuth kurulumunda kaydedin.
   2. `C1/C2` altında aynı Google Cloud projesinde **Desktop app Client ID**, **Android OAuth Client ID** (`com.marketmms.market_pos` + SHA-1) ve `google_sign_in` için zorunlu **Web application Client ID (`serverClientId`)** oluşturun; OAuth izin ekranını **`"In production"`** durumuna alın.
-  3. **`K-05` (`drive_live_sync_secret_v1` dağıtım modeli):** Gizli anahtarın cihazlara Hub üzerinden TLS-pinned teslimle mi yoksa Owner manuel/QR kurulumu ile mi dağıtılacağını Phase 2 öncesi belirleyin.
-- **Etkilenen dosyalar (Phase 2):** `pubspec.yaml`, Android yapılandırması, `lib/features/backup/application/google_drive_connect_service.dart`, `lib/features/backup/backup_providers.dart`, `lib/features/sync/sync_providers.dart`.
+  3. Phase 2 (`ADR-022`) onayı verdiğinizde `google_sign_in` entegrasyonu başlatılacaktır.
+- **Etkilenen dosyalar (`K-05` Tamamlandı / `ADR-022` Phase 2):**
+  - Tamamlanan (`K-05`): `test_spikes/spike_01_backend/lib/security/live_drive_secret_manager.dart`, `auth_middleware.dart`, `bin/server.dart`, `lib/features/sync/data/drive_authorized_registry_store.dart`, `hub_live_drive_config_client.dart`, `application/drive_authorized_registry_notifier.dart`, `sync_providers.dart`, `lib/main.dart`.
+  - Phase 2 (`ADR-022`): `pubspec.yaml`, Android yapılandırması, `lib/features/backup/application/google_drive_connect_service.dart`, `lib/features/backup/backup_providers.dart`.
 - **Güvenlik uyarısı:** Kapsam her koşulda yalnızca `drive.file` kalmalıdır (`ADR-011`). Web `client_secret` ve `drive_live_sync_secret_v1` değerleri APK'ya, depoya, loglara veya SQLite'a **asla** yazılmamalıdır.
-- **Tamamlandığında yapılacak test:** Phase 2 implementasyonu + `C1/C2` sonrası `PAT-13` (Windows & Android), `PAT-17` (Drive geri yükleme) ve `PAT-18` (2 cihaz hibrit canlı senkronizasyon).
+- **Tamamlandığında yapılacak test:** `K-05` backend + istemci provizyon otomatik testleri geçti; Phase 2 (`ADR-022`) + `C1/C2` sonrası `PAT-13` (Windows & Android), `PAT-17` (Drive geri yükleme) ve `PAT-18` (2 cihaz hibrit canlı senkronizasyon).
 
-### A7. QR görseli bağımlılığı
-- **Neden gerekli?**
-  - Windows eşleştirme ekranı şu an QR **içeriğini** kopyalanabilir metin olarak veriyor; ekrana QR **resmi** çizmiyor.
-  - Android tarafı QR'ı mevcut kamera paketiyle (`mobile_scanner`) okuyabiliyor.
-- **Ne yapmalısınız?** İki seçenek var:
-  - QR çizmek için bir paket eklenmesini onaylayın (örneğin `qr_flutter`, saf Dart).
-  - Ya da mevcut akışla devam edin: metni kopyalayıp başka bir araçla QR'a çevirin, veya Android'de metni yapıştırın.
-- **Etkilenen dosyalar:** `pubspec.yaml`, `lib/features/security/presentation/widgets/pairing_approval_panel.dart`.
+### A7. QR görseli bağımlılığı (**IMPLEMENTED (`qr_flutter: ^4.1.0`)**)
+- **Neden gerekliydi & Ne yapıldı?**
+  - Windows `PairingApprovalPanel` eşleştirme ekranı QR görselini doğrudan ekranda göstermiyordu.
+  - `pubspec.yaml` dosyasına `qr_flutter: ^4.1.0` eklendi ve `PairingApprovalPanel` içinde beyaz zeminli kart üzerinde kare modüllü `QrImageView` (`Key('pairing_qr_image')`, `220×220`) + güvenlik uyarısı ile kopyalanabilir payload akışı birlikte sunuldu; açık/koyu tema widget testleri (`pairing_approval_panel_test.dart`) geçti.
+- **Etkilenen dosyalar:** `pubspec.yaml`, `lib/features/security/presentation/widgets/pairing_approval_panel.dart`, `test/features/security/pairing_approval_panel_test.dart`.
 - **Güvenlik uyarısı:** QR içeriği tek kullanımlık ve süreli bir eşleştirme sırrı içerir. Ekran görüntüsünü paylaşmayın.
-- **Tamamlandığında yapılacak test:** `PAT-03`, adım 1–4.
+- **Kalan doğrulama:** Fiziksel Android kamera taraması ile **`PAT-03`** adım 1–4 (**BLOCKED**).
 
 ### A8. Güncelleme paketi imzalama ve merkezi hata izleme
 - **Neden gerekli?**

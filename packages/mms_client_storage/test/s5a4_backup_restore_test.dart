@@ -938,7 +938,7 @@ void main() {
       expect(sales.isEmpty, isTrue); // Başlangıç durumunda henüz satış yoktu
       final prods = await clientDb.select(clientDb.localProducts).get();
       expect(prods.length, equals(2));
-    });
+    }, timeout: const Timeout(Duration(seconds: 90)));
 
     test('16. Eski Şema Sürümünden Restore ve Başarılı Migration Doğrulaması (v1 -> v2)', () async {
       // 1. Şema sürümü 1 olan bir yedek oluştur

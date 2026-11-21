@@ -1,9 +1,9 @@
 # Market Management System (MMS) — İş Kuralları Şartnamesi (Business Rules Specification)
 
 **Doküman Kodu:** `BUSINESS_RULES_SPEC.md`  
-**Sürüm:** 1.6 (Karar, `PaymentMethod` & Legacy Outbox Recovery Uzlaştırması)  
-**Tarih:** 12 Kasım 2026  
-**Durum:** Güncel Canonical Şartname (v1.5 üzerine 12 Kasım 2026 dokümantasyon uzlaştırması; Faz 1.2 POS kodlaması henüz başlamamıştır)  
+**Sürüm:** 1.7 (Karar Uzlaştırması — `OD-03` Çevrimdışı Ürün Ekleme ve `PRODUCT_UPSERT` Güncellemesi)  
+**Tarih:** 22 Kasım 2026  
+**Durum:** Güncel Canonical Şartname (v1.6 üzerine 22 Kasım 2026 Owner kararıyla Faz 4/5 çevrimdışı ürün ekleme uzlaştırması)  
 **Ana Referans Doküman:** `MARKET_POS_AI_STUDIO_BUILD_PLANI.md` (v1.4)  
 **Girdi Dokümanı:** `docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md` (v1.3)  
 **Teknik Proje / Klasör Adı:** `market-pos`  
@@ -22,6 +22,7 @@
 | **v1.4** | 11 Kasım 2026 | UX Kabulü & `OD-01..OD-04` Karar Kapanışı | Proje Sahibi kararıyla açık UX/ürün kararları kesinleştirildi (mevcut ID'ler ve tarihçe korundu): `OD-01` (`BR-PROD-07`: Half-Up alt kuruş yuvarlama, floating-point yasak, integer/decimal güvenli hesap, `12.50 TL`, dahili kuruş tamsayı); `OD-02` (`BR-POS-05` Parked Carts: MVP kapsam dışı / `[OUT_OF_SCOPE]`); `OD-03` (`BR-PROD-05`, `BR-SYNC-04`: yerel DB'de olmayan ürün offline oluşturulamaz ve offline satış sepetine eklenemez, ürün oluşturma Master Hub bağlantısı gerektirir, yerel DB'deki ürünler offline satılabilir); `OD-04` (sanal numpad opsiyonel, varsayılan kapalı). |
 | **v1.5** | 11 Kasım 2026 | `PaymentMethod` Sözleşme Standardizasyonu | `BR-PAY-01`, `BR-PAY-04` ve izlenebilirlik matrisine tüm katmanlar için bağlayıcı kanonik değerler (`'CASH'`, `'CARD'`) eklendi. Eski taslak yorumlarında ve test fixture'larında görülen `'CREDIT_CARD'` ve `'NAKIT'` ifadeleri yürürlükten kaldırıldı (*obsolete*); eksik veya geçersiz değerlerin backend'de sessizce `'CASH'` olarak yorumlanması yasaklandı. |
 | **v1.6** | 12 Kasım 2026 | Dokümantasyon Uzlaştırması & Legacy Outbox Recovery | `BR-PAY-01` ve `BR-SYNC-02` altına `b069d5b` ile tamamlanan **Legacy Outbox Recovery** (`updateAndRetryFailedOperation`, atomik SQLite transaction/rollback, FIFO bloklama & devamı) uyumu işlendi; Bölüm 12 izlenebilirlik matrisindeki çelişkili `BR-POS-05` `CONFIRMED` satırı `BR-POS-07` ile düzeltildi; Bölüm 13 kabul durumu ve `v1.4` plan referansı güncel repo durumuyla (UI/UX kabulü, `b069d5b` push edildi, Faz 1.2 POS henüz başlamadı) uzlaştırıldı. |
+| **v1.7** | 22 Kasım 2026 | Karar Uzlaştırması (`OD-03` Güncellemesi) | Proje Sahibi (Owner) kararıyla `BR-PROD-05` ve `BR-SYNC-04` güncel Faz 4/5 koduna hizalandı: zorunlu ürün alanları (`Ürün Adı`, `Satış Fiyatı`, `Birim`) doldurularak **çevrimdışı yeni ürün oluşturma ve `PRODUCT_UPSERT` FIFO Outbox kuyruğuyla senkronizasyonu** (kamera + Open Food Facts akışı dahil) kalıcı olarak onaylandı; eksik/muhtelif geçici ürün satışı yasağı korundu; 11 Kasım 2026 tarihli eski `OD-03` kaydı tarihsel not olarak korundu. |
 
 ---
 
@@ -71,14 +72,14 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
   3. Fiyat değişikliği kural olarak ürün yönetim ekranından yapılır; geçmiş satış kayıtları kendi snapshot fiyatlarını aynen korur.
 - **Sepet İçi Fiyat Müdahalesi ile Uyum:** Ekmek satırı da genel sepet satırı fiyat müdahalesi kuralına (`BR-POS-11`) tabidir. İşletme sahibi dilerse sepet satırındaki ekmek birim fiyatını zorunlu gerekçe ve açık onayla değiştirebilir (ör. bayat ekmek indirimi veya ikram). Bu müdahale ana ürün kartındaki satış fiyatını kesinlikle değiştirmez; yalnızca o sepet ve fiş için geçerlidir.
 
-### `BR-PROD-05` [CONFIRMED — OD-03 (11 Kasım 2026)] Bulunamayan Barkod İş Akışı ve Zorunlu Alan Doğrulaması
-- **Açıklama:** Kasada okutulan bir barkod yerel katalogda bulunamazsa sistem satışı durdurmaz; işletme sahibini kontrollü ürün kayıt akışına yönlendirir.
+### `BR-PROD-05` [CONFIRMED — 22 Kasım 2026 Güncel Karar] Bulunamayan Barkod İş Akışı ve Çevrimdışı Ürün Kayıt Kuralları
+- **Açıklama:** Kasada veya ürün yönetiminde okutulan bir barkod yerel katalogda bulunamazsa sistem satışı durdurmaz; işletme sahibini kontrollü ürün kayıt akışına yönlendirir.
 - **İş Akışı:**
-  1. "Ürün Bulunamadı" modalı açılır ve okutulan barkod otomatik dolu gelir.
-  2. Cihazda aktif internet bağlantısı varsa arka planda Open Food Facts sorgusu yapılır.
-  3. İnternet yoksa veya API ürünü bulamazsa manuel ürün kayıt formu açılır.
-  4. **`BR-PROD-01` ile Tam Uyum:** Ürünün **Ürün Adı**, **Satış Fiyatı**, **Birim** ve **Kategori** alanlarının tamamı eksiksiz ve geçerli biçimde doldurulup yerel veritabanına başarıyla kaydedilmeden ürün sepete kesinlikle eklenemez. Yalnızca ad ve fiyat girilerek yarım/eksik ürün oluşturulması engellenir.
-- **`[CONFIRMED — OD-03 (11 Kasım 2026)]` Hub Çevrimdışıyken Bilinmeyen Barkod Davranışı:** Proje Sahibi kararıyla; yerel veritabanında bulunmayan ürün **offline olarak oluşturulamaz** ve bilinmeyen barkod **offline satış sepetine eklenemez** (geçici/muhtelif ürün olarak sepete ekleme yasaktır). Yeni ürün oluşturma işlemi Master Hub bağlantısı gerektirir. Yerel veritabanında kayıtlı bulunan ürünler ise offline satılabilir. *(Tarihçe: v1.3'te `OPEN DECISION — OD-03` statüsündeydi -> v1.4'te onaylandı.)*
+  1. "Ürün Bulunamadı" akışından veya Katalog/Kamera taramasından ürün kayıt formu açılır ve okutulan barkod otomatik dolu gelir.
+  2. Cihazda aktif internet bağlantısı varsa arka planda Open Food Facts öneri sorgusu yapılır (`BR-PROD-06`); satış fiyatı ve stok asla otomatik doldurulmaz.
+  3. İnternet yoksa veya API ürünü bulamazsa manuel ürün kayıt formu ile devam edilir.
+  4. **`BR-PROD-01` ile Tam Uyum:** Ürünün **Ürün Adı**, **Satış Fiyatı** ve **Birim** alanlarının tamamı eksiksiz ve geçerli biçimde doldurulup yerel veritabanına başarıyla kaydedilmeden ürün sepete kesinlikle eklenemez (kategori pilot kapsamında isteğe bağlıdır; `ADR-019` gereği pilotta Hub'a senkronize edilmez). Yalnızca geçici/muhtelif tutar girilerek ürün kartı açılmadan satış yapılması engellenir.
+- **`[CONFIRMED — 22 Kasım 2026 Owner Kararı]` Hub Çevrimdışıyken Yeni Ürün Oluşturma & Bilinmeyen Barkod Kuralı:** İşletme sahibi Hub çevrimdışıyken dahi zorunlu ürün alanlarını doldurarak yerel veritabanında yeni ürün kartı oluşturabilir (`ClientStorageRepository.createProduct`); oluşturulan kayıt atomik olarak FIFO `outbox_operations` kuyruğuna `PRODUCT_UPSERT` işlemi olarak yazılır ve Hub bağlantısı geri geldiğinde merkezi kataloğa aktarılır. Buna karşılık, ürün kartı oluşturulmadan bilinmeyen barkodun doğrudan "geçici/muhtelif ürün" olarak satış sepetine eklenmesi kesinlikle yasaktır. *(Tarihçe: v1.4'te `OD-03` ile çevrimdışı ürün oluşturma kısıtlanmıştı -> 22 Kasım 2026 Owner kararıyla Faz 4/5 mobil kamera + `PRODUCT_UPSERT` offline-first mimarisi kalıcı onaylandı.)*
 
 ### `BR-PROD-06` [CONFIRMED] Open Food Facts Öneri Mekanizması
 - **Açıklama:** Open Food Facts verileri yalnızca kullanıcı onayına sunulan bir öneridir; kesin işletme verisi değildir.
@@ -316,9 +317,9 @@ Pilot aşamasında sistem tek bir işletme (Tenant) ve tek bir mağaza (Store) �
 - **Açıklama:** Her satış ve stok işlemi istemci tarafından üretilen benzersiz bir idempotency anahtarı taşır. Ağ kesintisi veya mükerrer istek gönderiminde sunucu aynı işlemi ikinci kez işlemez; mükerrer stok düşümü engellenir.
 - **`[PROPOSED]` Format:** Anahtar formatı olarak UUIDv4 kullanılması teknik tasarım tercihidir.
 
-### `BR-SYNC-04` [CONFIRMED — OD-03 İle Uzlaştırıldı] Ürün Ekleme Hub Zorunluluğu ve Barkod Tekilliği
-- **Kesinleşen Karar (`OD-03`, 11 Kasım 2026):** Pilot Windows Master Hub mimarisinde **ürün oluşturma işlemi Master Hub bağlantısı gerektirir**. Yerel veritabanında bulunmayan bir ürün offline olarak oluşturulamaz ve bilinmeyen barkod offline satış sepetine eklenemez. Yerel veritabanında kayıtlı ürünler ise offline satılabilir.
-- **Tarihsel Not & Çoklu Cihaz Barkod Tekilliği:** Önceki `v1.2` taslağında *"internet yokken yerel veritabanında yeni ürün açılabilir"* hükmü yer almış olup **`OD-03` Proje Sahibi kararıyla pilot kapsamı için yürürlükten kaldırılmıştır**. İleride Hub veya çevrimdışı senkronize edilen yetkili işlemlerden kaynaklı çakışmalarda sunucu tenant düzeyinde barkod tekilliği kontrol edilir ve çakışan kayıtlar sessizce birleştirilmez veya ezilmez.
+### `BR-SYNC-04` [CONFIRMED — 22 Kasım 2026 Güncel Karar] Çevrimdışı Ürün Ekleme (`PRODUCT_UPSERT`) ve Barkod Tekilliği
+- **Kesinleşen Karar (22 Kasım 2026 — Faz 4/5 Uzlaştırması):** Offline-first mimari gereği işletme sahibi Hub bağlantısı yokken de yerel SQLite üzerinde yeni ürün oluşturabilir; işlem `PRODUCT_UPSERT` olarak FIFO `outbox_operations` kuyruğuna kaydedilir ve bağlantı sağlandığında (veya Hub-kapalı Hibrit Drive canlı senkronizasyonunda) aktarılır. Buna karşın ürün kartı açılmadan bilinmeyen barkodun doğrudan sepete (geçici/muhtelif ürün olarak) eklenmesi yasaktır; yerel katalogda kayıtlı ürünler ise offline satılabilir.
+- **Tarihsel Not (`OD-03`) & Çoklu Cihaz Barkod Tekilliği:** 11 Kasım 2026 tarihli `v1.4` uzlaştırmasında (`OD-03`) ürün ekleme için Hub zorunluluğu yer almış olsa da, Faz 4/5 kamera ve Open Food Facts ürün tanımlama gereksinimleri doğrultusunda 22 Kasım 2026 Owner kararıyla kalıcı olarak güncellenmiştir. Çoklu cihazdan çevrimdışı eklenen ürünlerde sunucu tenant/store düzeyinde barkod tekilliğini ve `priceVersionId` tutarlılığını kontrol eder; çakışan kayıtlar sessizce ezilmez.
 
 ### `BR-SYNC-05` [CONFIRMED] Çevrimdışı Fiyat Değişikliği ve Çakışma Koruma
 - **Açıklama:** Fiyat değişikliği yerel cihazda anında kaydedilir ve kuyruğa eklenir. Senkronizasyon gerçekleşene kadar diğer cihazlar kendi yerel fiyatını gösterebilir.
@@ -446,13 +447,13 @@ Aşağıdaki özellikler ilk sürümün (MVP) kapsamı dışındadır:
 11. Push bildirimleri.
 12. Gider yönetimi ve net kâr hesabı.
 13. Fiziksel stok sayım oturumları ve sayım farkı uzlaştırma modülü (`BR-STK-04` .. `BR-STK-10` — `OUT_OF_SCOPE` / Post-MVP).
-14. *(Not — `OD-01..OD-04` Kapanış Özeti, 11 Kasım 2026)* Sepeti Askıya Alma / Parked Carts (`BR-POS-05` / `OD-02`) **MVP kapsamı dışındadır** (`OUT_OF_SCOPE`). Alt Kuruş Yuvarlama (`OD-01` -> Half-Up), Hub Çevrimdışı Bilinmeyen Barkod (`OD-03` -> offline ürün oluşturulamaz ve bilinmeyen barkod offline sepete eklenemez) ve Sanal Numpad (`OD-04` -> opsiyonel, varsayılan kapalı) kararları Proje Sahibi tarafından onaylanmıştır. `B-2` (Root CA Pinning) ve `B-3` (Secure Token Storage) ise mimari kararı kesinleşmiş pilot uygulama backlog kalemleridir.
+14. *(Not — `OD-01..OD-04` & 22 Kasım 2026 Güncel Karar Özeti)* Sepeti Askıya Alma / Parked Carts (`BR-POS-05` / `OD-02`) **MVP kapsamı dışındadır** (`OUT_OF_SCOPE`). Alt Kuruş Yuvarlama (`OD-01` -> Half-Up), Sanal Numpad (`OD-04` -> opsiyonel, varsayılan kapalı) ve **22 Kasım 2026 `OD-03` uzlaştırması** (çevrimdışı yeni ürün oluşturma + `PRODUCT_UPSERT` Outbox kuyruğu onaylı; ürün kartı olmadan geçici/muhtelif ürün sepet satışı yasak) Proje Sahibi tarafından onaylanmıştır. `B-2` (Root CA Pinning) ve `B-3` (Secure Token Storage) mimari kararı kesinleşmiş pilot uygulama kalemleridir.
 
 ---
 
 ## 12. Keşif Dokümanı ile İzlenebilirlik Matrisi (Traceability Matrix)
 
-Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Github/market-pos/docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md) (v1.3) belgesindeki her bir gereksinimin işbu şartnamedeki (v1.6) karşılığını doğrulamaktadır:
+Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Github/market-pos/docs/requirements/PHASE_0_BUSINESS_DISCOVERY.md) (v1.3) belgesindeki her bir gereksinimin işbu şartnamedeki (v1.7) karşılığını doğrulamaktadır:
 
 | Keşif Dokümanı Bölümü | Konu / İş Gereksinimi | İlgili BR Kodu | Kural Durumu | Şartname Bölümü | Not / Doğrulama Durumu |
 |---|---|---|---|---|---|
@@ -466,7 +467,7 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 | **Bölüm 4.2** | Paket/kutu dönüşüm çarpanı ve farklı paket miktarları | `BR-PROD-02`, `BR-PROD-08` | `CONFIRMED` | Bölüm 2 | Farklı paket miktarları ayrı ürün |
 | **Bölüm 4.2** | Birim hassasiyeti ve alt kuruş yuvarlama kural seti | `BR-PROD-07` (`OD-01`) | `CONFIRMED` | Bölüm 2 | **11 Kasım 2026 (`OD-01`):** Half-Up yuvarlama onaylandı; floating-point yasak, integer/decimal hesap, `12.50 TL`, dahili kuruş tamsayı |
 | **Bölüm 4.3** | Ekmek hızlı satış tuşu (barkodsuz) | `BR-PROD-04` | `CONFIRMED` | Bölüm 2 | `product_barcodes` ilişkisizliği ile |
-| **Bölüm 4.3** | Bulunamayan barkod zorunlu kayıt akışı (çevrimdışı: `OD-03`) | `BR-PROD-05`, `BR-SYNC-04` | `CONFIRMED` | Bölüm 2 | **11 Kasım 2026 (`OD-03`):** Ad, birim, kategori, fiyat zorunlu; offline ürün oluşturulamaz ve bilinmeyen barkod offline sepete eklenemez (Hub gerekir; yerel katalogdakiler offline satılabilir) |
+| **Bölüm 4.3** | Bulunamayan barkod zorunlu kayıt akışı (çevrimdışı: güncellenen `OD-03`) | `BR-PROD-05`, `BR-SYNC-04` | `CONFIRMED` | Bölüm 2 | **22 Kasım 2026 Güncel Karar:** Ad, birim, fiyat zorunlu; offline yeni ürün oluşturma + `PRODUCT_UPSERT` Outbox kuyruğu onaylı (ürün kartı olmadan geçici/muhtelif barkod satışı yasak) |
 | **Bölüm 4.3** | Open Food Facts öneri mekanizması | `BR-PROD-06` | `CONFIRMED` | Bölüm 2 | Fiyat/stok API'den gelmez |
 | **Bölüm 4.4** | Eksi stok satış izni, uyarı ve negatif stok takibi | `BR-STK-02` | `CONFIRMED` | Bölüm 5 | İşletme onaylı eksi stok |
 | **Bölüm 4.4** | Eksi stokta satışın engellenmemesi ve uyuşmazlık takibi | `BR-STK-03` | `CONFIRMED` | Bölüm 5 | Eksi stok iş kuralı; DDL kısıtı Aşama 6B-2 |

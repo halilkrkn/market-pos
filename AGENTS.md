@@ -29,7 +29,7 @@ Projede yalnızca mimari olarak doğrulanmış ve kod tabanında aktif olan tekn
 | **Merkezi Depolama (Pilot)**| Merkezi SQLite (WAL Modu, Tekil Yazıcı) | `%PROGRAMDATA%\MarketMMS\data\market_master.db` (Yalnızca Windows Service erişir) |
 | **Windows Servis Sarmalayıcı**| WinSW (Windows Service Wrapper) | `MarketMMSService` arka plan servisi kurulumu ve otomatik kurtarma |
 | **Durum Yönetimi** | Riverpod | Test edilebilir, reaktif durum yönetimi |
-| **Navigasyon** | go_router | Deklaratif yönlendirme ve derin bağlantı uyumu |
+| **Navigasyon** | go_router *(Planlı / Pilot Sonrası)* | Deklaratif yönlendirme ve derin bağlantı hedefi (Pilot 1.0'da mevcut 6-sekme `MainShellScreen` aktiftir; `go_router` henüz `pubspec.yaml`'a eklenmemiştir) |
 | **Barkod Girişi** | PC'de USB HID (Klavye taklidi); Mobilde Kamera | Otomatik ürün bulma ve sepet oluşturma |
 | **Harici Yedekleme** | Google Drive API (`drive.file`) | Canlı senkronizasyon için DEĞİL; bağımsız şifreli SQLite anlık görüntüsü için |
 | **Gelecek SaaS Hedefi** | PostgreSQL / Supabase | Çok şubeli zincir ve bulut SaaS fazı için veri modeli uyumlu tutulur; **pilot aşamasında aktif değildir** |

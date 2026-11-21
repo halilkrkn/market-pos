@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/security/tls_pinned_client_factory.dart';
@@ -128,6 +129,50 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
         ]),
         if (_session != null) ...[
           const SizedBox(height: MmsSpacing.sm),
+          if (_session!.qrPayload.trim().isNotEmpty) ...[
+            Center(
+              child: Container(
+                key: const Key('pairing_qr_image_container'),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(MmsRadius.md),
+                  border: Border.all(color: colors.border),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    QrImageView(
+                      key: const Key('pairing_qr_image'),
+                      data: _session!.qrPayload,
+                      version: QrVersions.auto,
+                      size: 220,
+                      backgroundColor: Colors.white,
+                      eyeStyle: const QrEyeStyle(
+                        eyeShape: QrEyeShape.square,
+                        color: Colors.black,
+                      ),
+                      dataModuleStyle: const QrDataModuleStyle(
+                        dataModuleShape: QrDataModuleShape.square,
+                        color: Colors.black,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Tek kullanımlık eşleştirme kodu — ekran görüntüsünü paylaşmayın.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: MmsSpacing.sm),
+          ],
           Row(children: [
             Expanded(
               child: Text(

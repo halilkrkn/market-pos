@@ -1,7 +1,9 @@
 # PROJECT_STATUS.md — Market POS (MMS) Mevcut Durum Raporu
 
-*Bu belge her yeni yapay zekâ geliştirme oturumunda durum kontrolü amacıyla okunmalıdır.*  
-*Son güncelleme: 15 Kasım 2026*
+> [!IMPORTANT]
+> **Canlı Durum Takip Yönlendirmesi (22 Kasım 2026):** Bu dosya 15 Kasım 2026 itibarıyla çekirdek MVP kuruluş döneminin tarihsel kaydıdır. Güncel aktif aşama, `a118434` (Phase 1.1 Finalization) sonrası yazılım durumu, otomatik test sonuçları, kalan Owner aksiyonları ve `PAT-01…PAT-18` saha kabul durumu için **daima [`LIVE_PROJECT_STATUS.md`](./LIVE_PROJECT_STATUS.md)** ve [`RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`](./RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md) belgeleri esas alınır.
+
+*Tarihsel MVP kayıt son güncellemesi: 15 Kasım 2026 (yukarıdaki yönlendirme notu 22 Kasım 2026'da eklendi)*
 
 > [!NOTE]
 > **21 Kasım 2026:** Bu belge tarihsel MVP (eski Faz 0–1.x) kaydıdır. Güncel durum, 7 Fazlı Ana Yol Haritası durumu ve test sonuçları için [`LIVE_PROJECT_STATUS.md`](./LIVE_PROJECT_STATUS.md) ve [`FINAL_COMPLETION_REPORT.md`](./FINAL_COMPLETION_REPORT.md) esas alınır. Aşağıdaki "açık teknik koşullar" listesindeki B-2 (pinning) ve B-3 (DPAPI/Keystore) yazılım olarak uygulanmıştır; fiziksel doğrulamaları BLOCKED'dır.

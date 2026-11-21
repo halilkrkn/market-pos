@@ -121,15 +121,17 @@ class _PaymentDialogState extends State<PaymentDialog> {
     return PopScope(
       canPop: !_isSubmitting,
       child: CallbackShortcuts(
-        bindings: {
-          const SingleActivator(LogicalKeyboardKey.escape): () {
-            if (!_isSubmitting) Navigator.of(context).pop();
-          },
-          const SingleActivator(LogicalKeyboardKey.f10): () =>
-              _selectPaymentMethod(PaymentMethod.cash),
-          const SingleActivator(LogicalKeyboardKey.f9): () =>
-              _selectPaymentMethod(PaymentMethod.card),
-        },
+        bindings: widget.showKeyboardHints
+            ? {
+                const SingleActivator(LogicalKeyboardKey.escape): () {
+                  if (!_isSubmitting) Navigator.of(context).pop();
+                },
+                const SingleActivator(LogicalKeyboardKey.f10): () =>
+                    _selectPaymentMethod(PaymentMethod.cash),
+                const SingleActivator(LogicalKeyboardKey.f9): () =>
+                    _selectPaymentMethod(PaymentMethod.card),
+              }
+            : const {},
         child: FocusScope(
           autofocus: widget.showKeyboardHints,
           child: AppDialog(
@@ -367,7 +369,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
         TextField(
           key: const Key('cash_received_input'),
           controller: _cashController,
-          autofocus: true,
+          autofocus: widget.showKeyboardHints,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           style: TextStyle(
             fontSize: 22,
@@ -452,7 +454,7 @@ class _PaymentDialogState extends State<PaymentDialog> {
     return OutlinedButton(
       onPressed: _isSubmitting ? null : onTap,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(80, 46),
+        minimumSize: const Size(80, 48),
         padding: const EdgeInsets.symmetric(horizontal: 12),
       ),
       child: Text(

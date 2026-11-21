@@ -219,7 +219,7 @@ class DiagnosticsView extends ConsumerWidget {
       onTap: onTap,
       borderRadius: BorderRadius.circular(MmsRadius.sm),
       child: Container(
-        constraints: const BoxConstraints(minHeight: 44),
+        constraints: const BoxConstraints(minHeight: 48),
         padding: const EdgeInsets.symmetric(
           horizontal: MmsSpacing.md,
           vertical: MmsSpacing.xs,

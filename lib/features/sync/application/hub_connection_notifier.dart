@@ -185,13 +185,48 @@ class HubConnectionNotifier extends StateNotifier<HubConnectionState> {
       _lifecycleListener = AppLifecycleListener(
         onResume: () {
           if (_isDisposed || !state.isInitialized) return;
-          if (state.phase != HubConnectionPhase.connected) {
-            unawaited(ensureConnectedOrDiscover());
-          }
+          unawaited(ensureConnectedOrDiscover());
         },
       );
     } catch (_) {
       // Headless test ortamlarında binding yoksa sessizce atlanır
+    }
+  }
+
+  /// Dış taşıma katmanı (ör. [BackgroundSyncCoordinator]) mevcut aktif URL'de
+  /// ağ/zaman aşımı hatası gözlediğinde, cihaz hâlâ `connected` görünüyorsa
+  /// fazı `offline`a çeker ve yaşam döngüsü aktifse otomatik yeniden keşfi tetikler.
+  ///
+  /// Eski bir URL'den gelen bayat hatalar yok sayılır.
+  void reportTransportUnreachable({
+    required String failedUrl,
+    String? errorMessage,
+  }) {
+    if (_isDisposed || !state.isInitialized) return;
+    final currentUrl = HubUrlValidator.tryNormalize(
+      state.activeHubUrl,
+      allowLoopback: allowLoopback,
+    );
+    final observedUrl = HubUrlValidator.tryNormalize(
+      failedUrl,
+      allowLoopback: allowLoopback,
+    );
+    if (currentUrl == null || observedUrl == null || currentUrl != observedUrl) {
+      return;
+    }
+    if (state.phase != HubConnectionPhase.connected) {
+      return;
+    }
+
+    state = state.copyWith(
+      phase: HubConnectionPhase.offline,
+      lastCheckedAt: now(),
+      isBusy: false,
+      errorMessage: errorMessage ?? 'Hub ağ bağlantısı kesildi.',
+    );
+
+    if (enableAutoLifecycle) {
+      unawaited(ensureConnectedOrDiscover());
     }
   }
 

@@ -8,6 +8,7 @@ import 'package:http/testing.dart';
 import 'package:market_pos/core/theme/app_theme.dart';
 import 'package:market_pos/features/security/data/hub_pairing_admin_client.dart';
 import 'package:market_pos/features/security/presentation/widgets/pairing_approval_panel.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 /// Faz 7B — Windows Owner eşleştirme onay/red arayüzü (widget testi, sahte Hub).
 void main() {
@@ -55,5 +56,50 @@ void main() {
     expect(approved, ['s1']);
     expect(find.textContaining('onaylandı'), findsOneWidget);
     expect(find.byKey(const Key('pairing_approve_s1')), findsNothing);
+  });
+
+  testWidgets('A7: Yeni eşleştirme oturumu açıldığında QrImageView ve kopyalama butonu beyaz kartta gösterilir',
+      (tester) async {
+    final client = HubPairingAdminClient(
+      hubBaseUrl: 'https://127.0.0.1:8945',
+      httpClient: MockClient((req) async {
+        if (req.headers['x-mms-admin-secret'] != 'dogru_anahtar') {
+          return http.Response(jsonEncode({'code': 'ERR_INVALID_ADMIN_SECRET'}), 403);
+        }
+        if (req.url.path.endsWith('/pairing/session')) {
+          return http.Response(
+            jsonEncode({
+              'session_id': 'sess_qr_1',
+              'pairing_secret': 'secret_qr_abc',
+              'hub_url': 'https://192.168.1.50:8945',
+              'ca_fingerprint': 'AA:BB:CC:DD',
+              'expires_at': 1893456000,
+            }),
+            201,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [hubPairingAdminClientProvider.overrideWithValue(client)],
+      child: MaterialApp(
+        theme: AppTheme.darkTheme,
+        home: const Scaffold(
+          body: SingleChildScrollView(child: PairingApprovalPanel()),
+        ),
+      ),
+    ));
+
+    await tester.enterText(find.byKey(const Key('pairing_admin_secret_field')), 'dogru_anahtar');
+    await tester.tap(find.byKey(const Key('pairing_create_session_button')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('pairing_qr_image_container')), findsOneWidget);
+    expect(find.byKey(const Key('pairing_qr_image')), findsOneWidget);
+    expect(find.byType(QrImageView), findsOneWidget);
+    expect(find.byKey(const Key('pairing_copy_payload_button')), findsOneWidget);
+    expect(find.textContaining('ekran görüntüsünü paylaşmayın'), findsOneWidget);
   });
 }

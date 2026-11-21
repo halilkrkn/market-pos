@@ -11,11 +11,15 @@ import 'core/security/secure_token_store.dart';
 import 'core/security/security_providers.dart';
 import 'core/security/windows_dpapi_token_store.dart';
 import 'core/storage/local_database_service.dart';
+import 'core/theme/theme_preference_store.dart';
+import 'core/theme/theme_provider.dart';
 import 'features/diagnostics/application/system_status_notifier.dart';
 import 'features/security/data/device_pairing_client.dart';
 import 'features/setup/data/local_setup_config_store.dart';
 import 'features/setup/setup_providers.dart';
 import 'features/sync/application/hub_connection_notifier.dart';
+import 'features/sync/data/drive_authorized_registry_store.dart';
+import 'features/sync/sync_providers.dart';
 
 export 'features/backup/application/background_backup_scheduler.dart'
     show mmsBackgroundBackupEntrypoint;
@@ -99,6 +103,13 @@ Future<void> main() async {
     repository: localDbService.repository,
   );
 
+  // 1.5 Kalıcı tema tercihini ve yetkili Drive cihaz kayıt defterini yükle
+  final themeStore = FileThemePreferenceStore.inDirectory(dataDirectory);
+  final initialThemeMode = await themeStore.load();
+  final registryStore =
+      FileDriveAuthorizedRegistryStore.inDirectory(dataDirectory);
+  final initialRegistry = await registryStore.load();
+
   // 2. Kök Uygulamayı Riverpod ProviderScope ile Başlat
   final autoDiscoveryEnabled =
       !HubConnectionBootstrapper.defaultAllowLoopbackForPlatform();
@@ -116,6 +127,11 @@ Future<void> main() async {
             .overrideWithValue(initialHubConnectionState),
         hubAutoDiscoveryLifecycleEnabledProvider
             .overrideWithValue(autoDiscoveryEnabled),
+        themePreferenceStoreProvider.overrideWithValue(themeStore),
+        initialThemeModeProvider.overrideWithValue(initialThemeMode),
+        driveAuthorizedRegistryStoreProvider.overrideWithValue(registryStore),
+        initialDriveAuthorizedRegistryProvider
+            .overrideWithValue(initialRegistry),
       ],
       child: const MarketPosApp(),
     ),

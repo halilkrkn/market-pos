@@ -1758,7 +1758,118 @@ void main() {
 
       coordinator.dispose();
     });
+
+    test('32. WP-1 DHCP/Ağ Köprüsü: onHubNetworkUnreachable yalnızca ağ/downlink hatalarında tetiklenir; TLS ve Auth hatalarında ASLA tetiklenmez', () async {
+      final unreachableEvents = <({String url, String? err})>[];
+
+      // 1. Uplink networkError (503) -> tetiklenmeli
+      await localDb.repository.createOfflineSale(
+        deviceId: testDeviceId,
+        paymentMethod: 'CASH',
+        items: [CartItemInput.units('prod_su', 1)],
+      );
+      transport.defaultResponse = const SyncResponse(
+        statusCode: 503,
+        body: '',
+        errorMessage: 'SocketException: Connection refused',
+      );
+      final coordinator = BackgroundSyncCoordinator(
+        repository: localDb.repository,
+        transport: transport,
+        deviceId: testDeviceId,
+        readDeviceToken: () => testValidToken,
+        hubUrl: testHubUrl,
+        autoStartTimer: false,
+        enableLifecycleListener: false,
+        syncServiceFactory: ({
+          required repository,
+          required transport,
+          required deviceId,
+          required deviceToken,
+          readDeviceToken,
+          required hubUrl,
+        }) =>
+            ClientSyncService(
+          repository: repository,
+          transport: transport,
+          deviceId: deviceId,
+          deviceToken: deviceToken,
+          readDeviceToken: readDeviceToken,
+          hubUrl: hubUrl,
+          baseBackoff: Duration.zero,
+          maxBackoff: Duration.zero,
+        ),
+        onHubNetworkUnreachable: (url, err) {
+          unreachableEvents.add((url: url, err: err));
+        },
+      );
+      addTearDown(coordinator.dispose);
+
+      await coordinator.triggerSync(reason: SyncTriggerReason.manual);
+      expect(coordinator.state.status, SyncCoordinatorStatus.networkError);
+      expect(unreachableEvents, hasLength(1));
+      expect(unreachableEvents.single.url, testHubUrl);
+
+      // 2. TLS Pin Mismatch -> KESİNLİKLE tetiklenmemeli
+      unreachableEvents.clear();
+      transport.defaultResponse = SyncResponse.tlsPinMismatch(
+        TlsPinMismatchException(host: '127.0.0.1', port: 8443, presentedSha256: 'AA' * 32),
+      );
+      await coordinator.triggerSync(reason: SyncTriggerReason.manual);
+      expect(coordinator.state.status, SyncCoordinatorStatus.tlsPinMismatch);
+      expect(unreachableEvents, isEmpty);
+
+      // 3. TLS Cert Error -> KESİNLİKLE tetiklenmemeli
+      transport.defaultResponse = SyncResponse.tlsCertError(
+        const TlsCertificateValidationException(
+          kind: TlsCertificateFailureKind.ipAddressMismatch,
+          host: '127.0.0.1',
+          port: 8443,
+        ),
+      );
+      await coordinator.triggerSync(reason: SyncTriggerReason.manual);
+      expect(coordinator.state.status, SyncCoordinatorStatus.tlsCertError);
+      expect(unreachableEvents, isEmpty);
+
+      // 4. Downlink SocketException (outbox boşken bile) -> tetiklenmeli
+      transport.defaultResponse = null;
+      transport.productsResponse = const SyncResponse(
+        statusCode: 0,
+        body: '',
+        errorMessage: 'Ağ bağlantı hatası (SocketException): Network is unreachable',
+        failureKind: SyncFailureKind.network,
+      );
+      final emptyCoord = BackgroundSyncCoordinator(
+        repository: localDb.repository,
+        transport: _EmptyOutboxNetworkDownlinkTransport(),
+        deviceId: 'POS-OTHER-01',
+        readDeviceToken: () => testValidToken,
+        hubUrl: testHubUrl,
+        autoStartTimer: false,
+        enableLifecycleListener: false,
+        onHubNetworkUnreachable: (url, err) {
+          unreachableEvents.add((url: url, err: err));
+        },
+      );
+      addTearDown(emptyCoord.dispose);
+      await emptyCoord.triggerSync(reason: SyncTriggerReason.periodic);
+      expect(unreachableEvents, hasLength(1));
+      expect(unreachableEvents.single.url, testHubUrl);
+    });
   });
+}
+
+class _EmptyOutboxNetworkDownlinkTransport extends _TestSyncTransport {
+  @override
+  Future<SyncResponse> getProducts({
+    required String hubUrl,
+    required String token,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    return SyncResponse.networkError(
+      'Ağ bağlantı hatası (SocketException): Network is unreachable',
+    );
+  }
 }
 
 class _AsyncThrowingSyncService extends ClientSyncService {

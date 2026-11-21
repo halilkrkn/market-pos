@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:mms_client_storage/mms_client_storage.dart';
@@ -11,25 +12,69 @@ import '../diagnostics/application/system_status_notifier.dart';
 import '../diagnostics/domain/system_status.dart';
 import '../setup/setup_providers.dart';
 import 'application/background_sync_coordinator.dart';
+import 'application/drive_authorized_registry_notifier.dart';
 import 'application/hub_connection_notifier.dart';
+import 'data/drive_authorized_registry_store.dart';
+import 'data/hub_live_drive_config_client.dart';
 import 'domain/hub_connection_state.dart';
 import 'domain/sync_coordinator_state.dart';
 
 /// ADR-021: Google Drive canlı senkronizasyon gizlisi anahtarı (yedek parolasından ayrı).
 const String kDriveLiveSyncSecretKey = 'drive_live_sync_secret_v1';
 
+class _LiveDriveProvisionState {
+  DateTime? lastAttemptAt;
+  bool inFlight = false;
+}
+
+final _liveDriveProvisionStateProvider =
+    Provider<_LiveDriveProvisionState>((ref) {
+  return _LiveDriveProvisionState();
+});
+
+/// K-05 / ADR-021: Kalıcı yetkili cihaz kayıt defteri deposu sağlayıcısı.
+final driveAuthorizedRegistryStoreProvider =
+    Provider<DriveAuthorizedRegistryStore>((ref) {
+  return InMemoryDriveAuthorizedRegistryStore();
+});
+
+/// Başlangıçta diskten yüklenen yetkili cihaz kayıt defteri (varsa).
+final initialDriveAuthorizedRegistryProvider =
+    Provider<DriveAuthorizedDeviceRegistry?>((ref) => null);
+
+/// K-05 / ADR-021: Reaktif ve kalıcı yetkili cihaz kayıt defteri yöneticisi.
+final driveAuthorizedRegistryNotifierProvider = StateNotifierProvider<
+    DriveAuthorizedRegistryNotifier, DriveAuthorizedDeviceRegistry>((ref) {
+  final store = ref.watch(driveAuthorizedRegistryStoreProvider);
+  final initialRegistry = ref.watch(initialDriveAuthorizedRegistryProvider);
+  final setupIdentity = ref.watch(
+    setupConfigProvider.select((s) => (s.deviceId, s.tenantId, s.storeId)),
+  );
+  return DriveAuthorizedRegistryNotifier(
+    store: store,
+    initialRegistry: initialRegistry,
+    localDeviceId: setupIdentity.$1,
+    tenantId: setupIdentity.$2,
+    storeId: setupIdentity.$3,
+  );
+});
+
 /// ADR-021: Yetkili ve iptal edilmiş cihaz kayıt defteri.
-final driveAuthorizedRegistryProvider = Provider<DriveAuthorizedDeviceRegistry>((ref) {
-  final setup = ref.watch(setupConfigProvider);
-  final registry = DriveAuthorizedDeviceRegistry();
-  if (setup.deviceId.trim().isNotEmpty) {
-    registry.authorizeDevice(
-      deviceId: setup.deviceId,
-      tenantId: setup.tenantId,
-      storeId: setup.storeId,
-    );
-  }
-  return registry;
+final driveAuthorizedRegistryProvider =
+    Provider<DriveAuthorizedDeviceRegistry>((ref) {
+  return ref.watch(driveAuthorizedRegistryNotifierProvider);
+});
+
+/// K-05: Hub TLS-pinned Live Drive yapılandırma istemcisi sağlayıcısı.
+final hubLiveDriveConfigClientProvider =
+    Provider<HubLiveDriveConfigClient>((ref) {
+  final pinnedTls = ref.watch(pinnedTlsConfigProvider);
+  final httpClient = pinnedTls != null
+      ? MmsPinnedTlsClientFactory.createClient(pinnedTls)
+      : null;
+  final client = HubLiveDriveConfigClient(httpClient: httpClient);
+  ref.onDispose(client.close);
+  return client;
 });
 
 /// ADR-021: Hub-öncelikli Google Drive canlı senkronizasyon motoru sağlayıcısı.
@@ -120,6 +165,11 @@ final backgroundSyncCoordinatorProvider =
         return true;
       }
 
+      var providerDisposed = false;
+      ref.onDispose(() {
+        providerDisposed = true;
+      });
+
       final coordinator = BackgroundSyncCoordinator(
         repository: localDb.repository,
         transport: transport,
@@ -140,6 +190,80 @@ final backgroundSyncCoordinatorProvider =
           // Senkronizasyon tamamlandığında yalnızca yerel sayaçları/outbox durumunu reaktif yenile
           // Kesinlikle yeni bir HTTP /health isteği oluşturmaz (sonsuz döngüyü önler).
           await ref.read(systemStatusProvider.notifier).refreshLocalMetrics();
+
+          if (providerDisposed ||
+              localDb.databasePath == ':memory:' ||
+              result == null ||
+              !result.isCleanSuccess ||
+              result.retriedCount > 0) {
+            return;
+          }
+
+          final provisionState = ref.read(_liveDriveProvisionStateProvider);
+          final now = DateTime.now();
+          if (provisionState.inFlight) return;
+          if (provisionState.lastAttemptAt != null &&
+              now.difference(provisionState.lastAttemptAt!) <
+                  const Duration(minutes: 5)) {
+            return;
+          }
+
+          final hubUrl = ref.read(hubConnectionProvider).activeHubUrl;
+          final token = apiClient.effectiveDeviceToken;
+          if (hubUrl == null ||
+              hubUrl.trim().isEmpty ||
+              token == null ||
+              token.trim().isEmpty) {
+            return;
+          }
+
+          final setup = ref.read(setupConfigProvider);
+          final configClient = ref.read(hubLiveDriveConfigClientProvider);
+          final secureStore = ref.read(secureTokenStoreProvider);
+          final logger = ref.read(redactingLoggerProvider);
+          final registryNotifier =
+              ref.read(driveAuthorizedRegistryNotifierProvider.notifier);
+
+          provisionState.inFlight = true;
+          provisionState.lastAttemptAt = now;
+          try {
+            final config = await configClient.fetchConfig(
+              hubUrl: hubUrl,
+              deviceToken: token,
+              tenantId: setup.tenantId,
+              storeId: setup.storeId,
+            );
+            if (providerDisposed || config == null) return;
+            logger.registerSensitiveValue(config.liveSyncSecret);
+            final existingSecret =
+                await secureStore.readSecret(kDriveLiveSyncSecretKey);
+            if (providerDisposed) return;
+            if (existingSecret != config.liveSyncSecret) {
+              await secureStore.saveSecret(
+                kDriveLiveSyncSecretKey,
+                config.liveSyncSecret,
+              );
+            }
+            if (providerDisposed) return;
+            await registryNotifier.applyHubSnapshot(
+              devices: config.authorizedDevices,
+              localDeviceId: setup.deviceId,
+              tenantId: setup.tenantId,
+              storeId: setup.storeId,
+            );
+          } catch (e) {
+            debugPrint(
+              '[BackgroundSyncCoordinator] Live Drive yapılandırması alınamadı: $e',
+            );
+          } finally {
+            provisionState.inFlight = false;
+          }
+        },
+        onHubNetworkUnreachable: (failedUrl, errorMessage) {
+          ref.read(hubConnectionProvider.notifier).reportTransportUnreachable(
+                failedUrl: failedUrl,
+                errorMessage: errorMessage,
+              );
         },
         // Canlı ortamda 30 saniyelik periyodik sayaç ve lifecycle dinleyicisi etkindir
         periodicInterval: const Duration(seconds: 30),

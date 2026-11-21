@@ -51,7 +51,7 @@ MMS, mağaza içinde internet bağlantısı kopsa dahi kesintisiz çalışmayı 
 | **Uç Depolama** | Drift + SQLite (WAL Modu) | Mobil ve masaüstü yerel veri tabanı |
 | **Merkezi Depolama** | Merkezi SQLite (Windows Service) | Tekil yazıcı ile yönetilen master defter |
 | **Durum Yönetimi** | Riverpod | Reaktif ve test edilebilir durum yönetimi |
-| **Yönlendirme** | go_router | Deklaratif navigasyon |
+| **Yönlendirme** | go_router *(Planlı / Pilot Sonrası)* | Deklaratif navigasyon hedefi (Pilot 1.0'da `MainShellScreen` aktiftir) |
 | **Barkod Girişi** | PC'de USB HID; Mobilde Kamera | Otomatik ürün arama ve ekleme |
 | **Harici Yedekleme** | Google Drive API (`drive.file`) | İstemci taraflı AES-256-CBC + HMAC-SHA256 şifreleme |
 
