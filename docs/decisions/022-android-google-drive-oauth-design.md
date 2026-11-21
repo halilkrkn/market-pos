@@ -1,7 +1,7 @@
 # ADR-022: Android Google Drive OAuth Tasarımı (Yedekleme ve Hibrit Canlı Senkronizasyon)
 
 - **Karar Kodu:** ADR-022
-- **Durum:** `[DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION]` *(Owner tarafından **Seçenek A — `google_sign_in`** ve **Android Drive entegrasyonunun pilot kapsamına dahil edilmesi** kararlaştırılmıştır; teknik tasarım kesinleştirilmiştir. Ancak bu aşamada kodlanmamıştır, `pubspec.yaml` içine `google_sign_in` eklenmemiştir, Google Cloud OAuth yapılandırması yapılmamış ve fiziksel cihaz üzerinde doğrulanmamıştır — **IMPLEMENTED veya CONFIRMED değildir**.)*
+- **Durum:** `[CONFIRMED — TECHNICALLY IMPLEMENTED]` *(Owner tarafından **Seçenek A — `google_sign_in`** ve **Android Drive entegrasyonunun pilot kapsamına dahil edilmesi** kararlaştırılmıştır. 22.11.2026 Phase 2 implementasyonu kapsamında `pubspec.yaml`'a `google_sign_in: ^7.2.0` eklenmiş; `AndroidGoogleSignInTokenProvider`, `drive_auth_providers.dart`, `GoogleDriveConnectService`, `backup_providers.dart`, `sync_providers.dart`, `ExternalBackupSection` ve 9 otomatik test [unit + widget + `ADR-021` E2E + Android Debug APK derlemesi] başarıyla tamamlanmıştır. Gerçek Google Cloud kurulumu [`C1/C2`], Release keystore [`B1`] ve fiziksel cihaz testleri [`PAT-13/17/18`] Owner/donanım beklemektedir — **`BLOCKED`**.)*
 - **Tarih:** 2026-11-22 *(İlk taslak: 2026-11-21)*
 - **Karar Vericiler:** Proje Sahibi (Owner)
 - **Onaylanan Yöntem:** **Seçenek A — Resmi `google_sign_in` (v7+ mimarisi: Android Credential Manager + Google Play Services `AuthorizationClient`)**
@@ -215,19 +215,19 @@ Aşağıdaki eksikliklerin hiçbirinde uygulama çökmez, yerel POS satışı du
 
 ---
 
-## 6. Açık Kalan Teknik Konular ve Phase 2 Kapsam Sınırı
+## 6. Uygulama Durumu ve Açık Kalan Operasyonel Maddeler
 
-Aşağıdaki maddeler **Phase 1.1'de bilinçli olarak uygulanmamıştır** ve Phase 2 kapsamına bırakılmıştır:
+Phase 2 yazılım geliştirme kapsamı (22.11.2026) tamamlanmıştır; fiziksel cihaz ve dış Google Cloud / sertifika adımları Owner aksiyonu beklemektedir:
 
-| # | Konu | Phase 1.1 Durumu | Phase 2 Gereksinimi |
+| # | Konu | 22.11.2026 Yazılım Durumu | Kalan Dış / Saha Ön Koşulu |
 |---|---|---|---|
-| 1 | `pubspec.yaml` içine `google_sign_in` bağımlılığının eklenmesi | **Eklenmedi** | Phase 2 implementasyonunda eklenecek |
-| 2 | `AndroidGoogleSignInTokenProvider` ve Android `GoogleDriveConnectService` entegrasyonu | **Kodlanmadı** | Phase 2'de `DriveAccessTokenProvider` adaptörü + birim testleri yazılacak |
-| 3 | Headless `MmsBackgroundBackupJobService` (`70201`) içinden Drive yükleme kabiliyeti | **Çözülmemiş / Garanti Edilmez** | Phase 2'de teknik spike veya "yerel arka plan + ön plan Drive upload" kararı kesinleştirilecek |
-| 4 | Google Cloud OAuth (`C1/C2`: Desktop + Android SHA-1 + Web `serverClientId`, "In production") | **Yapılmadı (Owner Aksiyonu)** | `B1` Release keystore sonrası Owner tarafından kurulacak |
-| 5 | `drive_live_sync_secret_v1` dağıtım modeli (`K-05`) | **Owner seçimi bekliyor** | Phase 2 `ADR-021` Android saha kurulumu öncesi seçilecek |
-| 6 | Fiziksel Android testleri (`PAT-13`, `PAT-16`, `PAT-17`, `PAT-18`) | **BLOCKED — NOT RUN** | Phase 2 build + C1/C2 + B1 sonrası fiziksel cihazda yürütülecek |
+| 1 | `pubspec.yaml` içine `google_sign_in: ^7.2.0` bağımlılığının eklenmesi | **Eklendi & Android Debug APK ile Derlendi** | — |
+| 2 | `AndroidGoogleSignInTokenProvider`, `drive_auth_providers.dart`, `GoogleDriveConnectService`, `backup_providers.dart`, `sync_providers.dart`, `ExternalBackupSection` ve `android_google_sign_in_oauth_test.dart` (9 test) | **Kodlandı & Test Edildi (Tam Yeşil)** | Fiziksel GMS'li Android cihazda canlı doğrulama (`PAT-13`, `PAT-18`) |
+| 3 | Headless `MmsBackgroundBackupJobService` (`70201`) içinden Drive yükleme kabiliyeti | **Güvenli Fallback Aktif (Garanti Edilmez)** | Yerel `.mmsbak` her durumda üretilir; bekleyen yüklemeler ön plan açılışında `DriveUploadLedger` ile idempotent tamamlanır |
+| 4 | Google Cloud OAuth (`C1/C2`: Desktop + Android SHA-1 + Web `serverClientId`, "In production") | **Owner Aksiyonu (Dış Hesap)** | `B1` Release keystore sonrası Owner tarafından kurulacak |
+| 5 | `drive_live_sync_secret_v1` dağıtım modeli (`K-05` Seçenek 1) | **Kodlandı & Test Edildi (Tam Yeşil)** | Hub TLS-pinned `GET /api/v1/sync/live-drive-config` + `FileDriveAuthorizedRegistryStore` |
+| 6 | Fiziksel Android testleri (`PAT-13`, `PAT-16`, `PAT-17`, `PAT-18`) | **`BLOCKED — PHYSICAL HARDWARE REQUIRED`** | `B1` + `B2` + `C1/C2` sonrası gerçek cihazda yürütülecek |
 
 ---
 
-**ADR-022 Durumu:** **`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`** *(Owner kararıyla Seçenek A `google_sign_in` ve pilot kapsamı onaylanmıştır; Phase 1.1'de kodlanmamış ve fiziksel olarak doğrulanmamıştır.)*
+**ADR-022 Durumu:** **`CONFIRMED — TECHNICALLY IMPLEMENTED`** *(Seçenek A `google_sign_in: ^7.2.0` yazılım implementasyonu ve 9 otomatik senaryosu + Android Debug APK derlemesi geçmiştir; gerçek Google Cloud `C1/C2` ve fiziksel cihaz saha doğrulaması `PAT-13/17/18` beklenmektedir.)*

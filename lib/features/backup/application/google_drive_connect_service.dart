@@ -5,15 +5,16 @@ import 'package:http/http.dart' as http;
 import 'package:mms_client_storage/mms_client_storage.dart';
 
 import '../../../core/security/secure_token_store.dart';
+import 'android_google_sign_in_token_provider.dart';
 
-/// Faz 7D — Owner'ın Google hesabını (yalnızca `drive.file` izniyle) bağlaması.
+/// Faz 7D & ADR-022 — Owner'ın Google hesabını (yalnızca `drive.file` izniyle) bağlaması.
 ///
-/// Windows: loopback (127.0.0.1) yönlendirme + PKCE; tarayıcı sistem varsayılanıyla
-/// açılır. Refresh token yalnızca güvenli depoya (DPAPI) yazılır, loglanmaz.
-/// Android: Google, Android için loopback yönlendirmeyi desteklemez; Google Sign-In
-/// SDK'sı yeni bağımlılık gerektirdiğinden Owner kararına bırakıldı (BLOCKED).
+/// - Windows: loopback (127.0.0.1) yönlendirme + PKCE; refresh token yalnızca
+///   DPAPI güvenli deposuna yazılır.
+/// - Android (ADR-022 Seçenek A): `google_sign_in` v7+ (`Credential Manager` +
+///   `AuthorizationClient`); yalnızca kısa ömürlü access_token RAM'de tutulur.
 class GoogleDriveConnectService {
-  /// Güvenli depodaki refresh token anahtarı.
+  /// Güvenli depodaki refresh token anahtarı (Windows).
   static const String refreshTokenSecretKey = 'gdrive_refresh_token_v1';
 
   final String clientId;
@@ -21,6 +22,8 @@ class GoogleDriveConnectService {
   final SecureTokenStore secureStore;
   final http.Client httpClient;
   final Future<void> Function(Uri url) openBrowser;
+  final AndroidGoogleSignInTokenProvider? androidTokenProvider;
+  final bool? isAndroidOverride;
 
   GoogleDriveConnectService({
     required this.clientId,
@@ -28,16 +31,36 @@ class GoogleDriveConnectService {
     required this.httpClient,
     this.clientSecret,
     Future<void> Function(Uri url)? openBrowser,
+    this.androidTokenProvider,
+    this.isAndroidOverride,
   }) : openBrowser = openBrowser ?? _openWithSystemBrowser;
 
-  bool get isConfigured => clientId.trim().isNotEmpty;
+  bool get isAndroidMode => isAndroidOverride ?? Platform.isAndroid;
+
+  bool get isConfigured => isAndroidMode
+      ? (androidTokenProvider?.isConfigured ?? false)
+      : clientId.trim().isNotEmpty;
 
   Future<bool> isConnected() async {
+    if (isAndroidMode) {
+      return androidTokenProvider?.isConnected() ?? Future<bool>.value(false);
+    }
     final token = await secureStore.readSecret(refreshTokenSecretKey);
     return token != null && token.isNotEmpty;
   }
 
   Future<void> connect({Duration timeout = const Duration(minutes: 5)}) async {
+    if (isAndroidMode) {
+      final provider = androidTokenProvider;
+      if (provider == null || !provider.isConfigured) {
+        throw const DriveBackupException(
+          'ERR_DRIVE_NOT_CONFIGURED',
+          'Android Google Drive Web OAuth kimliği (MMS_GDRIVE_WEB_CLIENT_ID) tanımlı değil (Owner işlemi gerekir).',
+        );
+      }
+      await provider.connect();
+      return;
+    }
     if (!isConfigured) {
       throw const DriveBackupException(
         'ERR_DRIVE_NOT_CONFIGURED',
@@ -85,8 +108,12 @@ class GoogleDriveConnectService {
     await secureStore.saveSecret(refreshTokenSecretKey, trimmed);
   }
 
-  Future<void> disconnect({GoogleOAuthRefreshTokenProvider? tokenProvider}) async {
-    if (tokenProvider != null) {
+  Future<void> disconnect({DriveAccessTokenProvider? tokenProvider}) async {
+    if (isAndroidMode) {
+      await androidTokenProvider?.disconnect();
+      return;
+    }
+    if (tokenProvider is GoogleOAuthRefreshTokenProvider) {
       await tokenProvider.revokeToken();
     }
     await secureStore.deleteSecret(refreshTokenSecretKey);

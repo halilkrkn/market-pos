@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:mms_client_storage/mms_client_storage.dart';
@@ -17,7 +18,9 @@ import '../sync/sync_providers.dart';
 import 'application/background_backup_scheduler.dart';
 import 'application/backup_schedule_controller.dart';
 import 'application/client_backup_service.dart';
-import 'application/google_drive_connect_service.dart';
+import 'drive_auth_providers.dart';
+
+export 'drive_auth_providers.dart';
 
 /// Yerel şifreli yedek dosyalarının saklanacağı klasör.
 final backupRootDirectoryProvider = Provider<Directory>((ref) {
@@ -62,23 +65,6 @@ void invalidatePostRestoreProviders(WidgetRef ref) {
   ref.invalidate(dashboardSnapshotProvider);
 }
 
-/// Faz 7D: Google Cloud OAuth "Desktop app" istemci kimliği. Owner tarafından
-/// oluşturulup derlemede `--dart-define=MMS_GDRIVE_CLIENT_ID=...` ile verilir.
-/// Boşsa Drive yedeği devre dışıdır (BLOCKED: dış kaynak).
-const String kGoogleDriveClientId = String.fromEnvironment('MMS_GDRIVE_CLIENT_ID');
-const String kGoogleDriveClientSecret = String.fromEnvironment('MMS_GDRIVE_CLIENT_SECRET');
-
-final googleDriveConnectServiceProvider = Provider<GoogleDriveConnectService>((ref) {
-  final client = http.Client();
-  ref.onDispose(client.close);
-  return GoogleDriveConnectService(
-    clientId: kGoogleDriveClientId,
-    clientSecret: kGoogleDriveClientSecret.isEmpty ? null : kGoogleDriveClientSecret,
-    secureStore: ref.watch(secureTokenStoreProvider),
-    httpClient: client,
-  );
-});
-
 final driveUploadLedgerProvider = Provider<DriveUploadLedger>((ref) {
   final dbService = ref.watch(localDatabaseServiceProvider);
   return DriveUploadLedger(File(p.join(dbService.dataDirectoryPath, 'drive_upload_ledger.json')));
@@ -86,18 +72,12 @@ final driveUploadLedgerProvider = Provider<DriveUploadLedger>((ref) {
 
 /// Drive yapılandırılmamışsa `null`; yerel yedekleme bundan etkilenmez.
 final googleDriveUploaderProvider = Provider<GoogleDriveBackupUploader?>((ref) {
-  final connect = ref.watch(googleDriveConnectServiceProvider);
-  if (!connect.isConfigured) return null;
-  final secureStore = ref.watch(secureTokenStoreProvider);
+  final tokenProvider = ref.watch(driveAccessTokenProvider);
+  if (tokenProvider == null) return null;
   final client = http.Client();
   ref.onDispose(client.close);
   return GoogleDriveBackupUploader(
-    tokenProvider: GoogleOAuthRefreshTokenProvider(
-      clientId: connect.clientId,
-      clientSecret: connect.clientSecret,
-      readRefreshToken: () => secureStore.readSecret(GoogleDriveConnectService.refreshTokenSecretKey),
-      httpClient: client,
-    ),
+    tokenProvider: tokenProvider,
     httpClient: client,
     ledger: ref.watch(driveUploadLedgerProvider),
   );
@@ -126,11 +106,20 @@ final backupScheduleControllerProvider =
     afterSuccess: (_) async {
       final uploader = ref.read(googleDriveUploaderProvider);
       if (uploader == null) return;
-      if (!await ref.read(googleDriveConnectServiceProvider).isConnected()) return;
-      final local = await backupService.listBackups();
-      await uploader.uploadPending([
-        for (final b in local.take(3)) (file: b.file, manifest: b.manifest),
-      ]);
+      try {
+        if (!await ref.read(googleDriveConnectServiceProvider).isConnected()) {
+          return;
+        }
+        final local = await backupService.listBackups();
+        await uploader.uploadPending([
+          for (final b in local.take(3)) (file: b.file, manifest: b.manifest),
+        ]);
+      } catch (e) {
+        // ADR-022 fail-safe: arka plan yerel yedekleme başarısı Drive/OAuth
+        // hatasından etkilenmez; bir sonraki ön plan açılışında tekrar denenir.
+        final redacted = ref.read(redactingLoggerProvider).redact(e.toString());
+        debugPrint('[BackupSchedule] Drive yüklemesi atlandı (yerel yedek korundu): $redacted');
+      }
     },
   );
   if (dbService.databasePath != ':memory:') {

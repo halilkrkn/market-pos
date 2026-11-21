@@ -136,8 +136,8 @@ class _ExternalBackupSectionState extends ConsumerState<ExternalBackupSection> {
           const DiagnosticsInlineBanner(
             key: Key('gdrive_not_configured_banner'),
             tone: AppBadgeTone.warning,
-            message: 'Google Drive yedeği yapılandırılmadı: Owner\'ın Google Cloud OAuth istemci kimliği '
-                'oluşturması gerekir (yalnızca drive.file izni). Yerel ve USB yedekleme çalışmaya devam eder.',
+            message: 'Google Drive yedeği yapılandırılmadı: Owner\'ın platforma uygun Google Cloud OAuth '
+                'istemci kimliğini tanımlaması gerekir (yalnızca drive.file izni). Yerel yedekleme çalışmaya devam eder.',
           )
         else
           FutureBuilder<bool>(
@@ -152,29 +152,25 @@ class _ExternalBackupSectionState extends ConsumerState<ExternalBackupSection> {
                   tone: connected ? AppBadgeTone.success : AppBadgeTone.warning,
                   compact: true,
                 ),
-                if (isDesktop || connected)
-                  SizedBox(
-                    height: 48,
-                    child: OutlinedButton(
-                      key: const Key('gdrive_connect_button'),
-                      onPressed: _busy
-                          ? null
-                          : () => _guard(() async {
-                                if (connected) {
-                                  final tokenProv = uploader?.tokenProvider;
-                                  await drive.disconnect(
-                                    tokenProvider: tokenProv is GoogleOAuthRefreshTokenProvider
-                                        ? tokenProv
-                                        : null,
-                                  );
-                                  return 'Google Drive bağlantısı kaldırıldı.';
-                                }
-                                await drive.connect();
-                                return 'Google Drive bağlandı. Otomatik yedekler şifreli olarak yüklenecek.';
-                              }).then((_) => setState(() {})),
-                      child: Text(connected ? 'Bağlantıyı Kaldır' : 'Google Drive\'ı Bağla'),
-                    ),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    key: const Key('gdrive_connect_button'),
+                    onPressed: _busy
+                        ? null
+                        : () => _guard(() async {
+                              if (connected) {
+                                await drive.disconnect(tokenProvider: uploader?.tokenProvider);
+                                return 'Google Drive bağlantısı kaldırıldı.';
+                              }
+                              await drive.connect();
+                              return 'Google Drive bağlandı. Otomatik yedekler şifreli olarak yüklenecek.';
+                            }).then((_) {
+                              if (mounted) setState(() {});
+                            }),
+                    child: Text(connected ? 'Bağlantıyı Kaldır' : 'Google Drive\'ı Bağla'),
                   ),
+                ),
                 if (connected && uploader != null)
                   SizedBox(
                     height: 48,

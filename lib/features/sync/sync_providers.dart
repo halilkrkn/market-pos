@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../../core/security/security_providers.dart';
 import '../../core/security/tls_pinned_client_factory.dart';
+import '../backup/drive_auth_providers.dart';
 import '../diagnostics/application/system_status_notifier.dart';
 import '../diagnostics/domain/system_status.dart';
 import '../setup/setup_providers.dart';
@@ -77,14 +78,13 @@ final hubLiveDriveConfigClientProvider =
   return client;
 });
 
-/// ADR-021: Hub-öncelikli Google Drive canlı senkronizasyon motoru sağlayıcısı.
+/// ADR-021 & ADR-022: Hub-öncelikli Google Drive canlı senkronizasyon motoru sağlayıcısı.
 ///
-/// Bellek içi test veritabanlarında veya Drive OAuth kimliği tanımlanmamışsa
+/// Bellek içi test veritabanlarında veya platform Drive OAuth kimliği tanımlanmamışsa
 /// otomatik olarak `null` döner (Hub-yalnız mod korunur).
 final driveLiveSyncEngineProvider = Provider<MmsDriveLiveSyncEngine?>((ref) {
-  const clientId = String.fromEnvironment('MMS_GDRIVE_CLIENT_ID');
-  const clientSecret = String.fromEnvironment('MMS_GDRIVE_CLIENT_SECRET');
-  if (clientId.trim().isEmpty) return null;
+  final tokenProvider = ref.watch(driveAccessTokenProvider);
+  if (tokenProvider == null) return null;
 
   final localDb = ref.watch(localDatabaseServiceProvider);
   if (localDb.databasePath == ':memory:') return null;
@@ -95,13 +95,6 @@ final driveLiveSyncEngineProvider = Provider<MmsDriveLiveSyncEngine?>((ref) {
 
   final httpClient = http.Client();
   ref.onDispose(httpClient.close);
-
-  final tokenProvider = GoogleOAuthRefreshTokenProvider(
-    clientId: clientId,
-    clientSecret: clientSecret.isEmpty ? null : clientSecret,
-    readRefreshToken: () => secureStore.readSecret('gdrive_refresh_token_v1'),
-    httpClient: httpClient,
-  );
 
   return MmsDriveLiveSyncEngine(
     repository: localDb.repository,

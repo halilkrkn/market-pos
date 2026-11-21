@@ -77,7 +77,7 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
   - `tls.ca_cert` yapılandırılmış.
 - **Donanım:** Android cihaz ve Hub aynı Wi-Fi/LAN'da. Router'da istemci izolasyonu kapalı.
 - **Adımlar:**
-  1. Windows uygulamasında Tanılama → Cihaz Eşleştirme → yeni oturum açın. Kopyalanan eşleştirme JSON/metnini alın (not: Windows paneli yerleşik QR görseli çizmez; metin kopyalanır veya harici QR aracından taranır).
+  1. Windows uygulamasında Tanılama → Cihaz Eşleştirme → yeni oturum açın (Windows `PairingApprovalPanel` `qr_flutter` ile canlı kare QR görseli çizer ve ayrıca kopyalanabilir eşleştirme JSON/metnini de sunar).
   2. Android'de kurulum sihirbazından eşleştirme metnini yapıştırarak veya harici QR taratarak başlatın (`P-BLOCK-1..3` / `DEC-REV-1..5` kodda uygulanmış olup `hub_url` alanı otomatik olarak `server.crt` SAN ile doğrulanan LAN IPv4 adresini taşımalıdır; `127.0.0.1` gelmesi başarısızlık/regresyon sayılır).
   3. Windows'ta bekleyen talebi görün ve **Onayla**'ya basın.
   4. Android'de eşleşme tamamlanmalı ve Tanılama'da CA parmak izi görünmeli (`ca_fingerprint` boş/`UNKNOWN` ise pin oluşmaz; `/pairing/session` üretim TLS'de CA yoksa `503 ERR_CA_CERT_UNAVAILABLE` dönmelidir).
