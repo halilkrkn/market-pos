@@ -8,6 +8,7 @@ Bu dizin, **Market Management System (MMS)** projesinde alınan tüm bağlayıc�
 
 Her ADR belgesi aşağıdaki durumlardan birine sahiptir:
 - **`[CONFIRMED]`**: Kullanıcı tarafından açıkça onaylanmış ve bağlayıcı kabul edilmiş mimari karar.
+- **`[DESIGN_APPROVED]`**: Tasarım ve yöntem Owner tarafından onaylanmış, henüz kodlanmamış / sonraki faza bırakılmış mimari karar.
 - **`[PARTIALLY_CONFIRMED / IN_REVIEW]`**: Kararın bir bölümü onaylanmış, kalan teknik/doğrulama adımları kullanıcı incelemesinde bekleyen karar.
 - **`[PROPOSED]`**: Teknik analizle önerilen, kullanıcı değerlendirmesi veya teknik spike doğrulaması bekleyen karar.
 - **`[DEFERRED_POST_PILOT]`**: Pilot sonrası döneme ertelenmiş karar; pilotta yalnızca belgelenen operasyonel sınırlar geçerlidir.
@@ -38,8 +39,9 @@ Her ADR belgesi aşağıdaki durumlardan birine sahiptir:
 | **ADR-017** | Şifresiz Snapshot Ucunun Kapatılması ve TLS Pin / Sertifika Doğrulama Sınıflandırması | **PARTIALLY_CONFIRMED / IN_REVIEW** (Snapshot **CONFIRMED**; TLS sınıflandırma düzeltildi, PAT-12 **BLOCKED**) | [`017-snapshot-endpoint-and-tls-pin-classification.md`](./017-snapshot-endpoint-and-tls-pin-classification.md) |
 | **ADR-018** | Hub Keşfinde TLS — İstemci Tarafı Şema Seçimi ve Manuel Eşleştirme Protokolü | **CONFIRMED** (21.11.2026; §2.1 & Seçenek C + **`P-BLOCK-1..3`** `DEC-REV-1..5` uygulandı) | [`018-discovery-tls-scheme.md`](./018-discovery-tls-scheme.md) |
 | **ADR-019** | Kategori ve KDV Oranı Senkronizasyonu (SYNC-CAT) — Pilot %20 KDV Kısıtı | **DEFERRED_POST_PILOT** (21.11.2026; 7 kısıt / 8 risk / 9 gereksinim belgelendi) | [`019-category-vat-sync.md`](./019-category-vat-sync.md) |
-| **ADR-020** | Android'de Uygulama Kapalıyken Zamanlanmış Yedek (`JobScheduler` + Headless `FlutterEngine` + Ortak `AndroidKeystore` Kanalı) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (21.11.2026 Release 1.0 kapsamı; fiziksel Android `PAT-16` doğrulanacak) | [`020-android-background-backup-workmanager.md`](./020-android-background-backup-workmanager.md) |
-| **ADR-021** | Hub Öncelikli, Google Drive Destekli Hibrit Canlı Senkronizasyon Mimarisi (`MMSENV01` + Non-LWW) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (21.11.2026 Release 1.0 kapsamı; 20 mimari soru & 26 test senaryosu tamam; `PAT-18` fiziksel doğrulama bekler) | [`021-hybrid-hub-google-drive-live-sync.md`](./021-hybrid-hub-google-drive-live-sync.md) |
+| **ADR-020** | Android'de Uygulama Kapalıyken Zamanlanmış Yedek (`JobScheduler`, `JOB_ID = 70201` + Headless `FlutterEngine` + Ortak `AndroidKeystore` Kanalı) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (21.11.2026 Release 1.0 kapsamı; fiziksel Android `PAT-16` doğrulanacak) | [`020-android-background-backup-workmanager.md`](./020-android-background-backup-workmanager.md) |
+| **ADR-021** | Hub Öncelikli, Google Drive Destekli Hibrit Canlı Senkronizasyon Mimarisi (`MMSENV01`, `MARKET MMS LiveSync` + Non-LWW) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (21.11.2026 Release 1.0 kapsamı; 20 mimari soru & 26 test senaryosu tamam; `PAT-18` fiziksel doğrulama bekler) | [`021-hybrid-hub-google-drive-live-sync.md`](./021-hybrid-hub-google-drive-live-sync.md) |
+| **ADR-022** | Android Google Drive OAuth Tasarımı (Seçenek A — `google_sign_in`, Backup + Hibrit Canlı Senkronizasyon) | **DESIGN_APPROVED** (22.11.2026 Phase 1.1; Owner Seçenek A + pilot kapsamını onayladı — **Phase 2'de uygulanacak, kodlanmadı**) | [`022-android-google-drive-oauth-design.md`](./022-android-google-drive-oauth-design.md) |
 
 ---
 

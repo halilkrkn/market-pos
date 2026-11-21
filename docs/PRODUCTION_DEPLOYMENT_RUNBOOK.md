@@ -7,6 +7,8 @@ Bu kılavuz, **MARKET MANAGEMENT SYSTEM (MARKET MMS)** sisteminin Windows Local 
 > **21.11.2026 (Teknik Düzeltme Oturumu) Güncellemesi:** `hub_config.json` tek kaynak kuralından env fallback temizliği (ADR-015), `BackupOperationLock` heartbeat + 60 sn kurtarma ve Hub kilit entegrasyonu (ADR-016), TLS CA/SAN/tarih hata sınıflandırması (ADR-017), Android Keystore fail-closed hata eşleme + `minSdk 24 (Android 7.0)` (ADR-020 `DEFERRED_POST_PILOT`) ve pilot için onaylanan **%20 KDV geçici operasyonel kısıtları** (ADR-019 `DEFERRED_POST_PILOT`) dokümante edilmiştir. Güncel bütünleşik rapor: [`PILOT_TECHNICAL_REMEDIATION_REPORT.md`](./PILOT_TECHNICAL_REMEDIATION_REPORT.md). **Fiziksel kabul testleri (PAT-01…15) henüz çalıştırılmamıştır; sistem üretime hazır değildir.**
 >
 > **21.11.2026 (3. oturum) güncellemesi:** Kurulum betiği v2.1 (güncellemede önce servis durdurma, `bin.previous` ile otomatik geri dönüş), tüm `.ps1` betikleri Windows PowerShell 5.1 uyumlu (UTF-8 BOM), firewall yalnızca yerel alt ağ, Android otomatik (Google) yedekleme kapalı, restore koruyucu kopyası şifreli. Adım adım saha kabulü: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](../PHYSICAL_ACCEPTANCE_TEST_PLAN.md). Owner'ın yapması gerekenler: [`OWNER_ACTION_CHECKLIST.md`](../OWNER_ACTION_CHECKLIST.md).
+>
+> **22.11.2026 (Phase 1.1 Finalization) Güncellemesi:** `ADR-018` (`P-BLOCK-1..3` / `DEC-REV-1..5`) ve `ADR-020` (`JobScheduler`, `JOB_ID = 70201`) ile `ADR-021` (`MMSENV01`, klasör: `MARKET MMS LiveSync`) kod tabanında teknik olarak uygulanmıştır. Android uygulama sürümü `1.0.0+1` olarak sabitlenmiştir. Android Google Drive OAuth için Owner **Seçenek A (`google_sign_in`)** tasarımını ve pilot kapsamına dahil edilmesini onaylamıştır ([`ADR-022`](./decisions/022-android-google-drive-oauth-design.md), implementasyon Phase 2 kapsamındadır). Tüm fiziksel kabul testleri (`PAT-01…PAT-18`) henüz çalıştırılmamıştır (`BLOCKED / NOT RUN`).
 
 ## 1. Mimari Özet
 
@@ -43,9 +45,9 @@ Bu kılavuz, **MARKET MANAGEMENT SYSTEM (MARKET MMS)** sisteminin Windows Local 
 ## 3. Android Release APK Hazırlama
 
 ```powershell
-.\scripts\package_android_release.ps1 -Version 1.0.0
+.\scripts\package_android_release.ps1
 ```
-Çıktılar `dist\android_release\` klasöründe (`market_mms_v1.0.0.apk`, `.sha256` ve örnek `manifest.json`) üretilir.
+Betik sürüm bilgisini doğrudan `pubspec.yaml` (`1.0.0+1`) üzerinden okuyarak `--build-name` ve `--build-number` ile derler; çıktılar `dist\android_release\` klasöründe (`market_mms_v1.0.0-b1.apk`, `.sha256` ve örnek `manifest.json`) üretilir. İsteğe bağlı `-Version 1.0.0+1` parametresi yalnızca `pubspec.yaml` ile tutarlılık doğrulaması (guard) sağlar.
 
 > **Not (Sürüm İmzalama):** `android/key.properties` yoksa release derlemesi **durur** (21.11.2026'da doğrulandı: `BUILD FAILED — Release imzalama yapılandırılmadı`). Üretim anahtarı Owner tarafından oluşturulur ([`release/ANDROID_RELEASE.md`](./release/ANDROID_RELEASE.md) §2); `key.properties` ve `.jks` Git'e eklenmez. Debug anahtarıyla imzalı paket dağıtılmaz.
 >
@@ -75,7 +77,7 @@ Bu kılavuz, **MARKET MANAGEMENT SYSTEM (MARKET MMS)** sisteminin Windows Local 
   - Paket `AES-256-CBC` + `PBKDF2-HMAC-SHA256 (600.000 tur)` + `HMAC-SHA256` Encrypt-then-MAC ile şifrelenir.
 - **Geri Yükleme:** Seçilen yedek için `Geri Yükle` -> parola doğrulama -> `PRAGMA integrity_check` -> canlı DB bağlantısının kontrollü askıya alınması -> pre-restore güvenlik yedeği -> atomik dosya değişimi -> canlı DB'nin aynı oturumda yeniden açılması adımları işletilir.
 - **Çökme Sonrası Kurtarma:** Uygulama açılışında `DatabaseBackupEngine.recoverPendingRestoreSync` otomatik çalışarak yarıda kalmış restore işlemlerini güvenli şekilde tamamlar veya geri alır. Yedekleme/restore dosya kilidi (`BackupOperationLock`) 10 sn heartbeat ile aktif işlemi korur; çöken süreç kilidi 60 sn sonra kurtarılır ve hem istemci hem Hub tarafında eşzamanlı çakışma engellenir.
-- **Android Sınırı:** En az `minSdk 24 (Android 7.0)` gereklidir. Otomatik zamanlanmış yedek Android'de yalnızca uygulama açıkken çalışır (kapalıyken çalışma `ADR-020` ile pilot sonrasına ertelenmiştir).
+- **Android Sınırı:** En az `minSdk 24 (Android 7.0)` gereklidir. Uygulama kapalıyken Android zamanlanmış yedekleme (`ADR-020`) saf SDK `JobScheduler` (`MmsBackgroundBackupJobService`, `JOB_ID = 70201`) + headless `FlutterEngine` + Android Keystore üzerinden teknik olarak uygulanmıştır; fiziksel doğrulaması `PAT-16` (`BLOCKED`) ile yürütülecektir.
 
 ---
 
@@ -84,8 +86,8 @@ Bu kılavuz, **MARKET MANAGEMENT SYSTEM (MARKET MMS)** sisteminin Windows Local 
 - Pilot sürümde Hub veritabanında `categories` tablosu ile `products.vat_rate` / `category_id` sütunları yoktur (`DEFERRED_POST_PILOT`).
 - Tüm yeni/sıfırlanan cihazlar ürünleri **%20 KDV** ve `category_id = null` ile indirir; bir cihazda yerel değiştirilen %1/%10 KDV veya kategori diğer cihazlara ve Hub'a taşınmaz.
 - Çoklu KDV oranlı mağazada KDV dökümleri cihazlar arasında farklılık gösterebileceğinden resmî mali beyan bu pilot KDV kırılımına dayandırılmamalıdır.
-- **Google Drive Yedeği:** Başlangıç pilotunda isteğe bağlıdır; Hub zamanlanmış şifreli yedeği + USB aktarımı yeterlidir.
-- **Eşleştirme Bloklayıcıları (`P-BLOCK-1..3`):** İlk TLS+QR eşleştirme öncesi Owner kararı bekleyen protokol bulguları [`OWNER_ACTION_CHECKLIST.md`](../OWNER_ACTION_CHECKLIST.md) §A4'te belgelenmiştir.
+- **Google Drive Yedeği ve Hibrit Canlı Senkronizasyon (`ADR-021`, `ADR-022`):** Owner kararıyla Android Drive entegrasyonu pilot kapsamına dahil edilmiş ve Android OAuth için **Seçenek A (`google_sign_in`)** tasarımı onaylanmıştır (Phase 2'de uygulanacaktır; `C1`/`C2` Google Cloud OAuth ve `drive_live_sync_secret_v1` dağıtımı tamamlanana kadar yerel Hub+USB yedekleme çalışır).
+- **Eşleştirme ve Keşif Protokolü (`P-BLOCK-1..3` / `DEC-REV-1..5`):** İlgili sertleştirme adımları (`X.509/DER`, `ALT-BOOT-2`, `ACK_PENDING`, Win x64 FFI, `advertise_host`, zorunlu `IP:127.0.0.1` SAN) kodlanmıştır; gerçek LAN ve donanım doğrulamaları `PAT-03` & `PAT-12` (`BLOCKED`) içinde yürütülecektir.
 
 ---
 
@@ -96,4 +98,4 @@ Bu kılavuz, **MARKET MANAGEMENT SYSTEM (MARKET MMS)** sisteminin Windows Local 
 - [ ] Gerçek Windows–Android aynı yerel Wi-Fi üzerinde `UDP 8946` otomatik Hub keşfi + fiziksel kamera QR ile `S-4` eşleştirme doğrulaması.
 - [ ] Gerçek LAN üzerinde HTTPS CA `B-2` Certificate Pinning + `B-3` Android Keystore yeniden başlatma sonrası token kalıcılık testi.
 - [ ] Offline satış -> uygulama yeniden başlatma -> LAN dönüşünde FIFO senkronizasyon -> `S5A-4` yedek/geri yükleme doğrulaması.
-- [ ] Tüm maddelerin ayrıntılı adımları, beklenen sonuçları ve kanıt formatı: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](../PHYSICAL_ACCEPTANCE_TEST_PLAN.md) (PAT-01…PAT-15).
+- [ ] Tüm maddelerin ayrıntılı adımları, beklenen sonuçları ve kanıt formatı: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](../PHYSICAL_ACCEPTANCE_TEST_PLAN.md) (`PAT-01…PAT-18` — tamamı `BLOCKED / NOT RUN`).

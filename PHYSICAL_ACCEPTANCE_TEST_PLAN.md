@@ -4,8 +4,8 @@
 
 Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğrulamak içindir.
 
-- **Önerilen Yürütme Sırası:** `PAT-12 (adım 1: CA zinciri ve /health)` → `PAT-08` → `PAT-10` → `PAT-11` → `PAT-03` → `PAT-12 (adım 2–5: sabitlenmiş cihaz doğrulaması ve rotasyon)` → `PAT-01`, `PAT-02`, `PAT-04..07`, `PAT-09`, `PAT-14`, `PAT-15` → `PAT-13` (Drive — başlangıç pilotu için isteğe bağlı).
-- **Bağımlılık Notu (`PAT-12` adım 1 vs 2–5):** `PAT-12` adım 1 eşleştirmeden bağımsız olarak Hub sertifika zincirini tarayıcıdan doğrular; ancak adım 2–5 eşleştirilmiş cihaz gerektirdiğinden mutlaka `PAT-03` (ve `P-BLOCK-1..3` çözümü/manuel eşleştirme) sonrasında çalıştırılır.
+- **Önerilen Yürütme Sırası:** `PAT-12 (adım 1: CA zinciri ve /health)` → `PAT-08` → `PAT-10` → `PAT-11` → `PAT-03` → `PAT-12 (adım 2–5: sabitlenmiş cihaz doğrulaması ve rotasyon)` → `PAT-01`, `PAT-02`, `PAT-04..07`, `PAT-09`, `PAT-14`, `PAT-15`, `PAT-16` → `PAT-13` → `PAT-17` → `PAT-18` (Google Drive ve hibrit canlı senkronizasyon — `C1/C2` OAuth kurulumu tamamlandığında).
+- **Bağımlılık Notu (`PAT-12` adım 1 vs 2–5):** `PAT-12` adım 1 eşleştirmeden bağımsız olarak Hub sertifika zincirini tarayıcıdan doğrular; ancak adım 2–5 eşleştirilmiş cihaz gerektirdiğinden mutlaka `PAT-03` (`P-BLOCK-1..3` / `DEC-REV-1..5` kodda uygulanmış olup gerçek LAN/Android doğrulaması `PAT-03` içinde yürütülür) sonrasında çalıştırılır.
 
 **Genel ön koşullar (tüm testler):**
 1. `OWNER_ACTION_CHECKLIST.md` B1 (Android imza anahtarı) ve B2 (Hub TLS sertifikaları) tamamlanmış olmalı.
@@ -78,7 +78,7 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 - **Donanım:** Android cihaz ve Hub aynı Wi-Fi/LAN'da. Router'da istemci izolasyonu kapalı.
 - **Adımlar:**
   1. Windows uygulamasında Tanılama → Cihaz Eşleştirme → yeni oturum açın. Kopyalanan eşleştirme JSON/metnini alın (not: Windows paneli yerleşik QR görseli çizmez; metin kopyalanır veya harici QR aracından taranır).
-  2. Android'de kurulum sihirbazından eşleştirme metnini yapıştırarak veya harici QR taratarak başlatın (**Not:** `P-BLOCK-1..3` nedeniyle `hub_url` alanı `127.0.0.1` gelirse Android'de Hub LAN IP'sini elle girin; ilk `/pairing/ca-cert` ve PEM/DER pin uyuşmazlığı için Owner `P-BLOCK` düzeltme onayı gerekebilir).
+  2. Android'de kurulum sihirbazından eşleştirme metnini yapıştırarak veya harici QR taratarak başlatın (`P-BLOCK-1..3` / `DEC-REV-1..5` kodda uygulanmış olup `hub_url` alanı otomatik olarak `server.crt` SAN ile doğrulanan LAN IPv4 adresini taşımalıdır; `127.0.0.1` gelmesi başarısızlık/regresyon sayılır).
   3. Windows'ta bekleyen talebi görün ve **Onayla**'ya basın.
   4. Android'de eşleşme tamamlanmalı ve Tanılama'da CA parmak izi görünmeli (`ca_fingerprint` boş/`UNKNOWN` ise pin oluşmaz; `/pairing/session` üretim TLS'de CA yoksa `503 ERR_CA_CERT_UNAVAILABLE` dönmelidir).
   5. Android'de Hub adresini silin veya uygulamayı yeniden başlatın. Tanılama → Hub kartı → **Keşfet** (eşleştirilmiş cihaz yalnızca `https://` dener, UDP yanıtı `protocol_version: "1.0"` kalır).
@@ -244,7 +244,7 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 - **Başarısızlıkta:** Sertifikanın SAN alanını kontrol edin (Hub IP'si dahil mi?).
 
 ## PAT-13 — Gerçek Google OAuth ve Drive yükleme
-- **Ön koşullar:** Owner C1/C2 tamamlandı ve Windows derlemesi `MMS_GDRIVE_CLIENT_ID` ile yapıldı.
+- **Ön koşullar:** Owner `C1/C2` tamamlandı ve Windows derlemesi `MMS_GDRIVE_CLIENT_ID` ile yapıldı. *(Android `PAT-13` varyantı için ek olarak Phase 2 `ADR-022` [`google_sign_in`] implementasyonu, `B1` Release keystore SHA-1 kaydı ve `C1/C2` Web/Android OAuth yapılandırması gereklidir.)*
 - **Donanım:** Windows kasa, internet bağlantısı, Google hesabı.
 - **Adımlar:**
   1. Harici Yedek → **Google Drive'ı Bağla**. Tarayıcıda izin ekranında **yalnızca** `drive.file` izni istenmeli.
@@ -290,7 +290,7 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 - **Adımlar:**
   1. Tanılama → Otomatik Yedekleme ekranında `Arka Plan Zamanlayıcı (Uygulama Kapalıyken)` satırının **ZAMANLANDI** olduğunu doğrulayın.
   2. Uygulamayı **Zorla Durdur** (Recents'tan tamamen kaydırıp kapatın).
-  3. Bekleme süresini bekleyin veya geliştirici testinde `adb shell cmd jobscheduler run -f com.marketmms.market_pos 202611` komutunu çalıştırın.
+  3. Bekleme süresini bekleyin veya geliştirici testinde `adb shell cmd jobscheduler run -f com.marketmms.market_pos 70201` komutunu çalıştırın (`MmsBackgroundBackupChannelHandler.JOB_ID = 70201`).
   4. Uygulama kapalıyken yeni `.mmsbak` dosyasının oluştuğunu ve boyutunun > 0 olduğunu doğrulayın; cihazı yeniden başlatıp açılışta zamanlamanın (`setPersisted(true)`) korunduğunu teyit edin.
 - **Beklenen sonuç:** Uygulama kapalıyken alınan yedek yalnızca şifreli `.mmsbak` üretir (`PRAGMA integrity_check = ok` çözülünce); kilit çakışması varsa atlanır; Keystore kilitliyse fail-closed olur (asla şifresiz `.db` bırakılmaz).
 - **Kanıt:** Zamanlama UI ekran görüntüsü, dosya listesi/tarih damgası, Keystore hata varsa maskeli tanı raporu.

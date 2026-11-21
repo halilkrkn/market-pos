@@ -1,6 +1,6 @@
 # Windows Master Hub Kurulum, Güncelleme ve Servis Kılavuzu — MARKET MMS
 
-*Son güncelleme: 21 Kasım 2026 (3. oturum) — REL-01 (ADR-015 + Ek A)*
+*Son güncelleme: 21 Kasım 2026 (Phase 1.1 TLS & `advertise_host` güncellemesi) — REL-01 (ADR-015 + Ek A) & `P-BLOCK-1..3` (`DEC-REV-1..5`)*
 
 ## 1. Tek Yapılandırma Kaynağı (REL-01)
 
@@ -12,11 +12,43 @@ Tüm ayarlar `%ProgramData%\MarketMMS\config\hub_config.json` dosyasındadır. S
 | `port` / `discovery_port` | 8945 / 8946 | Firewall betiği bu değerleri okur |
 | `db_path`, `backup_dir`, `pepper_file` | `..\data`, `..\backups`, `..\security` | Göreli yollar config klasörüne göredir |
 | `admin_secret_file` | `..\security\admin_secret.txt` | Kurulumda rastgele üretilir; düz metin `admin_secret` anahtarı **reddedilir** |
-| `tls.enabled/cert/key` | `true`, `..\certs\server.crt/.key` | Dosya yoksa servis açılmaz (çıkış kodu 78) |
-| `tls.ca_cert` | `..\certs\ca.crt` | **Üretimde zorunlu (PAIR-CA, 21.11.2026).** Eşleştirme QR'ındaki CA parmak izi ve `/api/v1/pairing/ca-cert` bu dosyadan gelir; yoksa QR ile eşleştirmede TLS pin kurulamazdı. Yalnızca **genel** CA sertifikası — `ca.key` Hub diskinde bulunmamalıdır (ACL betiği bulursa kurulumu durdurur). Eski `ROOT_CA_CERT_FILE` ortam değişkeni geliştirme için korunur |
+| `tls.enabled/cert/key` | `true`, `..\certs\server.crt/.key` | Dosya yoksa veya `server.crt` geçersizse / `IP:127.0.0.1` SAN taşımıyorsa servis açılmaz (**çıkış kodu `78`**) |
+| `tls.ca_cert` | `..\certs\ca.crt` | **Üretimde zorunlu (PAIR-CA + `DEC-REV-1`).** Eşleştirme QR'ındaki CA parmak izi ve `/api/v1/pairing/ca-cert` bu dosyadan gelir; geçerli X.509v3 Root CA olmalıdır (`CA:TRUE`, `keyCertSign`, self-issued, yaprak SAN'sız). Yalnızca **genel** CA sertifikası — `ca.key` Hub diskinde bulunmamalıdır (ACL betiği bulursa kurulumu durdurur). `--config=` modunda `ROOT_CA_CERT_FILE` ortam değişkenine fallback yapılmaz |
+| `advertise_host` | `null` *(isteğe bağlı)* | Çoklu NIC veya özel ağ durumlarında Hub'ın eşleştirme QR'ında duyuracağı sabit yerel LAN IPv4 adresi (ör. `"192.168.1.50"`). Loopback (`127.x`), APIPA (`169.254.x`), CGNAT (`100.64.0.0/10`), multicast/broadcast ve VirtualBox Host-Only (`192.168.56.x`) adresleri yapılandırma yüklenirken reddedilir (`HubConfigException`). `null` bırakıldığında Hub otomatik SAN ∩ aktif LAN IPv4 çözümlemesini işletir |
 | `tenant_id`, `store_id`, `hub_id` | — | Mağaza kimliği; istemci kurulum değerleriyle aynı olmalı |
 
 Bilinmeyen anahtarlar (yazım hataları) açılışı durdurur.
+
+### 1.1 Üretim TLS Sertifika (SAN), `advertise_host`, Açılış (`exit 78`) ve Eşleştirme (`503`) Kuralları
+
+Üretimde `tls.enabled = true` iken Hub sertifikaları ve LAN duyuru adresi şu katı **fail-closed** kurallara tabidir (`bin/server.dart`, `lib/config/hub_config.dart`, `lib/network/hub_lan_address_resolver.dart`):
+
+1. **Zorunlu `IP:127.0.0.1` Loopback SAN (Hub Açılış Fail-Fast — Çıkış Kodu `78`):**
+   - Windows yerel kasa istemcisi ve yerel yönetim/eşleştirme uçları `https://127.0.0.1:<port>` adresine bağlanır.
+   - Bu nedenle `server.crt` sertifikasının X.509 `subjectAltName` (`iPAddress`) listesinde **`IP:127.0.0.1`** bulunması **mutlak zorunludur** (yalnızca `DNS:localhost` yeterli değildir).
+   - `server.crt` eksikse (`ERR_SERVER_CERT_NOT_FOUND`), bozuk DER/PEM ise (`ERR_SERVER_CERT_INVALID`) veya `IP:127.0.0.1` SAN içermiyorsa (**`ERR_SERVER_CERT_MISSING_LOOPBACK_SAN`**), Hub servisi açılışta **çıkış kodu `78`** ile fail-fast olarak durur.
+2. **LAN IPv4 ve Hostname SAN Gereksinimi:**
+   - Mobil ve ağ üzerindeki istemcilerin TLS sertifikasını doğrulayabilmesi için `server.crt` `subjectAltName` alanında **en az bir aktif LAN IPv4 adresi** (ör. `IP:192.168.1.50`) yer almalıdır; isteğe bağlı olarak yerel hostname (`DNS:localhost,DNS:<hub-hostname>`) da eklenebilir.
+   - Örnek güvenli SAN uzantısı (OpenSSL):
+     ```text
+     subjectAltName=IP:127.0.0.1,IP:192.168.1.50,DNS:localhost,DNS:MARKET-HUB-01
+     ```
+   - Kök CA (`ca.crt`) X.509v3 (`basicConstraints=critical,CA:TRUE`, `keyUsage=critical,keyCertSign,cRLSign`) olarak ayrı üretilmeli, yaprak SAN taşımamalı ve `ca.key` Hub makinesinde **asla** tutulmamalıdır.
+3. **`advertise_host` Çift Doğrulama Koşulu (`SAN` + Aktif Yerel Arayüz):**
+   - `hub_config.json` içinde `advertise_host` belirtilmişse bu IPv4 adresi hem `server.crt` SAN IPv4 listesinde bulunmalı hem de Hub makinesinde aktif bir ağ arayüzüne (`OperStatus = Up`, `DadState = Preferred`, non-loopback) atanmış olmalıdır.
+   - `advertise_host` `null` (veya tanımsız) ise Hub, Windows x64 `iphlpapi.dll` (`GetAdaptersAddresses` + `GetIfEntry2`) üzerinden `server.crt` LAN IPv4 SAN kümesiyle kesişen aktif fiziksel NIC'i (**Tier 1**: Ethernet/Wi-Fi, `HardwareInterface = true`) veya host LAN sanal anahtarını (**Tier 2**: Hyper-V External vEthernet, RFC1918) otomatik seçer; loopback, APIPA, VPN (WireGuard/Tailscale/OpenVPN), WSL, Docker, VirtualBox ve VMware adaptörlerini dışlar.
+4. **Hub Startup Fail (`exit 78`) vs Eşleştirme `HTTP 503` Ayrımı:**
+   - **Startup Fail (`exit 78`):** `tls.enabled=true` iken `server.crt`/`server.key`/`ca.crt` eksikse, `hub_config.json` geçersizse veya `server.crt` içinde **`IP:127.0.0.1` SAN yoksa** Hub hiç başlamaz.
+   - **Hub Ayakta Kalır, Eşleştirme `HTTP 503` Döner:** Hub yerel kasayı (`127.0.0.1`) kesintiye uğratmamak için LAN SAN / `advertise_host` uyuşmazlığında açılışta `stderr`'e `[WARN] ERR_ADVERTISE_HOST_SAN_MISMATCH` yazar ve çalışmaya devam eder; ancak `POST /api/v1/pairing/session` çağrısı **`HTTP 503`** ile fail-closed reddedilir (QR içine asla `127.0.0.1` veya `UNKNOWN` sızdırılmaz).
+
+| Hata Kodu | Nerede / HTTP | Neden | Çözüm |
+|---|---|---|---|
+| `ERR_SERVER_CERT_MISSING_LOOPBACK_SAN` | Hub açılışı (`exit 78`) | `server.crt` SAN listesinde `IP:127.0.0.1` yok | `server.crt` sertifikasını `IP:127.0.0.1` + LAN IP SAN ile yeniden imzalayın |
+| `ERR_CA_CERT_UNAVAILABLE` | `POST /api/v1/pairing/session` (`503`) | `tls.ca_cert` eksik veya X.509v3 Root CA doğrulamasından geçmedi | Geçerli `ca.crt` dosyasını yerleştirin |
+| `ERR_ADVERTISE_HOST_SAN_MISMATCH` | Açılışta `[WARN]`; `/pairing/session` (`503`) | `advertise_host` değeri `server.crt` IPv4 SAN listesinde yok | `server.crt` SAN listesini veya `advertise_host` değerini eşitleyin |
+| `ERR_ADVERTISE_HOST_NOT_LOCAL` | `/pairing/session` (`503`) | `advertise_host` makinede aktif bir arayüzde atanmış değil (ör. DHCP değişimi) | Sabit LAN IP atayın veya `advertise_host` / `server.crt` güncelleyin |
+| `ERR_HUB_LAN_IP_UNAVAILABLE` | `/pairing/session` (`503`) | `server.crt` SAN ile eşleşen aktif fiziksel/Tier-2 LAN IPv4 bulunamadı | `server.crt` içine aktif LAN IPv4 SAN ekleyin ve ağ bağlantısını doğrulayın |
+| `ERR_HUB_LAN_IP_AMBIGUOUS` | `/pairing/session` (`503`) | Birden fazla aktif LAN arayüzü `server.crt` SAN ile eşleşiyor | `hub_config.json` içinde kullanılacak tek IP'yi `advertise_host` olarak tanımlayın |
 
 ## 2. Kurulum (Yönetici PowerShell)
 

@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:market_pos/core/constants/app_constants.dart';
 
 /// Faz 7C / SEC-ABK — Android üretim yapılandırmasının depo düzeyinde doğrulanması.
 ///
@@ -53,5 +54,81 @@ void main() {
     final gitignore = File('.gitignore').readAsStringSync();
     expect(gitignore, contains('key.properties'));
     expect(gitignore, anyOf(contains('*.jks'), contains('*.keystore')));
+  });
+
+  test('Phase 1.1: pubspec.yaml sürümü 1.0.0+1, Gradle Flutter sürüm alanlarını kullanır ve paketleme betiği dinamik sürüm üretir', () {
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final versionMatch = RegExp(
+      r'^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)\s*$',
+      multiLine: true,
+    ).firstMatch(pubspec);
+    expect(versionMatch, isNotNull, reason: 'pubspec.yaml geçerli X.Y.Z+N sürümü taşımalı');
+    expect(versionMatch!.group(1), '1.0.0');
+    expect(versionMatch.group(2), '1');
+    expect(AppConstants.appVersion, versionMatch.group(1));
+
+    final g = gradle.readAsStringSync();
+    expect(g, contains('ndkVersion = flutter.ndkVersion'));
+    expect(g, contains('versionCode = flutter.versionCode'));
+    expect(g, contains('versionName = flutter.versionName'));
+
+    final scriptFile = File('scripts/package_android_release.ps1');
+    expect(scriptFile.existsSync(), isTrue);
+    final scriptBytes = scriptFile.readAsBytesSync();
+    final hasBom = scriptBytes.length >= 3 &&
+        scriptBytes[0] == 0xEF &&
+        scriptBytes[1] == 0xBB &&
+        scriptBytes[2] == 0xBF;
+    expect(
+      hasBom || !scriptBytes.any((b) => b > 0x7F),
+      isTrue,
+      reason: 'package_android_release.ps1 Windows PowerShell 5.1 için UTF-8 BOM veya ASCII olmalı',
+    );
+
+    final script = scriptFile.readAsStringSync();
+    expect(script, isNot(contains(r'[string]$Version = "1.0.0"')));
+    expect(script, contains('pubspec.yaml'));
+    expect(script, contains('--build-name=\$buildName'));
+    expect(script, contains('--build-number=\$buildNumber'));
+    expect(script, contains(r'market_mms_v$buildName-b$buildNumber$ext'));
+
+    if (Platform.isWindows) {
+      final parseRes = Process.runSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        '[System.Management.Automation.Language.Parser]::ParseFile("${scriptFile.absolute.path}", [ref]\$null, [ref]\$null)',
+      ]);
+      expect(parseRes.exitCode, 0, reason: 'PowerShell AST ayrıştırması geçmeli: ${parseRes.stderr}');
+
+      final mismatchRes = Process.runSync('powershell.exe', [
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        scriptFile.absolute.path,
+        '-Version',
+        '9.9.9',
+        '-SkipFlutterBuild',
+      ]);
+      expect(
+        mismatchRes.exitCode,
+        isNot(0),
+        reason: 'pubspec.yaml ile uyuşmayan -Version fail-closed reddedilmeli',
+      );
+    }
+  });
+
+  test('Phase 1.1: PAT-16 Android JobScheduler JOB_ID (70201) Kotlin kodu ve fiziksel test planında tutarlıdır', () {
+    final jobService = File(
+      'android/app/src/main/kotlin/com/marketmms/market_pos/MmsBackgroundBackupJobService.kt',
+    ).readAsStringSync();
+    expect(jobService, contains('const val JOB_ID = 70201'));
+
+    final patPlan = File('PHYSICAL_ACCEPTANCE_TEST_PLAN.md').readAsStringSync();
+    expect(
+      patPlan,
+      contains('adb shell cmd jobscheduler run -f com.marketmms.market_pos 70201'),
+    );
+    expect(patPlan, isNot(contains('202611')));
   });
 }

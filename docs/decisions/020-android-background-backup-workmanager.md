@@ -13,7 +13,7 @@ Android 7.0+ (`minSdk 24`) cihazlarda yalnızca uygulama ön planda açıkken ç
 Harici `workmanager` pub paketine yeni ağ/Gradle bağımlılığı eklemek yerine (çevrimdışı Gradle derleme kırılganlığından kaçınmak ve doğrudan kontrol sağlamak için) **saf Android SDK `JobScheduler` (`JobService` + `setPersisted(true)`) + arka plan headless `FlutterEngine`** mimarisi tercih edilmiştir:
 
 1. **`MmsSecureStorageChannelHandler.kt`:** `AndroidKeystore` + AES-256-GCM şifreli Depolama kanalı `MainActivity`'den ayrı, yeniden kullanılabilir sınıfa taşındı; hem ön plan `MainActivity` hem arka plan `MmsBackgroundBackupJobService` aynı kanalı kaydeder.
-2. **`MmsBackgroundBackupJobService.kt` & `AndroidManifest.xml`:** `BIND_JOB_SERVICE` ve `RECEIVE_BOOT_COMPLETED` ile uygulama kapandıktan veya cihaz yeniden başlatıldıktan sonra bile (`setPersisted(true)`) OS tarafından zamanlı uyandırılır; arka plan `FlutterEngine` üzerinden `@pragma('vm:entry-point')` `mmsBackgroundBackupEntrypoint()` giriş noktasını başlatır.
+2. **`MmsBackgroundBackupJobService.kt` & `AndroidManifest.xml`:** Kanonik `JOB_ID = 70201` ile `BIND_JOB_SERVICE` ve `RECEIVE_BOOT_COMPLETED` üzerinden uygulama kapandıktan veya cihaz yeniden başlatıldıktan sonra bile (`setPersisted(true)`) OS tarafından zamanlı uyandırılır; arka plan `FlutterEngine` üzerinden `@pragma('vm:entry-point')` `mmsBackgroundBackupEntrypoint()` giriş noktasını başlatır.
 3. **`BackgroundBackupWorkerExecutor` (`lib/features/backup/application/background_backup_scheduler.dart`):**
    - `ScheduledBackupRunner` + `BackupSchedulePolicy.isDue` ile aralık içi tekrar yedek almaz (**idempotent**).
    - Ön plan/geri yükleme ile ortak **`BackupOperationLock`** kullanır; kilit tutuluyorsa `SKIPPED_LOCK_BUSY` döner ve hata sayacını artırmaz.

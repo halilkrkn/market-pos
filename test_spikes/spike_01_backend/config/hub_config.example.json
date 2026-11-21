@@ -13,6 +13,7 @@
     "key": "../certs/server.key",
     "ca_cert": "../certs/ca.crt"
   },
+  "advertise_host": null,
   "tenant_id": "default-tenant",
   "store_id": "default-store",
   "hub_id": "MMS-HUB-MASTER",

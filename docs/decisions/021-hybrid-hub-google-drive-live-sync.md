@@ -38,7 +38,7 @@ Yalnızca **doğrulanmış Hub ulaşılamazlığı** oluştuğunda: ardışık a
 Birden fazla cihazın Google Drive'daki aynı SQLite dosyasına yazması **dosya bozulmasına, WAL kaybına ve sessiz veri ezilmesine (split-brain)** yol açar. Bunun yerine Drive yalnızca **değiştirilemez (immutable, append-only), işlem başına tekil şifreli zarf (`.mmsenv`)** mesaj kuyruğu / relay alanı olarak kullanılır.
 
 ### S5. Drive klasör yapısı ve dosya adlandırma şeması nasıldır?
-`MMS LiveSync/` klasörü (en dar `drive.file` yetkisi altında) içinde işlem başına tekil dosya açılır:
+`MARKET MMS LiveSync` klasörü (kod sabiti: `GoogleDriveLiveEnvelopeTransport.folderName = 'MARKET MMS LiveSync'`, en dar `drive.file` yetkisi altında) içinde işlem başına tekil dosya açılır:
 `env_<tenantId>_<storeId>_<deviceId>_<clientSeq_12hane>_<operationId>.mmsenv`
 `appProperties`: `mms_env_v`, `mms_tenant_id`, `mms_store_id`, `mms_device_id`, `mms_client_seq`, `mms_op_id`, `mms_op_type`, `mms_sha256`. Mevcut aynı `(device_id, client_seq, operation_id)` zarfı bir daha yüklenmez (idempotent).
 

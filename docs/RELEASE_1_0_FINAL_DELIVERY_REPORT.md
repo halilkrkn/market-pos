@@ -5,6 +5,9 @@
 - **Kapsam:** Release 1.0 End-to-End Tamamlama (`Faz A: P-BLOCK-1..3 / DEC-REV-1..5`, `Faz B: ADR-020 Android Kapalı Arka Plan Yedeği`, `Faz C: Google Drive Şifreli Yedek Listeleme & Ön Doğrulamalı Geri Yükleme`, `Faz D: ADR-021 Hub Öncelikli Google Drive Hibrit Canlı Senkronizasyon`, `Faz E: Tam Otomatik Test + Statik Analiz + Kotlin Derleme`, `Faz F: Kanonik Dokümantasyon`)
 - **Nihai Durum Etiketi:** **`TECHNICALLY COMPLETE — PHYSICAL VALIDATION REQUIRED`**
 
+> [!NOTE]
+> **Phase 1.1 Remediation & Finalization Referansı (22 Kasım 2026):** Bu belge Release 1.0 teknik teslimatının (`a02a3c66edb3d580c047a02557057acf7d6fa573`) tarihsel kaydıdır. Sürümün `1.0.0+1` olarak sabitlenmesi, Android NDK `28.2.13676358` kurulumu & uyumu, `ADR-022` (Seçenek A — `google_sign_in`) teknik tasarımı ve ek dokümantasyon/test doğrulamaları için bkz.: [`RELEASE_1_0_PHASE_1_1_REMEDIATION_REPORT.md`](./RELEASE_1_0_PHASE_1_1_REMEDIATION_REPORT.md) ve [`RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`](./RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md).
+
 > [!IMPORTANT]
 > **Dürüst Doğrulama ve Kapsam Sınırı Beyanı:** Onaylı teknik tasarım kapsamındaki tüm yazılım bileşenleri kodlanmış, son kod temizliği sonrası **4 pakette 772/772 otomatik test** sıfır hata/sıfır başarısızlık ile geçmiş, 4 pakette statik analiz çıkış kodu `0` olmuş ve Android `:app:compileDebugKotlin` derlemesi başarıyla tamamlanmıştır. Ancak fiziksel cihaz/ağ/servis/OAuth doğrulamaları (`PAT-01…PAT-18`), Flutter `integration_test/`, Release APK üretimi ve Windows AOT üretim kurulumu bu ortamda **yürütülmemiştir (`BLOCKED — NOT RUN`)**; hiçbir aşama Owner adına kabul edilmiş sayılmaz ve hiçbir Git stage/commit/push işlemi yapılmamıştır.
 
@@ -63,9 +66,9 @@
 | **ADR-015** | Windows Hub tek `hub_config.json`, env sızıntı temizliği, `/devices/revoke` loopback+admin | `CONFIRMED` | Tamamlandı & regresyon testli (`spike_01_backend`). |
 | **ADR-016** | `BackupOperationLock`, Outbox/`client_seq` korunmalı two-phase restore, Guide §7 | `CONFIRMED` | Tamamlandı & Drive restore akışı da aynı kilit/Outbox güvencesine bağlandı. |
 | **ADR-017** | Snapshot güvenlik kuralı ve TLS CA-pin / SAN / MITM 7-durum ayrımı | `PARTIALLY_CONFIRMED / IN_REVIEW` | Yazılım & gerçek soket testleri tam; üretim OpenSSL sertifikaları saha `PAT-12` bekliyor. |
-| **ADR-018 + `DEC-REV-1..5`** | Discovery TLS (`https://`, UDP v1.0), `P-BLOCK-1..3` (`X.509/DER`, `ALT-BOOT-2`, `ACK_PENDING`, Win FFI) | `CONFIRMED` | Kodlandı & test edildi (`APP-T01..T17`, `HUB-T01..T09b`); fiziksel LAN/Android eşleştirme `PAT-03` & `PAT-17` bekliyor. |
+| **ADR-018 + `DEC-REV-1..5`** | Discovery TLS (`https://`, UDP v1.0), `P-BLOCK-1..3` (`X.509/DER`, `ALT-BOOT-2`, `ACK_PENDING`, Win FFI) | `CONFIRMED` | Kodlandı & test edildi (`APP-T01..T17`, `HUB-T01..T09b`); fiziksel LAN/Android eşleştirme `PAT-03` & `PAT-12` bekliyor. |
 | **ADR-019** | Kategori ve KDV senkronizasyonu (`SYNC-CAT`) | `DEFERRED_POST_PILOT` | Bilinçli olarak değiştirilmedi; 7 geçici %20 KDV operasyonel kısıtı korunuyor. |
-| **ADR-020** | Android kapalıyken arka plan yedekleme (saf SDK `JobScheduler` + headless `FlutterEngine`) | `CONFIRMED` (Owner Release 1.0 Onayı) | Kotlin `JobService` + paylaşılan Keystore + Dart worker uygulandı ve `:app:compileDebugKotlin` ile derlendi (`PAT-15` bekliyor). |
+| **ADR-020** | Android kapalıyken arka plan yedekleme (saf SDK `JobScheduler`, `JOB_ID = 70201` + headless `FlutterEngine`) | `CONFIRMED` (Owner Release 1.0 Onayı) | Kotlin `JobService` + paylaşılan Keystore + Dart worker uygulandı ve `:app:compileDebugKotlin` ile derlendi (`PAT-15`, `PAT-16` bekliyor). |
 | **ADR-021** | Hub öncelikli, Google Drive destekli (`MMSENV01`) hibrit canlı senkronizasyon (20 soru, 26 senaryo) | `CONFIRMED — TEKNİK TASARIM VE UYGULAMA` | Engine + Coordinator + 10 UI durumu + 26 otomatik senaryo tamamlandı; gerçek 2 cihaz Drive relay `PAT-18` bekliyor. |
 
 ---
@@ -114,7 +117,7 @@ Son kod düzenlemelerinden (`lib/main.dart`, `device_pairing_client.dart`, `pblo
 ## F. Kullanıcının (Owner) Gerçekleştirmesi Gereken Manuel Adımlar
 
 1. **`OWNER_ACTION_CHECKLIST.md` Ön Koşulları:** Android imzalama anahtarı (`B1: key.properties` + `.jks`), üretim Hub Root CA + SAN'lı sunucu sertifikası (`B2`), Google Cloud OAuth Desktop/Android istemci kimliği (`C1–C2`: Drive yedekleme + canlı fallback için) ve `MarketMmsSpike01` + test DB/token temizliği (`D1–D4`, `E1`).
-2. **`PHYSICAL_ACCEPTANCE_TEST_PLAN.md` (`PAT-01…PAT-18`):** Tek tek adım protokolüyle gerçek Windows + Android + USB HID + Google Drive saha doğrulamalarının yürütülmesi (özellikle `PAT-03`, `PAT-08..12`, `PAT-13` Drive indirme/geri yükleme, `PAT-15` kapalı uygulama `JobScheduler`, `PAT-16` Windows FFI canlı doğrulaması, `PAT-17` re-pairing çökme kurtarması, `PAT-18` iki cihaz Hub-kapalı Drive canlı senkronizasyon + Hub dönüş uzlaştırması).
+2. **`PHYSICAL_ACCEPTANCE_TEST_PLAN.md` (`PAT-01…PAT-18`):** Tek tek adım protokolüyle gerçek Windows + Android + USB HID + Google Drive saha doğrulamalarının yürütülmesi (özellikle `PAT-03` Wi-Fi Hub keşfi & QR eşleştirme [`P-BLOCK-1..3` / `DEC-REV-1..5`], `PAT-08..12` SCM/ACL/Release APK/TLS rotasyon, `PAT-13` Google OAuth & Drive yükleme, `PAT-15` zamanlanmış yedek, `PAT-16` Android uygulama kapalıyken `JobScheduler` [`JOB_ID = 70201`] & reboot kalıcılığı, `PAT-17` Google Drive gerçek hesap ile yedek listeleme/kesintili `.part` indirme/kontrollü geri yükleme ve `PAT-18` iki cihaz Hub-kapalı Drive canlı senkronizasyon + Hub dönüş uzlaştırması). *(Not: Windows x64 FFI canlı adaptör çözümlemesi [`HUB-T04c`] ve crash-safe re-pairing kesinti kurtarması [`APP-T16`] otomatik testlerle doğrulanmış olup, bunların sahada `PAT-03` alt adımı olarak mı yoksa ayrı fiziksel kontrol maddesi olarak mı izleneceği Owner onayına bırakılmıştır.)*
 
 ---
 

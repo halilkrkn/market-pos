@@ -26,7 +26,7 @@ val allowReleaseCleartext = System.getenv("MMS_ALLOW_CLEARTEXT") == "true"
 android {
     namespace = "com.marketmms.market_pos"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = "27.0.11718014"
+    ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
