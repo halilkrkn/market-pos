@@ -154,7 +154,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_zero_qty',
-          'client_seq': 2,
+          'client_seq': 1,
           'total_amount': 10000,
           'payment_method': 'CASH',
           'items': [
@@ -173,7 +173,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_bad_item_total',
-          'client_seq': 3,
+          'client_seq': 1,
           'total_amount': 1,
           'payment_method': 'CASH',
           'items': [
@@ -192,7 +192,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_bad_sum',
-          'client_seq': 4,
+          'client_seq': 1,
           'total_amount': 9999,
           'payment_method': 'CASH',
           'items': [
@@ -211,7 +211,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_fake_price',
-          'client_seq': 5,
+          'client_seq': 1,
           'total_amount': 500,
           'payment_method': 'CASH',
           'items': [
@@ -230,7 +230,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_valid_history_price',
-          'client_seq': 6,
+          'client_seq': 1,
           'total_amount': 20000,
           'payment_method': 'CASH',
           'items': [
@@ -255,7 +255,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_lossy_conv',
-          'client_seq': 7,
+          'client_seq': 2,
           'total_amount': 1000,
           'payment_method': 'CASH',
           'items': [
@@ -274,7 +274,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_stock_conv_success',
-          'client_seq': 8,
+          'client_seq': 2,
           'total_amount': 10000,
           'payment_method': 'CASH',
           'items': [
@@ -309,7 +309,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_legit_pre_ack_sale',
-          'client_seq': 9,
+          'client_seq': 3,
           'total_amount': 20000,
           'payment_method': 'CASH',
           'items': [
@@ -357,7 +357,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_expired_price_attempt',
-          'client_seq': 13,
+          'client_seq': 4,
           'total_amount': 20000,
           'payment_method': 'CASH',
           'items': [
@@ -382,7 +382,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_overflow_price_qty',
-          'client_seq': 10,
+          'client_seq': 4,
           'total_amount': 5000,
           'payment_method': 'CASH',
           'items': [
@@ -419,7 +419,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_overflow_conv',
-          'client_seq': 11,
+          'client_seq': 4,
           'total_amount': 10000000,
           'payment_method': 'CASH',
           'items': [
@@ -444,7 +444,7 @@ void main() {
         headers: authHeaders(),
         body: jsonEncode({
           'operation_id': 'op_unscaled_rejected',
-          'client_seq': 12,
+          'client_seq': 4,
           'total_amount': 30000,
           'payment_method': 'CASH',
           'items': [
@@ -464,8 +464,8 @@ void main() {
 
     test('12. Kanonik CARD ödeme yöntemi 201 COMMITTED döner, kaydedilir ve tekrar gönderimde idempotent replay yapar', () async {
       final cardPayload = {
-        'operation_id': 'op_canonical_card_14',
-        'client_seq': 14,
+        'operation_id': 'op_canonical_card_4',
+        'client_seq': 4,
         'total_amount': 20000,
         'payment_method': 'CARD',
         'items': [
@@ -500,10 +500,10 @@ void main() {
       expect(resReplay.statusCode, equals(200));
       expect(resReplay.headers['x-mms-idempotent-replay'], equals('true'));
 
-      final allSeq14Sales = await (db.select(db.sales)
-            ..where((s) => s.deviceId.equals(deviceId) & s.clientSeq.equals(14)))
+      final allSeq4Sales = await (db.select(db.sales)
+            ..where((s) => s.deviceId.equals(deviceId) & s.clientSeq.equals(4)))
           .get();
-      expect(allSeq14Sales.length, equals(1));
+      expect(allSeq4Sales.length, equals(1));
     });
 
     test('13. Geçersiz veya eski ödeme yöntemleri (CREDIT_CARD, NAKIT, küçük harf, boş) ve eksik/null alan 400 ERR_INVALID_PAYMENT_METHOD ile reddedilir', () async {
@@ -511,7 +511,7 @@ void main() {
       final invalidBodies = <Map<String, dynamic>>[
         {
           'operation_id': 'op_bad_pm_credit_card',
-          'client_seq': 15,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': 'CREDIT_CARD',
           'items': [
@@ -520,7 +520,7 @@ void main() {
         },
         {
           'operation_id': 'op_bad_pm_nakit',
-          'client_seq': 16,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': 'NAKIT',
           'items': [
@@ -529,7 +529,7 @@ void main() {
         },
         {
           'operation_id': 'op_bad_pm_lower',
-          'client_seq': 17,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': 'cash',
           'items': [
@@ -538,7 +538,7 @@ void main() {
         },
         {
           'operation_id': 'op_bad_pm_empty',
-          'client_seq': 18,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': '',
           'items': [
@@ -547,7 +547,7 @@ void main() {
         },
         {
           'operation_id': 'op_bad_pm_null',
-          'client_seq': 19,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': null,
           'items': [
@@ -556,7 +556,7 @@ void main() {
         },
         {
           'operation_id': 'op_bad_pm_int',
-          'client_seq': 20,
+          'client_seq': 5,
           'total_amount': 20000,
           'payment_method': 123,
           'items': [
@@ -566,7 +566,7 @@ void main() {
         {
           // Eksik payment_method alanı sessizce CASH yapılmaz!
           'operation_id': 'op_bad_pm_missing',
-          'client_seq': 21,
+          'client_seq': 5,
           'total_amount': 20000,
           'items': [
             {'product_id': 'prod_et', 'quantity': 1000, 'unit_price': 20000, 'total_price': 20000}
@@ -591,8 +591,8 @@ void main() {
 
     test('14. Aynı idempotency key üzerinde payment_method değiştirilmesi (CARD -> CASH) 409 ERR_IDEMPOTENCY_PAYLOAD_MISMATCH döner', () async {
       final mutatedReplay = {
-        'operation_id': 'op_canonical_card_14',
-        'client_seq': 14,
+        'operation_id': 'op_canonical_card_4',
+        'client_seq': 4,
         'total_amount': 20000,
         'payment_method': 'CASH',
         'items': [

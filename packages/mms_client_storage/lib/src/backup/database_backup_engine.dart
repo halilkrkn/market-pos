@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,7 @@ import 'package:sqlite3/sqlite3.dart';
 import 'backup_crypto.dart';
 import 'backup_manifest.dart';
 import 'backup_storage_provider.dart';
+import 'client_restore_reconciler.dart';
 
 class BackupException implements Exception {
   final String code;
@@ -37,7 +39,12 @@ class BackupResult {
 class RestoreResult {
   final String backupId;
   final BackupManifest manifest;
+
+  /// Restore ÖNCESİ canlı veritabanının güvenlik kopyası. [safetyBackupEncrypted]
+  /// `true` ise şifreli `.mmsbak` paketidir (geri yüklenen yedeğin parolasıyla açılır);
+  /// `false` ise şifresiz `.db` dosyasıdır (şifreleme kapalı veya başarısız).
   final String safetyBackupPath;
+  final bool safetyBackupEncrypted;
   final DateTime restoredAt;
 
   const RestoreResult({
@@ -45,6 +52,7 @@ class RestoreResult {
     required this.manifest,
     required this.safetyBackupPath,
     required this.restoredAt,
+    this.safetyBackupEncrypted = false,
   });
 }
 
@@ -99,7 +107,7 @@ class DatabaseBackupEngine {
           throw BackupException('ERR_INTEGRITY_CHECK_FAILED', 'Snapshot SQLite integrity_check başarısız: $status');
         }
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
 
       // 4. SHA-256 Checksum ve dosya boyutunu hesapla
@@ -124,11 +132,16 @@ class DatabaseBackupEngine {
         isMonthlyArchive: isMonthlyArchive,
       );
 
-      // 6. AES-256-CBC ve HMAC-SHA256 ile şifrele
-      final packageBytes = BackupCryptoService.encryptPackage(
-        databaseBytes: rawSnapshotBytes,
-        password: backupPassword,
-        manifest: manifest,
+      // 6. AES-256-CBC ve HMAC-SHA256 ile şifrele.
+      // Faz 7A: PBKDF2 (600.000 iterasyon) + AES CPU yoğun; çağıran (UI) isolate'i
+      // bloklamamak için ayrı isolate'te çalıştırılır.
+      final packageBytes = await Isolate.run(
+        () => BackupCryptoService.encryptPackage(
+          databaseBytes: rawSnapshotBytes,
+          password: backupPassword,
+          manifest: manifest,
+        ),
+        debugName: 'mms_backup_encrypt',
       );
 
       // 7. Depolama sağlayıcısına güvenle yaz (.tmp -> .mmsbak atomik geçişi)
@@ -149,7 +162,9 @@ class DatabaseBackupEngine {
       if (tempDir.existsSync()) {
         try {
           tempDir.deleteSync(recursive: true);
-        } catch (_) {}
+        } on FileSystemException catch (e) {
+          stderr.writeln('[BackupEngine] Geçici snapshot dizini silinemedi (${tempDir.path}): ${e.message}');
+        }
       }
     }
   }
@@ -182,6 +197,34 @@ class DatabaseBackupEngine {
     }
   }
 
+  static Future<void> _deleteQuietly(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } on FileSystemException catch (e) {
+      stderr.writeln('[BackupEngine] Geçici dosya silinemedi (${file.path}): ${e.message}');
+    }
+  }
+
+  static void _deleteQuietlySync(File file) {
+    try {
+      if (file.existsSync()) file.deleteSync();
+    } on FileSystemException catch (e) {
+      stderr.writeln('[BackupEngine] Geçici dosya silinemedi (${file.path}): ${e.message}');
+    }
+  }
+
+  static void _verifyIntegrityOrThrow(File dbFile, String errorCode) {
+    final checkDb = sqlite3.open(dbFile.path);
+    try {
+      final status = checkDb.select('PRAGMA integrity_check;').first.columnAt(0)?.toString().toLowerCase();
+      if (status != 'ok') {
+        throw BackupException(errorCode, 'SQLite integrity_check başarısız: $status');
+      }
+    } finally {
+      checkDb.close();
+    }
+  }
+
   /// Bekleyen veya yarıda kalmış restore işlemini (.restore_journal) senkron olarak kurtarır.
   /// Süreç çökmesi veya elektrik kesintisi sonrasında veritabanı açılırken çağrılır.
   static bool recoverPendingRestoreSync(File liveDbFile) {
@@ -211,15 +254,15 @@ class DatabaseBackupEngine {
         } catch (_) {
           liveOk = false;
         } finally {
-          checkDb?.dispose();
+          checkDb?.close();
         }
 
         if (liveOk) {
           if (stagingFile != null && stagingFile.existsSync()) {
-            try { stagingFile.deleteSync(); } catch (_) {}
+            _deleteQuietlySync(stagingFile);
           }
           if (swapFile != null && swapFile.existsSync()) {
-            try { swapFile.deleteSync(); } catch (_) {}
+            _deleteQuietlySync(swapFile);
           }
           journalFile.deleteSync();
           return true;
@@ -237,16 +280,16 @@ class DatabaseBackupEngine {
         } catch (_) {
           stagingOk = false;
         } finally {
-          checkDb?.dispose();
+          checkDb?.close();
         }
 
         if (stagingOk) {
           if (liveDbFile.existsSync()) {
-            try { liveDbFile.deleteSync(); } catch (_) {}
+            _deleteQuietlySync(liveDbFile);
           }
           _safeRenameSync(stagingFile, liveDbFile.path);
           if (swapFile != null && swapFile.existsSync()) {
-            try { swapFile.deleteSync(); } catch (_) {}
+            _deleteQuietlySync(swapFile);
           }
           journalFile.deleteSync();
           return true;
@@ -256,11 +299,11 @@ class DatabaseBackupEngine {
       // 3. Durum C: Swap yedeği mevcut -> Önceki kararlı duruma geri dönülür
       if (swapFile != null && swapFile.existsSync()) {
         if (liveDbFile.existsSync()) {
-          try { liveDbFile.deleteSync(); } catch (_) {}
+          _deleteQuietlySync(liveDbFile);
         }
         _safeRenameSync(swapFile, liveDbFile.path);
         if (stagingFile != null && stagingFile.existsSync()) {
-          try { stagingFile.deleteSync(); } catch (_) {}
+          _deleteQuietlySync(stagingFile);
         }
         journalFile.deleteSync();
         return true;
@@ -269,11 +312,11 @@ class DatabaseBackupEngine {
       // 4. Durum D: Koruyucu yedek mevcut -> Koruyucu yedekten canlı dosya kopyalanır
       if (safetyFile != null && safetyFile.existsSync()) {
         if (liveDbFile.existsSync()) {
-          try { liveDbFile.deleteSync(); } catch (_) {}
+          _deleteQuietlySync(liveDbFile);
         }
         safetyFile.copySync(liveDbFile.path);
         if (stagingFile != null && stagingFile.existsSync()) {
-          try { stagingFile.deleteSync(); } catch (_) {}
+          _deleteQuietlySync(stagingFile);
         }
         journalFile.deleteSync();
         return true;
@@ -298,6 +341,7 @@ class DatabaseBackupEngine {
     required BackupStorageProvider storageProvider,
     required String expectedDeviceId,
     required String expectedTenantId,
+    String? expectedStoreId,
     required DatabaseType expectedDatabaseType,
     required int currentSchemaVersion,
     int minSupportedSchemaVersion = 1,
@@ -306,6 +350,13 @@ class DatabaseBackupEngine {
     required Directory safetyBackupDir,
     Future<void> Function(String safetyPath)? customSafetySnapshotExecutor,
     dynamic applySchemaMigration,
+    /// ADR-BAK-03: `null` ise istemci DB türlerinde (clientLocal/mobileLocal) açıktır.
+    bool? preservePendingOutbox,
+    /// SEC-SAFETY: Başarılı restore sonrası şifresiz güvenlik kopyası, geri yüklenen
+    /// yedeğin parolası ve KDF gücüyle şifreli `.mmsbak` paketine dönüştürülür.
+    bool encryptSafetyBackup = true,
+    /// Varsayılan mühürleme yerine kullanılacak adım (şifreli paketin yolunu döner).
+    Future<String> Function(File plainSafetyBackup)? customSafetyBackupSealer,
   }) async {
     // 0. Önceki bir çökmeden kalan yarım kurtarma journal'ı varsa güvenle tamamla
     await recoverPendingRestore(liveDbFile);
@@ -347,6 +398,13 @@ class DatabaseBackupEngine {
       );
     }
 
+    if (expectedStoreId != null && preliminaryManifest.storeId != expectedStoreId) {
+      throw BackupException(
+        'ERR_STORE_ID_MISMATCH',
+        'Şube (Store) uyuşmazlığı: Hedef [$expectedStoreId], Yedek [${preliminaryManifest.storeId}]. Başka bir şubenin yedeği geri yüklenemez.',
+      );
+    }
+
     if (preliminaryManifest.schemaVersion > currentSchemaVersion) {
       throw BackupException(
         'ERR_INCOMPATIBLE_SCHEMA_VERSION',
@@ -364,9 +422,13 @@ class DatabaseBackupEngine {
     // 3. Şifre çözme ve bütünlük doğrulama (HMAC + Checksum)
     DecryptedBackupResult decryptedResult;
     try {
-      decryptedResult = BackupCryptoService.verifyAndDecryptPackage(
-        packageBytes: packageBytes,
-        password: backupPassword,
+      // Faz 7A: Şifre çözme/HMAC doğrulama ayrı isolate'te (UI donmaz).
+      decryptedResult = await Isolate.run(
+        () => BackupCryptoService.verifyAndDecryptPackage(
+          packageBytes: packageBytes,
+          password: backupPassword,
+        ),
+        debugName: 'mms_backup_decrypt',
       );
     } catch (e) {
       if (e is BackupCryptoException) {
@@ -384,7 +446,7 @@ class DatabaseBackupEngine {
     }
     final stagingFile = File(p.join(liveDir.path, '${p.basename(liveDbFile.path)}.restore_staging.tmp'));
     if (await stagingFile.exists()) {
-      try { await stagingFile.delete(); } catch (_) {}
+      await _deleteQuietly(stagingFile);
     }
     await stagingFile.writeAsBytes(decryptedResult.databaseBytes, flush: true);
 
@@ -397,7 +459,7 @@ class DatabaseBackupEngine {
         throw BackupException('ERR_INTEGRITY_CHECK_FAILED', 'Çözülen veritabanı SQLite integrity_check başarısız: $status');
       }
     } finally {
-      stagingDb.dispose();
+      stagingDb.close();
     }
 
     // 6. Eski şema sürümünden restore edildiyse MİGRASYONU ÖNCE STAGING DB ÜZERİNDE UYGULA!
@@ -421,7 +483,7 @@ class DatabaseBackupEngine {
           throw BackupException('ERR_MIGRATION_INTEGRITY_FAILED', 'Şema migrasyonu sonrası veritabanı hasarlı: $postMigrateStatus');
         }
       } finally {
-        postMigrateDb.dispose();
+        postMigrateDb.close();
       }
     }
 
@@ -429,34 +491,66 @@ class DatabaseBackupEngine {
     // Yeni istekler 503 ile durdurulur, devam edenler bitirilir, WAL checkpoint yapılır ve bağlantı kapatılır
     await pauseLiveDb();
 
-    // 8. RESTORE ÖNCESİ KORUYUCU GÜVENLİK YEDEĞİ (Pre-Restore Safety Snapshot)
     if (!safetyBackupDir.existsSync()) {
       safetyBackupDir.createSync(recursive: true);
     }
     final dateStr = DateTime.now().toUtc().toIso8601String().replaceAll(':', '').replaceAll('-', '').replaceAll('.', '_');
     final safetyBackupFile = File(p.join(safetyBackupDir.path, 'safety_snapshot_${expectedDatabaseType.value}_$dateStr.db'));
-
-    if (await liveDbFile.exists()) {
-      if (customSafetySnapshotExecutor != null) {
-        await customSafetySnapshotExecutor(safetyBackupFile.path);
-      } else {
-        await safetyBackupFile.writeAsBytes(await liveDbFile.readAsBytes(), flush: true);
-      }
-    }
-
-    // 9. CRASH / POWER-LOSS JOURNAL YAZILMASI (Same Volume)
     final swapBakFile = File(p.join(liveDir.path, '${p.basename(liveDbFile.path)}.swap_bak'));
     final journalFile = File(p.join(liveDir.path, '${p.basename(liveDbFile.path)}.restore_journal'));
+    final shouldPreserveOutbox = preservePendingOutbox ??
+        (expectedDatabaseType == DatabaseType.clientLocal ||
+            expectedDatabaseType == DatabaseType.mobileLocal);
 
-    final journalData = {
-      'version': 1,
-      'staging_file': stagingFile.path,
-      'safety_file': safetyBackupFile.path,
-      'live_file': liveDbFile.path,
-      'swap_file': swapBakFile.path,
-      'timestamp': DateTime.now().toUtc().toIso8601String(),
-    };
-    await journalFile.writeAsString(jsonEncode(journalData), flush: true);
+    // HAZIRLIK AŞAMASI (canlı dosyaya HENÜZ dokunulmaz). Faz 7A: Bu aşamadaki her hata
+    // (disk dolu, USB çıkarıldı, kilit) canlı DB'yi yeniden açar ve staging'i temizler;
+    // aksi halde duraklatılmış veritabanı/servis kalıcı olarak kapalı kalırdı.
+    try {
+      // 8. RESTORE ÖNCESİ KORUYUCU GÜVENLİK YEDEĞİ (Pre-Restore Safety Snapshot)
+      if (await liveDbFile.exists()) {
+        if (customSafetySnapshotExecutor != null) {
+          await customSafetySnapshotExecutor(safetyBackupFile.path);
+        } else {
+          await safetyBackupFile.writeAsBytes(await liveDbFile.readAsBytes(), flush: true);
+        }
+      }
+
+      // 8.1 ADR-BAK-03: Hub'a ulaşmamış Outbox işlemleri ve client_seq korunur.
+      if (shouldPreserveOutbox) {
+        ClientRestoreReconciler.mergeLiveOutboxIntoStaging(
+          liveDbFile: liveDbFile,
+          stagingDbFile: stagingFile,
+        );
+        _verifyIntegrityOrThrow(stagingFile, 'ERR_OUTBOX_MERGE_INTEGRITY_FAILED');
+      }
+
+      // 9. CRASH / POWER-LOSS JOURNAL YAZILMASI (Same Volume)
+      final journalData = {
+        'version': 1,
+        'staging_file': stagingFile.path,
+        'safety_file': safetyBackupFile.path,
+        'live_file': liveDbFile.path,
+        'swap_file': swapBakFile.path,
+        'timestamp': DateTime.now().toUtc().toIso8601String(),
+      };
+      await journalFile.writeAsString(jsonEncode(journalData), flush: true);
+    } catch (e) {
+      await _deleteQuietly(journalFile);
+      await _deleteQuietly(stagingFile);
+      await _deleteQuietly(File('${stagingFile.path}-wal'));
+      await _deleteQuietly(File('${stagingFile.path}-shm'));
+      if (customSafetySnapshotExecutor == null) {
+        // Yarım yazılmış koruyucu yedek geçerli kurtarma noktası gibi görünmemeli.
+        await _deleteQuietly(safetyBackupFile);
+      }
+      await resumeLiveDb();
+      if (e is BackupException) rethrow;
+      throw BackupException(
+        'ERR_RESTORE_PREPARATION_FAILED',
+        'Geri yükleme hazırlığı tamamlanamadı (disk dolu, hedef aygıt çıkarılmış veya dosya kilitli olabilir); '
+            'canlı veritabanı değiştirilmedi: $e',
+      );
+    }
 
     // 10. ATOMİK DOSYA DEĞİŞTİRME (ATOMIC SWAP ON SAME VOLUME)
     try {
@@ -464,16 +558,16 @@ class DatabaseBackupEngine {
       final walFile = File('${liveDbFile.path}-wal');
       final shmFile = File('${liveDbFile.path}-shm');
       if (await walFile.exists()) {
-        try { await walFile.delete(); } catch (_) {}
+        await _deleteQuietly(walFile);
       }
       if (await shmFile.exists()) {
-        try { await shmFile.delete(); } catch (_) {}
+        await _deleteQuietly(shmFile);
       }
 
       // B. Windows dosya kilidi ve aynı disk bölümünde rename:
       // Canlı dosya swap_bak'a taşınır, staging dosya canlı dosya adına taşınır
       if (await swapBakFile.exists()) {
-        try { await swapBakFile.delete(); } catch (_) {}
+        await _deleteQuietly(swapBakFile);
       }
 
       if (await liveDbFile.exists()) {
@@ -491,15 +585,15 @@ class DatabaseBackupEngine {
           throw BackupException('ERR_POST_RESTORE_INTEGRITY', 'Geri yükleme sonrası canlı veritabanı hasarlı: $liveStatus');
         }
       } finally {
-        checkLiveDb.dispose();
+        checkLiveDb.close();
       }
 
       // D. Başarılı swap sonrası swap yedeğini ve journal dosyasını temizle
       if (await swapBakFile.exists()) {
-        try { await swapBakFile.delete(); } catch (_) {}
+        await _deleteQuietly(swapBakFile);
       }
       if (await journalFile.exists()) {
-        try { await journalFile.delete(); } catch (_) {}
+        await _deleteQuietly(journalFile);
       }
 
       // E. Veritabanını ve API kabulünü yeniden aç
@@ -509,12 +603,12 @@ class DatabaseBackupEngine {
       try {
         if (await swapBakFile.exists()) {
           if (await liveDbFile.exists()) {
-            try { await liveDbFile.delete(); } catch (_) {}
+            await _deleteQuietly(liveDbFile);
           }
           await _safeRename(swapBakFile, liveDbFile.path);
         } else if (await safetyBackupFile.exists()) {
           if (await liveDbFile.exists()) {
-            try { await liveDbFile.delete(); } catch (_) {}
+            await _deleteQuietly(liveDbFile);
           }
           await safetyBackupFile.copy(liveDbFile.path);
         }
@@ -522,17 +616,17 @@ class DatabaseBackupEngine {
         final walFile = File('${liveDbFile.path}-wal');
         final shmFile = File('${liveDbFile.path}-shm');
         if (await walFile.exists()) {
-          try { await walFile.delete(); } catch (_) {}
+          await _deleteQuietly(walFile);
         }
         if (await shmFile.exists()) {
-          try { await shmFile.delete(); } catch (_) {}
+          await _deleteQuietly(shmFile);
         }
 
         if (await stagingFile.exists()) {
-          try { await stagingFile.delete(); } catch (_) {}
+          await _deleteQuietly(stagingFile);
         }
         if (await journalFile.exists()) {
-          try { await journalFile.delete(); } catch (_) {}
+          await _deleteQuietly(journalFile);
         }
 
         await resumeLiveDb();
@@ -542,15 +636,93 @@ class DatabaseBackupEngine {
       rethrow;
     } finally {
       if (await stagingFile.exists()) {
-        try { await stagingFile.delete(); } catch (_) {}
+        await _deleteQuietly(stagingFile);
+      }
+    }
+
+    // 12. SEC-SAFETY: Rollback penceresi kapandı (journal silindi, canlı DB açık);
+    // şifresiz güvenlik kopyasına artık gerek yok → şifreli pakete dönüştürülür.
+    var safetyPath = safetyBackupFile.path;
+    var safetyEncrypted = false;
+    if (encryptSafetyBackup && await safetyBackupFile.exists()) {
+      try {
+        safetyPath = customSafetyBackupSealer != null
+            ? await customSafetyBackupSealer(safetyBackupFile)
+            : await _sealSafetyBackup(
+                plainSafety: safetyBackupFile,
+                safetyDir: safetyBackupDir,
+                password: backupPassword,
+                kdfIterations: preliminaryManifest.kdfIterations,
+                deviceId: expectedDeviceId,
+                tenantId: expectedTenantId,
+                storeId: expectedStoreId ?? preliminaryManifest.storeId,
+                databaseType: expectedDatabaseType,
+                schemaVersion: currentSchemaVersion,
+              );
+        safetyEncrypted = true;
+      } catch (e) {
+        // Restore tamamlandı; şifreleme hatası onu geri almaz. Şifresiz kopya korunur
+        // (silinirse kurtarma noktası kaybolur) ve sonuçta işaretlenir.
+        safetyPath = safetyBackupFile.path;
+        stderr.writeln('[BackupEngine] UYARI: Güvenlik kopyası şifrelenemedi, şifresiz kaldı ($safetyPath): $e');
       }
     }
 
     return RestoreResult(
       backupId: backupId,
       manifest: manifest,
-      safetyBackupPath: safetyBackupFile.path,
+      safetyBackupPath: safetyPath,
+      safetyBackupEncrypted: safetyEncrypted,
       restoredAt: DateTime.now().toUtc(),
     );
   }
+
+  /// Şifresiz güvenlik kopyasını standart `.mmsbak` biçiminde şifreler, yazılan
+  /// dosyayı bayt düzeyinde doğrular ve ancak ondan sonra şifresiz kopyayı siler.
+  /// Paket mevcut restore/USB içe aktarma akışlarıyla açılabilir (aynı cihaz/şube).
+  static Future<String> _sealSafetyBackup({
+    required File plainSafety,
+    required Directory safetyDir,
+    required String password,
+    required int kdfIterations,
+    required String deviceId,
+    required String tenantId,
+    required String storeId,
+    required DatabaseType databaseType,
+    required int schemaVersion,
+  }) async {
+    final plainBytes = await plainSafety.readAsBytes();
+    final manifest = BackupManifest(
+      backupId: generateBackupId(),
+      deviceId: deviceId,
+      tenantId: tenantId,
+      storeId: storeId,
+      databaseType: databaseType,
+      schemaVersion: schemaVersion,
+      appVersion: safetySnapshotAppVersion,
+      timestamp: DateTime.now().toUtc(),
+      checksum: sha256.convert(plainBytes).toString().toLowerCase(),
+      unencryptedSizeBytes: plainBytes.length,
+      encryptedSizeBytes: 0,
+      kdfIterations: kdfIterations,
+    );
+    final packageBytes = await Isolate.run(
+      () => BackupCryptoService.encryptPackage(databaseBytes: plainBytes, password: password, manifest: manifest),
+      debugName: 'mms_safety_encrypt',
+    );
+    final provider = LocalStorageProvider(safetyDir);
+    await provider.saveBackup(packageBytes: packageBytes, manifest: manifest);
+    final sealed = await provider.getBackupFile(manifest.backupId);
+
+    final written = await sealed.readAsBytes();
+    if (written.length != packageBytes.length ||
+        sha256.convert(written) != sha256.convert(packageBytes)) {
+      throw const BackupException('ERR_SAFETY_SEAL_VERIFY', 'Şifreli güvenlik kopyası geri okunarak doğrulanamadı.');
+    }
+    await plainSafety.delete();
+    return sealed.path;
+  }
+
+  /// Şifreli güvenlik kopyalarının manifestindeki `app_version` işareti.
+  static const String safetySnapshotAppVersion = 'pre-restore-safety';
 }

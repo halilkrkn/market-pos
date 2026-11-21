@@ -1,6 +1,9 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
+
+import '../lib/config/hub_config.dart';
 
 void main() {
   late String spikeRoot;
@@ -52,15 +55,28 @@ void main() {
       expect(xmlContent, contains('<domain>NT AUTHORITY</domain>'));
       expect(xmlContent, contains('<user>LocalService</user>'));
 
-      // TLS Zorunluluğu (S-3 Uyumu: Üretim servisi kesinlikle şifresiz HTTP listener açamaz)
-      expect(xmlContent, contains('--tls'),
-          reason: 'WinSW XML argümanlarında TLS zorunluluğu (--tls) bulunmalıdır.');
-      expect(xmlContent, contains('--cert='),
-          reason: 'Sunucu TLS sertifika yolu yapılandırılmış olmalıdır.');
-      expect(xmlContent, contains('--key='),
-          reason: 'Sunucu TLS özel anahtar yolu yapılandırılmış olmalıdır.');
-      expect(xmlContent, contains('<env name="ENABLE_TLS" value="true"/>'),
-          reason: 'Ortam değişkeninde TLS etkinleştirilmiş olmalıdır.');
+      // TLS Zorunluluğu (S-3 Uyumu: Üretim servisi kesinlikle şifresiz HTTP listener açamaz).
+      // REL-01: TLS/sertifika ayarları TEK kaynakta (hub_config.json) tutulur; servis yalnızca
+      // --config geçirir ve HubConfig, TLS kapalı üretim yapılandırmasıyla açılışı reddeder.
+      expect(xmlContent, contains('--config='),
+          reason: 'WinSW XML yalnızca tek yapılandırma kaynağına (--config) işaret etmelidir.');
+      final exampleConfig = jsonDecode(
+        File(p.join(serviceWrapperDir, '..', 'config', 'hub_config.example.json'))
+            .readAsStringSync(),
+      ) as Map<String, dynamic>;
+      expect(exampleConfig['environment'], 'production');
+      expect((exampleConfig['tls'] as Map)['enabled'], isTrue,
+          reason: 'Üretim yapılandırma şablonunda TLS etkin olmalıdır.');
+      expect((exampleConfig['tls'] as Map)['cert'], isNotNull);
+      expect((exampleConfig['tls'] as Map)['key'], isNotNull);
+      expect(
+        () => HubConfig.fromJson(
+          {...exampleConfig, 'tls': {'enabled': false}},
+          baseDir: serviceWrapperDir,
+        ),
+        throwsA(isA<HubConfigException>()),
+        reason: 'TLS kapalı üretim yapılandırması servis açılışında reddedilmelidir.',
+      );
 
       // Kurtarma Politikası
       expect(xmlContent, contains('<onfailure action="restart" delay="5 sec"/>'));

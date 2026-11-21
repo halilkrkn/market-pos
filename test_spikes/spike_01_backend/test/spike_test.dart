@@ -12,6 +12,8 @@ import '../lib/db/write_queue.dart';
 import '../lib/security/pepper_manager.dart';
 import '../lib/security/token_manager.dart';
 
+const _spikeAdminSecret = 'spike_admin_test_secret_2026';
+
 void main() {
   late Directory tempDir;
   late File dbFile;
@@ -81,7 +83,12 @@ void main() {
           ),
         );
 
-    server = SpikeServer(db: db, writeQueue: writeQueue, pepperManager: pepperManager);
+    server = SpikeServer(
+      db: db,
+      writeQueue: writeQueue,
+      pepperManager: pepperManager,
+      adminSecret: _spikeAdminSecret, // SEC-SNAP: şifresiz snapshot yalnızca admin + loopback
+    );
     await server.start(address: InternetAddress.loopbackIPv4, port: testPort);
     baseUrl = 'http://127.0.0.1:$testPort';
   });
@@ -220,7 +227,7 @@ void main() {
       // Olmayan ürün satmaya çalışıldığında foreign key hatası simülasyonu
       final payload = {
         'operation_id': 'op_sale_failing',
-        'client_seq': 999,
+        'client_seq': 2,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'items': [
@@ -240,7 +247,7 @@ void main() {
       expect(res.statusCode, equals(500));
 
       // Satış tablosuna yazılmadığını doğrula
-      final sales = await (db.select(db.sales)..where((s) => s.clientSeq.equals(999))).get();
+      final sales = await (db.select(db.sales)..where((s) => s.clientSeq.equals(2))).get();
       expect(sales.isEmpty, isTrue);
 
       // Processed operations defterine yazılmadığını doğrula
@@ -257,7 +264,7 @@ void main() {
         Uri.parse('$baseUrl/api/v1/backup/snapshot'),
         headers: {
           'content-type': 'application/json',
-          'authorization': 'Bearer $validToken',
+          'x-mms-admin-secret': _spikeAdminSecret,
         },
         body: jsonEncode({}),
       );
@@ -334,7 +341,7 @@ void main() {
 
       for (int client = 1; client <= 4; client++) {
         futures.add(Future(() async {
-          for (int seq = 10; seq < 20; seq++) {
+          for (int seq = 1; seq <= 10; seq++) {
             final sw = Stopwatch()..start();
             final payload = {
               'operation_id': 'op_${client}_$seq',
@@ -408,7 +415,7 @@ void main() {
 
       for (int client = 1; client <= 10; client++) {
         futures.add(Future(() async {
-          for (int seq = 100; seq < 110; seq++) {
+          for (int seq = 1; seq <= 10; seq++) {
             final sw = Stopwatch()..start();
             final payload = {
               'operation_id': 'burst_op_${client}_$seq',

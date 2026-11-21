@@ -1,3 +1,6 @@
+@Timeout(Duration(minutes: 2))
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/drift.dart' hide isNull, isNotNull;
@@ -318,7 +321,7 @@ void main() {
         'operation_id': 'op_pilot_pre_restore',
         'sale_id': 'sale_pre_restore',
         'device_id': devWin,
-        'client_seq': 2,
+        'client_seq': 1,
         'items': [
           {'product_id': 'prod_cola', 'quantity': 2000, 'unit_price': 2500, 'total_price': 5000}
         ],
@@ -398,11 +401,11 @@ void main() {
           'authorization': 'Bearer ${deviceTokens[devMob3]}',
           'content-type': 'application/json',
         },
-        body: jsonEncode({
+          body: jsonEncode({
           'operation_id': 'op_revoked_try',
           'sale_id': 'sale_revoked',
           'device_id': devMob3,
-          'client_seq': 99,
+          'client_seq': 1,
           'items': [
             {'product_id': 'prod_cola', 'quantity': 1000, 'unit_price': 2500, 'total_price': 2500}
           ],
@@ -423,7 +426,7 @@ void main() {
           'operation_id': 'op_valid_after_revoke',
           'sale_id': 'sale_valid_dev_win',
           'device_id': devWin,
-          'client_seq': 10,
+          'client_seq': 1,
           'items': [
             {'product_id': 'prod_cola', 'quantity': 1000, 'unit_price': 2500, 'total_price': 2500}
           ],
@@ -437,9 +440,12 @@ void main() {
     test('4. Pilot Ölçeği Performans ve Gecikme Metrikleri (P50, P95, P99 Latency)', () async {
       // Pilot ölçeğinde 20 adet sıralı ve eşzamanlı satış isteği göndererek gecikme ölçümü yap
       final latenciesMs = <int>[];
+      final nextSeqByDevice = <String, int>{devWin: 0, devMob1: 0};
 
       for (var i = 1; i <= 20; i++) {
         final devId = (i % 2 == 0) ? devWin : devMob1;
+        final nextSeq = (nextSeqByDevice[devId] ?? 0) + 1;
+        nextSeqByDevice[devId] = nextSeq;
         final sw = Stopwatch()..start();
 
         final resp = await http.post(
@@ -452,7 +458,7 @@ void main() {
             'operation_id': 'op_perf_$i',
             'sale_id': 'sale_perf_$i',
             'device_id': devId,
-            'client_seq': 100 + i,
+            'client_seq': nextSeq,
             'items': [
               {'product_id': 'prod_cola', 'quantity': 1000, 'unit_price': 2500, 'total_price': 2500}
             ],

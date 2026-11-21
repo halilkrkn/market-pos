@@ -6,24 +6,93 @@ import 'package:http/http.dart' as http;
 
 import '../constants/api_endpoints.dart';
 import '../constants/app_constants.dart';
+import '../security/tls_pinned_client_factory.dart';
 import 'api_exception.dart';
 import 'api_response.dart';
+
+import 'package:mms_client_storage/mms_client_storage.dart';
 
 /// MARKET MMS - Merkezi Shelf Backend İle İletişim Kurucu API İstemcisi
 class MmsApiClient {
   final http.Client _client;
-  final String baseUrl;
+  final String _staticBaseUrl;
+  final String? Function()? readBaseUrl;
+  final bool allowLoopback;
   final String? deviceToken;
+  final String? Function()? readDeviceToken;
   final String deviceId;
   final Duration timeout;
 
   MmsApiClient({
     http.Client? client,
-    this.baseUrl = AppConstants.defaultBackendBaseUrl,
+    String baseUrl = AppConstants.defaultBackendBaseUrl,
+    this.readBaseUrl,
+    this.allowLoopback = true,
     this.deviceToken,
+    this.readDeviceToken,
     this.deviceId = AppConstants.defaultDeviceId,
     this.timeout = AppConstants.defaultTimeout,
-  }) : _client = client ?? http.Client();
+  })  : _client = client ?? http.Client(),
+        _staticBaseUrl = baseUrl;
+
+  /// Çalışma zamanında kullanılacak aktif cihaz token'ını döner.
+  String? get effectiveDeviceToken {
+    final dynamicToken = readDeviceToken?.call()?.trim();
+    if (dynamicToken != null && dynamicToken.isNotEmpty) {
+      return dynamicToken;
+    }
+    final staticToken = deviceToken?.trim();
+    return (staticToken != null && staticToken.isNotEmpty) ? staticToken : null;
+  }
+
+  /// Aktif, doğrulanmış ve normalize edilmiş Hub URL'sini çözümler.
+  ///
+  /// Dinamik [readBaseUrl] sağlandıysa onun döndürdüğü değer esas alınır; boş veya
+  /// `null` döndüğünde statik fallback'e düşülmez.
+  String? get resolvedBaseUrl {
+    final reader = readBaseUrl;
+    final raw = reader != null ? reader() : _staticBaseUrl;
+    return HubUrlValidator.tryNormalize(raw, allowLoopback: allowLoopback);
+  }
+
+  /// Mevcut aktif Hub adresi (yapılandırılmamışsa boş string).
+  String get baseUrl => resolvedBaseUrl ?? '';
+
+  String _requireResolvedBaseUrl() {
+    final resolved = resolvedBaseUrl;
+    if (resolved == null) {
+      throw const NetworkException(
+        'Hub adresi henüz yapılandırılmadı veya platform tarafından engellendi.',
+      );
+    }
+    return resolved;
+  }
+
+  /// Kalıcı aktif URL'yi değiştirmeden belirli bir Hub adayı üzerinde `/health` doğrulaması yapar.
+  Future<CentralHealthResponse> checkHealthForUrl(String targetBaseUrl) {
+    final normalized = HubUrlValidator.tryNormalize(
+      targetBaseUrl,
+      allowLoopback: allowLoopback,
+    );
+    if (normalized == null) {
+      return Future.value(
+        CentralHealthResponse.unreachable(
+          errorMessage:
+              'Geçersiz veya bu platformda engellenmiş Hub adresi.',
+          latencyMs: 0,
+        ),
+      );
+    }
+    return MmsApiClient(
+      client: _client,
+      baseUrl: normalized,
+      allowLoopback: allowLoopback,
+      deviceToken: deviceToken,
+      readDeviceToken: readDeviceToken,
+      deviceId: deviceId,
+      timeout: timeout,
+    ).checkHealth();
+  }
 
   /// Standart İstek Başlıkları
   Map<String, String> get _headers {
@@ -32,8 +101,9 @@ class MmsApiClient {
       'Accept': 'application/json',
       'X-Device-Id': deviceId,
     };
-    if (deviceToken != null && deviceToken!.isNotEmpty) {
-      headers['Authorization'] = 'Bearer $deviceToken';
+    final token = effectiveDeviceToken;
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
     }
     return headers;
   }
@@ -43,8 +113,15 @@ class MmsApiClient {
   /// Gecikme süresini (latency) ms cinsinden hesaplar.
   /// Sunucu kapalı veya ulaşılamaz ise güvenli bir biçimde 'OFFLINE' modeli döner (Exception fırlatmaz).
   Future<CentralHealthResponse> checkHealth() async {
+    final effectiveBaseUrl = resolvedBaseUrl;
+    if (effectiveBaseUrl == null) {
+      return CentralHealthResponse.unreachable(
+        errorMessage: 'Hub adresi henüz yapılandırılmadı.',
+        latencyMs: 0,
+      );
+    }
     final stopwatch = Stopwatch()..start();
-    final uri = Uri.parse('$baseUrl${ApiEndpoints.health}');
+    final uri = Uri.parse('$effectiveBaseUrl${ApiEndpoints.health}');
 
     try {
       final response = await _client.get(uri).timeout(timeout);
@@ -65,6 +142,37 @@ class MmsApiClient {
           latencyMs: latencyMs,
         );
       }
+    } on TlsPinMismatchException catch (e) {
+      stopwatch.stop();
+      return CentralHealthResponse.tlsPinMismatch(
+        errorMessage: 'GÜVENLİK UYARISI: ${e.message}',
+        latencyMs: stopwatch.elapsedMilliseconds,
+      );
+    } on TlsCertificateValidationException catch (e) {
+      stopwatch.stop();
+      return CentralHealthResponse.tlsCertificateError(
+        errorMessage: 'Sertifika doğrulama hatası: ${e.message}',
+        latencyMs: stopwatch.elapsedMilliseconds,
+      );
+    } on HandshakeException catch (e) {
+      stopwatch.stop();
+      final certFailure = MmsPinnedTlsClientFactory.classifyCaTrustedCertError(e);
+      if (certFailure != null) {
+        final certEx = TlsCertificateValidationException(
+          kind: certFailure,
+          host: uri.host,
+          port: uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80),
+        );
+        return CentralHealthResponse.tlsCertificateError(
+          errorMessage: 'Sertifika doğrulama hatası: ${certEx.message}',
+          latencyMs: stopwatch.elapsedMilliseconds,
+        );
+      }
+      return CentralHealthResponse.tlsPinMismatch(
+        errorMessage:
+            'GÜVENLİK UYARISI: Hub TLS sertifika doğrulaması başarısız oldu.',
+        latencyMs: stopwatch.elapsedMilliseconds,
+      );
     } on SocketException catch (e) {
       stopwatch.stop();
       return CentralHealthResponse.unreachable(
@@ -97,7 +205,8 @@ class MmsApiClient {
     String endpoint, {
     Map<String, String>? queryParameters,
   }) async {
-    final uri = Uri.parse('$baseUrl$endpoint')
+    final effectiveBaseUrl = _requireResolvedBaseUrl();
+    final uri = Uri.parse('$effectiveBaseUrl$endpoint')
         .replace(queryParameters: queryParameters);
 
     try {
@@ -105,6 +214,23 @@ class MmsApiClient {
           .get(uri, headers: _headers)
           .timeout(timeout);
       return _processResponse(response);
+    } on TlsPinMismatchException catch (e) {
+      throw NetworkException(e.message);
+    } on TlsCertificateValidationException catch (e) {
+      throw NetworkException(e.message);
+    } on HandshakeException catch (e) {
+      final kind = MmsPinnedTlsClientFactory.classifyCaTrustedCertError(e);
+      if (kind != null) {
+        final ex = TlsCertificateValidationException(
+          kind: kind,
+          host: uri.host,
+          port: uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80),
+        );
+        throw NetworkException(ex.message);
+      }
+      throw const NetworkException(
+        'Güvenli TLS sertifika doğrulaması başarısız oldu (parmak izi veya CA zinciri uyuşmuyor).',
+      );
     } on SocketException catch (e) {
       throw NetworkException(
         _sanitizeString('Ağ bağlantısı yok veya sunucuya erişilemiyor: ${e.message}'),
@@ -121,13 +247,31 @@ class MmsApiClient {
     String endpoint, {
     required Map<String, dynamic> body,
   }) async {
-    final uri = Uri.parse('$baseUrl$endpoint');
+    final effectiveBaseUrl = _requireResolvedBaseUrl();
+    final uri = Uri.parse('$effectiveBaseUrl$endpoint');
 
     try {
       final response = await _client
           .post(uri, headers: _headers, body: jsonEncode(body))
           .timeout(timeout);
       return _processResponse(response);
+    } on TlsPinMismatchException catch (e) {
+      throw NetworkException(e.message);
+    } on TlsCertificateValidationException catch (e) {
+      throw NetworkException(e.message);
+    } on HandshakeException catch (e) {
+      final kind = MmsPinnedTlsClientFactory.classifyCaTrustedCertError(e);
+      if (kind != null) {
+        final ex = TlsCertificateValidationException(
+          kind: kind,
+          host: uri.host,
+          port: uri.hasPort ? uri.port : (uri.scheme == 'https' ? 443 : 80),
+        );
+        throw NetworkException(ex.message);
+      }
+      throw const NetworkException(
+        'Güvenli TLS sertifika doğrulaması başarısız oldu (parmak izi veya CA zinciri uyuşmuyor).',
+      );
     } on SocketException catch (e) {
       throw NetworkException(
         _sanitizeString('Ağ bağlantısı yok veya sunucuya erişilemiyor: ${e.message}'),
@@ -221,6 +365,10 @@ class MmsApiClient {
   /// Metin içindeki token, authorization başlığı veya hassas verileri maskeler
   String _sanitizeString(String text) {
     var result = text;
+    final activeToken = effectiveDeviceToken;
+    if (activeToken != null && activeToken.isNotEmpty) {
+      result = result.replaceAll(activeToken, '[REDACTED]');
+    }
     if (deviceToken != null && deviceToken!.isNotEmpty) {
       result = result.replaceAll(deviceToken!, '[REDACTED]');
     }

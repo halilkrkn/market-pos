@@ -1,0 +1,191 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/security/tls_pinned_client_factory.dart';
+import '../../../../core/theme/design_tokens.dart';
+import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart';
+import '../../../setup/setup_providers.dart';
+import '../../../sync/application/hub_connection_notifier.dart';
+import '../../data/hub_pairing_admin_client.dart';
+
+/// Hub yönetim uçları yalnızca loopback'ten kabul edilir: aktif Hub adresinin portu
+/// korunarak host 127.0.0.1'e çevrilir.
+final hubPairingAdminClientProvider = Provider<HubPairingAdminClient>((ref) {
+  final active = ref.watch(hubConnectionProvider.select((s) => s.activeHubUrl));
+  final parsed = Uri.tryParse(active ?? '');
+  final base = parsed == null || parsed.host.isEmpty
+      ? 'https://127.0.0.1:8945'
+      : parsed.replace(host: '127.0.0.1', path: '').toString();
+  final pinned = ref.watch(pinnedTlsConfigProvider);
+  final client = pinned != null ? MmsPinnedTlsClientFactory.createClient(pinned) : http.Client();
+  ref.onDispose(client.close);
+  return HubPairingAdminClient(hubBaseUrl: base, httpClient: client);
+});
+
+/// Faz 7B — Windows Owner: yeni cihaz eşleştirme oturumu açma ve bekleyen talepleri
+/// onaylama/reddetme. Admin secret yalnızca bu ekranın belleğinde tutulur.
+class PairingApprovalPanel extends ConsumerStatefulWidget {
+  const PairingApprovalPanel({super.key});
+
+  @override
+  ConsumerState<PairingApprovalPanel> createState() => _PairingApprovalPanelState();
+}
+
+class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
+  final _secretController = TextEditingController();
+  List<PendingPairingRequest> _pending = const [];
+  PairingSessionInfo? _session;
+  String? _message;
+  AppBadgeTone _tone = AppBadgeTone.info;
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _secretController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _run(Future<String?> Function(HubPairingAdminClient c, String secret) action) async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final msg = await action(ref.read(hubPairingAdminClientProvider), _secretController.text);
+      if (!mounted) return;
+      setState(() {
+        _tone = AppBadgeTone.success;
+        _message = msg;
+      });
+    } on HubPairingAdminException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _tone = AppBadgeTone.danger;
+        _message = e.message;
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<String?> _refresh(HubPairingAdminClient c, String secret) async {
+    final list = await c.listPendingRequests(adminSecret: secret);
+    if (mounted) setState(() => _pending = list);
+    return list.isEmpty ? 'Onay bekleyen eşleştirme talebi yok.' : null;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mmsColors;
+    return DiagnosticsSectionCard(
+      key: const Key('pairing_approval_panel'),
+      title: 'Cihaz Eşleştirme Onayları (Owner)',
+      subtitle: 'Yeni Android cihazları yalnızca bu bilgisayardan onaylayın',
+      trailing: const AppBadge(label: 'Loopback + Admin', tone: AppBadgeTone.info, compact: true),
+      children: [
+        TextField(
+          key: const Key('pairing_admin_secret_field'),
+          controller: _secretController,
+          obscureText: true,
+          decoration: const InputDecoration(
+            labelText: 'Hub yönetici anahtarı (admin secret)',
+            helperText: 'Kaydedilmez; ekran kapanınca bellekten silinir.',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        const SizedBox(height: MmsSpacing.sm),
+        Wrap(spacing: MmsSpacing.sm, runSpacing: MmsSpacing.sm, children: [
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              key: const Key('pairing_create_session_button'),
+              onPressed: _busy
+                  ? null
+                  : () => _run((c, s) async {
+                        final session = await c.createSession(adminSecret: s);
+                        if (mounted) setState(() => _session = session);
+                        return 'Eşleştirme oturumu açıldı. Kodu Android cihazdaki "Eşleştir" alanına aktarın.';
+                      }),
+              icon: const Icon(Icons.qr_code_2_rounded),
+              label: const Text('Yeni Eşleştirme Oturumu'),
+            ),
+          ),
+          SizedBox(
+            height: 48,
+            child: OutlinedButton.icon(
+              key: const Key('pairing_refresh_button'),
+              onPressed: _busy ? null : () => _run(_refresh),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('Bekleyen Talepler'),
+            ),
+          ),
+        ]),
+        if (_session != null) ...[
+          const SizedBox(height: MmsSpacing.sm),
+          Row(children: [
+            Expanded(
+              child: Text(
+                'Oturum ${_session!.sessionId} · son geçerlilik: ${_session!.expiresAt?.toLocal() ?? '-'}',
+                style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+              ),
+            ),
+            TextButton.icon(
+              key: const Key('pairing_copy_payload_button'),
+              onPressed: () => Clipboard.setData(ClipboardData(text: _session!.qrPayload)),
+              icon: const Icon(Icons.copy_rounded, size: 16),
+              label: const Text('Eşleştirme kodunu kopyala'),
+            ),
+          ]),
+        ],
+        if (_message != null) ...[
+          const SizedBox(height: MmsSpacing.sm),
+          DiagnosticsInlineBanner(key: const Key('pairing_admin_status_banner'), tone: _tone, message: _message!),
+        ],
+        for (final r in _pending)
+          Padding(
+            padding: const EdgeInsets.only(top: MmsSpacing.sm),
+            child: Row(children: [
+              Expanded(
+                child: Text(
+                  '${r.deviceName} (${r.platform}) · ${r.deviceId}\nAnahtar parmak izi: ${r.publicKeyFingerprint}',
+                  style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+                ),
+              ),
+              SizedBox(
+                height: 48,
+                child: FilledButton(
+                  key: Key('pairing_approve_${r.sessionId}'),
+                  onPressed: _busy
+                      ? null
+                      : () => _run((c, s) async {
+                            await c.approve(sessionId: r.sessionId, adminSecret: s);
+                            await _refresh(c, s);
+                            return '${r.deviceName} onaylandı. Cihaz eşleştirmeyi tamamlayacak.';
+                          }),
+                  child: const Text('Onayla'),
+                ),
+              ),
+              const SizedBox(width: MmsSpacing.xs),
+              SizedBox(
+                height: 48,
+                child: OutlinedButton(
+                  key: Key('pairing_reject_${r.sessionId}'),
+                  onPressed: _busy
+                      ? null
+                      : () => _run((c, s) async {
+                            await c.reject(sessionId: r.sessionId, adminSecret: s);
+                            await _refresh(c, s);
+                            return '${r.deviceName} reddedildi.';
+                          }),
+                  child: const Text('Reddet'),
+                ),
+              ),
+            ]),
+          ),
+      ],
+    );
+  }
+}

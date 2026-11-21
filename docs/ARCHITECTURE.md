@@ -103,7 +103,7 @@ $$\text{presentation} \longrightarrow \text{domain} \longleftarrow \text{data}$$
 - Maliyet verisi girilmemiş ürünlerde gerçek kâr hesabı yapılmaz; işletme giderleri (kira, fatura, personel vb.) sisteme girilmeden net kâr iddiasında bulunulamaz.
 - **Kuruş Tamsayı Standardı (`CONFIRMED`):** Para değerleri ve hesaplamaları kesinlikle floating point (`double`) ile yapılamaz; kuruş bazlı tamsayılar (`int` / `BIGINT`) veya özel Value Object (`Money`) ile saklanır ve hesaplanır.
 - **Snapshot Fiyat ve İsim (`CONFIRMED`):** Satış anındaki birim fiyat ve ürün adı satış satırına kopyalanır; gelecekteki fiyat değişiklikleri geçmiş satışları etkileyemez.
-- **Alt Kuruş Yuvarlama Politikası (`OPEN DECISION`):** Kesirli miktar, gramaj veya birim maliyet çarpmalarında ortaya çıkabilecek alt kuruş kesirlerinin yuvarlama yöntemi (Half-Up vb.) proje sahibi tarafından henüz karara bağlanmamış olup `OPEN DECISION` statüsündedir.
+- **Alt Kuruş Yuvarlama Politikası (`CONFIRMED — OD-01`, 11 Kasım 2026):** Kesirli miktar (milli-unit `quantity` ölçeği), kısmi iade veya birim fiyat çarpmalarında ortaya çıkabilecek alt kuruşlar Windows, Android ve Master Hub genelinde **Half-Up** yöntemiyle yuvarlanır (milli-unit ölçeğinde örnek: `((unitPrice * quantity) + 500) ~/ 1000`). Floating-point (`double`) para hesaplamalarında kanonik yöntem değildir; tutarlar integer kuruş olarak saklanır ve UI gösterim standardı iki ondalık basamaktır (ör. `12.50 TL`).
 
 ---
 

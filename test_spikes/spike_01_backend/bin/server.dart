@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ffi';
 import 'dart:io';
 import 'dart:math';
 import 'package:drift/drift.dart';
@@ -8,9 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
-import 'package:sqlite3/open.dart';
 
-import 'package:crypto/crypto.dart';
 import '../lib/db/database.dart';
 import '../lib/db/write_queue.dart';
 import '../lib/security/auth_middleware.dart';
@@ -23,28 +20,51 @@ import '../lib/security/secure_cors_middleware.dart';
 import '../lib/security/token_manager.dart';
 import '../lib/service/admission_gate.dart';
 import '../lib/service/lifecycle_manager.dart';
+import '../lib/discovery/discovery_responder.dart';
+import '../lib/config/hub_config.dart';
+import '../lib/sync/canonical_payload_hasher.dart';
+import '../lib/sync/device_sequence_inspector.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
 void configureSqliteNative() {
-  if (Platform.isWindows) {
-    open.overrideFor(OperatingSystem.windows, () {
-      final exeDir = p.dirname(Platform.resolvedExecutable);
-      final dllPath = p.join(exeDir, 'sqlite3.dll');
-      if (File(dllPath).existsSync()) {
-        return DynamicLibrary.open(dllPath);
-      }
-      try {
-        return DynamicLibrary.open('sqlite3.dll');
-      } catch (_) {
-        return DynamicLibrary.process();
-      }
-    });
-  }
+  // Dart Native Assets (sqlite3 3.x): SQLite C ikilisi derleme kancaları (build hooks)
+  // aracılığıyla platforma göre otomatik bağlanır. Manuel override gerekmez.
 }
 
 class _IdempotencyConflictException implements Exception {
   final String idempotencyKey;
   _IdempotencyConflictException(this.idempotencyKey);
+}
+
+class _IdempotencyHashUnverifiableException implements Exception {
+  final String idempotencyKey;
+  _IdempotencyHashUnverifiableException(this.idempotencyKey);
+}
+
+class _SequenceGapException implements Exception {
+  final String deviceId;
+  final int expectedSeq;
+  final int receivedSeq;
+  final int highWaterMarkSeq;
+  final int maxSeenSeq;
+
+  _SequenceGapException({
+    required this.deviceId,
+    required this.expectedSeq,
+    required this.receivedSeq,
+    required this.highWaterMarkSeq,
+    required this.maxSeenSeq,
+  });
+}
+
+class _MutationTxResult {
+  final bool isReplay;
+  final String bodyJson;
+
+  const _MutationTxResult({
+    required this.isReplay,
+    required this.bodyJson,
+  });
 }
 
 class _ValidationException implements Exception {
@@ -55,6 +75,10 @@ class _ValidationException implements Exception {
 }
 
 class SpikeServer {
+  static const String defaultTenantId = 'default-tenant';
+  static const String defaultStoreId = 'default-store';
+  static const String defaultHubId = 'MMS-HUB-MASTER';
+
   SpikeDatabase db;
   final File? dbFile;
   final WriteQueue writeQueue;
@@ -66,9 +90,50 @@ class SpikeServer {
   final bool requireTls;
   final PairingManager pairingManager;
   final String? caCertPath;
+  final String tenantId;
+  final String storeId;
+  final String hubId;
+  final bool requireTenantStoreHeaders;
+
+  /// Faz 3: Zamanlanmış şifreli Hub yedeği politikası (`null`/kapalı → zamanlama yok).
+  final BackupSchedulePolicy? backupSchedule;
+
+  /// Zamanlayıcının "yedek zamanı geldi mi?" kontrol aralığı.
+  final Duration backupCheckInterval;
+
+  static const String backupScheduleStateFileName = 'backup_schedule_state.json';
+
+  final bool allowAdminEnvFallback;
+  final Map<String, String>? _environment;
   late final Router _router;
   HttpServer? _httpServer;
   Timer? _pairingCleanupTimer;
+  HubDiscoveryResponder? _discoveryResponder;
+  BackupScheduler? _backupScheduler;
+  BackupScheduleState? _backupScheduleState;
+
+  /// Son bilinen zamanlanmış yedek durumu (izleme ve testler için).
+  BackupScheduleState? get backupScheduleState => _backupScheduleState;
+
+  /// Durum dosyası DB ile aynı (servis tarafından yazılabilir) dizinde tutulur;
+  /// yedek hedefi erişilemez olsa bile hata kaydı kaybolmaz.
+  File get backupScheduleStateFile => File(p.join(
+        (dbFile ?? File(p.join(Directory.current.path, 'market_master.db'))).parent.path,
+        backupScheduleStateFileName,
+      ));
+
+  Directory get _backupTargetDir =>
+      Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
+
+  /// BK-LOCK: Hub manuel/zamanlanmış yedekleme ve restore işlemleri aynı kilit
+  /// dosyasını paylaşır; eşzamanlı çalışma engellenir.
+  File get backupOperationLockFile =>
+      File(p.join(_backupTargetDir.path, BackupOperationLock.defaultFileName));
+
+  BackupOperationLock get _backupOperationLock =>
+      BackupOperationLock(backupOperationLockFile);
+
+  HubDiscoveryResponder? get discoveryResponder => _discoveryResponder;
 
   static final Random _secureRandom = Random.secure();
 
@@ -84,9 +149,27 @@ class SpikeServer {
     PairingManager? pairingManager,
     this.caCertPath,
     LifecycleManager? lifecycle,
-  })  : pepperManager = _resolvePepperManager(pepperManager),
+    String? tenantId,
+    String? storeId,
+    String? hubId,
+    this.requireTenantStoreHeaders = false,
+    this.backupSchedule,
+    this.backupCheckInterval = const Duration(minutes: 5),
+    this.allowAdminEnvFallback = true,
+    Map<String, String>? environment,
+  })  : _environment = environment,
+        pepperManager = _resolvePepperManager(pepperManager),
         pairingManager = pairingManager ?? PairingManager(),
-        lifecycle = lifecycle ?? LifecycleManager(db: db, writeQueue: writeQueue) {
+        lifecycle = lifecycle ?? LifecycleManager(db: db, writeQueue: writeQueue),
+        tenantId = (tenantId != null && tenantId.trim().isNotEmpty)
+            ? tenantId.trim()
+            : defaultTenantId,
+        storeId = (storeId != null && storeId.trim().isNotEmpty)
+            ? storeId.trim()
+            : defaultStoreId,
+        hubId = (hubId != null && hubId.trim().isNotEmpty)
+            ? hubId.trim()
+            : defaultHubId {
     _setupRoutes();
   }
 
@@ -115,19 +198,354 @@ class SpikeServer {
     return result == 0;
   }
 
-  /// S5A-2: Satış işlem yükünün (payload) kanonik SHA-256 hash özetini üretir
+  /// S5A-2: Satış işlem yükünün (payload) kanonik SHA-256 hash özetini üretir (Legacy v1 uyumluluğu)
   static String computeSaleRequestHash(Map<String, dynamic> body) {
-    final canonical = {
-      'client_seq': body['client_seq'],
-      'total_amount': body['total_amount'],
-      'payment_method': body['payment_method'],
-      'items': body['items'],
-    };
-    return sha256.convert(utf8.encode(jsonEncode(canonical))).toString();
+    return CanonicalPayloadHasher.computeLegacyV1SaleHash(body);
   }
 
-  /// Hub yönetimi için Loopback ve Admin Secret yetkilendirmesi denetler (Fail-Closed)
-  Response? _verifyLoopbackAndAdmin(Request req, {String actionName = 'Bu işlem'}) {
+  /// BK-02.1: Pilot tek-tenant / tek-store Hub kimliğini `hub_metadata` ile doğrular veya ilk açılışta mühürler.
+  Future<void> _verifyOrInitializeHubIdentity() async {
+    await writeQueue.enqueue(() async {
+      await db.transaction(() async {
+        final existingTenant = await (db.select(db.hubMetadata)
+              ..where((m) => m.key.equals('tenant_id')))
+            .getSingleOrNull();
+        final existingStore = await (db.select(db.hubMetadata)
+              ..where((m) => m.key.equals('store_id')))
+            .getSingleOrNull();
+
+        if (existingTenant != null && existingTenant.value != tenantId) {
+          throw StateError(
+            'Hub Tenant Kimlik Uyuşmazlığı (Fail-Closed): DB tenant_id=${existingTenant.value}, yapılandırma=$tenantId.',
+          );
+        }
+        if (existingStore != null && existingStore.value != storeId) {
+          throw StateError(
+            'Hub Store Kimlik Uyuşmazlığı (Fail-Closed): DB store_id=${existingStore.value}, yapılandırma=$storeId.',
+          );
+        }
+
+        final now = DateTime.now();
+        if (existingTenant == null) {
+          await db.into(db.hubMetadata).insert(
+                HubMetadataCompanion(
+                  key: const Value('tenant_id'),
+                  value: Value(tenantId),
+                  updatedAt: Value(now),
+                ),
+              );
+        }
+        if (existingStore == null) {
+          await db.into(db.hubMetadata).insert(
+                HubMetadataCompanion(
+                  key: const Value('store_id'),
+                  value: Value(storeId),
+                  updatedAt: Value(now),
+                ),
+              );
+        }
+        await db.into(db.hubMetadata).insertOnConflictUpdate(
+              HubMetadataCompanion(
+                key: const Value('hub_id'),
+                value: Value(hubId),
+                updatedAt: Value(now),
+              ),
+            );
+      });
+    });
+  }
+
+  Response _idempotencyConflictResponse(String idempotencyKey) {
+    return Response(
+      409,
+      body: jsonEncode({
+        'error': 'CONFLICT',
+        'code': 'ERR_IDEMPOTENCY_PAYLOAD_MISMATCH',
+        'message':
+            'Aynı idempotency key ($idempotencyKey) farklı bir işlem yükü ile tekrar gönderilemez.',
+        'idempotency_key': idempotencyKey,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  Response _idempotencyHashUnverifiableResponse(String idempotencyKey) {
+    return Response(
+      409,
+      body: jsonEncode({
+        'error': 'CONFLICT',
+        'code': 'ERR_IDEMPOTENCY_HASH_UNVERIFIABLE',
+        'message':
+            'Mevcut makbuz kaydının hash bilgisi eksik veya doğrulanamıyor ($idempotencyKey); güvenli replay reddedildi.',
+        'idempotency_key': idempotencyKey,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  Response _sequenceGapResponse(_SequenceGapException e) {
+    return Response(
+      409,
+      body: jsonEncode({
+        'error': 'CONFLICT',
+        'code': 'ERR_CLIENT_SEQ_GAP',
+        'message':
+            'Beklenmeyen client_seq (${e.receivedSeq}). Cihaz (${e.deviceId}) için beklenen ardışık sıra numarası: ${e.expectedSeq}.',
+        'device_id': e.deviceId,
+        'expected_client_seq': e.expectedSeq,
+        'received_client_seq': e.receivedSeq,
+        'high_water_mark_seq': e.highWaterMarkSeq,
+        'max_seen_client_seq': e.maxSeenSeq,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  Response _validationErrorResponse(_ValidationException e) {
+    final errorType = e.statusCode == 404
+        ? 'NOT_FOUND'
+        : (e.statusCode == 409 ? 'CONFLICT' : 'BAD_REQUEST');
+    return Response(
+      e.statusCode,
+      body: jsonEncode({
+        'error': errorType,
+        'code': e.code,
+        'message': e.message,
+      }),
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  /// Hedef satışı önce doğrudan Hub ID ile, bulunamazsa `(device_id, target_client_seq)`
+  /// ile çözümler. Bulunamazsa veya referans belirsizse fail-closed hata fırlatır.
+  Future<Sale> _resolveTargetSaleInTx({
+    required String deviceId,
+    required String? rawSaleId,
+    required int? targetClientSeq,
+  }) async {
+    final trimmedSaleId = rawSaleId?.trim();
+    if (trimmedSaleId != null && trimmedSaleId.isNotEmpty) {
+      final direct = await (db.select(db.sales)
+            ..where((s) => s.id.equals(trimmedSaleId)))
+          .getSingleOrNull();
+      if (direct != null) {
+        return direct;
+      }
+    }
+
+    if (targetClientSeq != null) {
+      final matches = await (db.select(db.sales)
+            ..where((s) =>
+                s.deviceId.equals(deviceId) & s.clientSeq.equals(targetClientSeq)))
+          .get();
+      if (matches.length == 1) {
+        return matches.first;
+      }
+      if (matches.length > 1) {
+        throw _ValidationException(
+          409,
+          'ERR_AMBIGUOUS_SALE_REFERENCE',
+          'Hedef satış referansı belirsiz: device_id=$deviceId client_seq=$targetClientSeq için ${matches.length} satış bulundu.',
+        );
+      }
+      throw _ValidationException(
+        404,
+        'ERR_SALE_NOT_FOUND',
+        'Hedef satış bulunamadı (sale_id=$rawSaleId, device_id=$deviceId, target_client_seq=$targetClientSeq).',
+      );
+    }
+
+    throw _ValidationException(
+      404,
+      'ERR_SALE_NOT_FOUND',
+      'Hedef satış bulunamadı (sale_id=$rawSaleId).',
+    );
+  }
+
+  /// İade kalemini orijinal satışın `sale_items` listesiyle eşleştirir.
+  SaleItem? _matchSaleItem(
+    List<SaleItem> saleItems, {
+    String? saleItemId,
+    String? productId,
+  }) {
+    final cleanItemId = saleItemId?.trim();
+    if (cleanItemId != null && cleanItemId.isNotEmpty) {
+      for (final si in saleItems) {
+        if (si.id == cleanItemId) {
+          if (productId != null &&
+              productId.trim().isNotEmpty &&
+              si.productId != productId.trim()) {
+            throw _ValidationException(
+              400,
+              'ERR_INVALID_REFUND_ITEM',
+              'sale_item_id ($cleanItemId) ile product_id ($productId) birbiriyle uyuşmuyor.',
+            );
+          }
+          return si;
+        }
+      }
+    }
+
+    final cleanProductId = productId?.trim();
+    if (cleanProductId != null && cleanProductId.isNotEmpty) {
+      for (final si in saleItems) {
+        if (si.productId == cleanProductId) {
+          return si;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  Response _evaluateExistingReceipt({
+    required ProcessedOperation existingOp,
+    required String operationType,
+    required Map<String, dynamic> incomingBody,
+    required String rawBody,
+    required String idempotencyKey,
+  }) {
+    Map<String, dynamic>? cachedJson;
+    try {
+      final decoded = jsonDecode(existingOp.resultPayload);
+      if (decoded is Map<String, dynamic>) {
+        cachedJson = decoded;
+      }
+    } catch (_) {
+      cachedJson = null;
+    }
+
+    final match = CanonicalPayloadHasher.verifyAgainstStoredReceipt(
+      operationType: operationType,
+      incomingBody: incomingBody,
+      rawBody: rawBody,
+      storedClientSeq: existingOp.clientSeq,
+      storedOperationType: existingOp.operationType,
+      storedRequestHash: existingOp.requestHash,
+      storedHashVersion: existingOp.hashVersion,
+      cachedResultPayload: cachedJson,
+    );
+
+    switch (match) {
+      case ReceiptHashMatchResult.matched:
+        return Response.ok(
+          existingOp.resultPayload,
+          headers: {
+            'content-type': 'application/json',
+            'x-mms-idempotent-replay': 'true',
+          },
+        );
+      case ReceiptHashMatchResult.mismatched:
+        return _idempotencyConflictResponse(idempotencyKey);
+      case ReceiptHashMatchResult.unverifiable:
+        return _idempotencyHashUnverifiableResponse(idempotencyKey);
+    }
+  }
+
+  Future<_MutationTxResult?> _checkExistingReceiptInTx({
+    required String idempotencyKey,
+    required String operationType,
+    required Map<String, dynamic> incomingBody,
+    required String rawBody,
+  }) async {
+    final checkAgain = await (db.select(db.processedOperations)
+          ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
+        .getSingleOrNull();
+    if (checkAgain == null) return null;
+
+    Map<String, dynamic>? cachedJson;
+    try {
+      final decoded = jsonDecode(checkAgain.resultPayload);
+      if (decoded is Map<String, dynamic>) {
+        cachedJson = decoded;
+      }
+    } catch (_) {
+      cachedJson = null;
+    }
+
+    final match = CanonicalPayloadHasher.verifyAgainstStoredReceipt(
+      operationType: operationType,
+      incomingBody: incomingBody,
+      rawBody: rawBody,
+      storedClientSeq: checkAgain.clientSeq,
+      storedOperationType: checkAgain.operationType,
+      storedRequestHash: checkAgain.requestHash,
+      storedHashVersion: checkAgain.hashVersion,
+      cachedResultPayload: cachedJson,
+    );
+
+    switch (match) {
+      case ReceiptHashMatchResult.matched:
+        return _MutationTxResult(
+          isReplay: true,
+          bodyJson: checkAgain.resultPayload,
+        );
+      case ReceiptHashMatchResult.mismatched:
+        throw _IdempotencyConflictException(idempotencyKey);
+      case ReceiptHashMatchResult.unverifiable:
+        throw _IdempotencyHashUnverifiableException(idempotencyKey);
+    }
+  }
+
+  Future<void> _assertExpectedClientSeqInTx(String deviceId, int clientSeq) async {
+    final ops = await (db.select(db.processedOperations)
+          ..where((o) => o.deviceId.equals(deviceId) & o.clientSeq.isNotNull()))
+        .get();
+    final summary = DeviceSequenceInspector.computeFromSeqs(
+      ops.map((o) => o.clientSeq!),
+    );
+    final expectedSeq = summary.expectedNextClientSeq;
+    if (clientSeq != expectedSeq) {
+      throw _SequenceGapException(
+        deviceId: deviceId,
+        expectedSeq: expectedSeq,
+        receivedSeq: clientSeq,
+        highWaterMarkSeq: summary.contiguousHwm,
+        maxSeenSeq: summary.maxSeenClientSeq,
+      );
+    }
+  }
+
+  Future<String> _commitReceiptAndAdvanceHwmInTx({
+    required String operationId,
+    required String deviceId,
+    required String idempotencyKey,
+    required int clientSeq,
+    required String operationType,
+    required String canonicalHash,
+    required Map<String, dynamic> responsePayload,
+    required DateTime committedAt,
+  }) async {
+    final encodedPayload = jsonEncode(responsePayload);
+
+    await db.into(db.processedOperations).insert(
+          ProcessedOperationsCompanion(
+            operationId: Value(operationId),
+            deviceId: Value(deviceId),
+            idempotencyKey: Value(idempotencyKey),
+            clientSeq: Value(clientSeq),
+            operationType: Value(operationType),
+            requestHash: Value(canonicalHash),
+            hashVersion: const Value(CanonicalPayloadHasher.hashVersionV2Canonical),
+            resultPayload: Value(encodedPayload),
+            processedAt: Value(committedAt),
+          ),
+        );
+
+    await DeviceSequenceInspector.recomputeAndPersistDeviceHwm(
+      db,
+      deviceId,
+      committedAt: committedAt,
+    );
+
+    return encodedPayload;
+  }
+
+  String? get _effectiveAdminSecret =>
+      adminSecret ??
+      (allowAdminEnvFallback ? (_environment ?? Platform.environment)['ADMIN_SECRET'] : null);
+
+  Response? _denyIfNotLoopback(Request req, {required String actionName}) {
     final connectionInfo = req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
     if (connectionInfo == null) {
       return Response.forbidden(
@@ -146,7 +564,6 @@ class SpikeServer {
         remoteAddr.address == '::1' ||
         remoteAddr.address == '0:0:0:0:0:0:0:1' ||
         remoteAddr.address == '::ffff:127.0.0.1';
-
     if (!isLoopback) {
       return Response.forbidden(
         jsonEncode({
@@ -157,8 +574,15 @@ class SpikeServer {
         headers: {'content-type': 'application/json'},
       );
     }
+    return null;
+  }
 
-    final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'];
+  /// Hub yönetimi için Loopback ve Admin Secret yetkilendirmesi denetler (Fail-Closed)
+  Response? _verifyLoopbackAndAdmin(Request req, {String actionName = 'Bu işlem'}) {
+    final loopbackDenied = _denyIfNotLoopback(req, actionName: actionName);
+    if (loopbackDenied != null) return loopbackDenied;
+
+    final effectiveAdminSecret = _effectiveAdminSecret;
     if (effectiveAdminSecret == null || effectiveAdminSecret.isEmpty) {
       return Response(
         503,
@@ -172,6 +596,7 @@ class SpikeServer {
     }
 
     final providedAdminSecret = req.headers['x-admin-secret'] ??
+        req.headers['x-mms-admin-secret'] ??
         (req.headers['authorization']?.startsWith('Bearer ') == true
             ? req.headers['authorization']!.substring(7).trim()
             : null);
@@ -202,6 +627,80 @@ class SpikeServer {
     return null;
   }
 
+  /// S5A-4: Merkezi DB'nin şifreli yedeği (manuel admin ucu ve zamanlayıcı ortak yolu).
+  /// VACUUM INTO tek yazıcı kuyruğundan geçer; parola verilmezse DPAPI korumalı pepper kullanılır.
+  Future<BackupResult> createEncryptedHubBackup({
+    String? backupPassword,
+    bool isMonthlyArchive = false,
+  }) {
+    final targetLiveDb = dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
+    return _backupOperationLock.synchronized(
+      BackupOperationKind.backup,
+      () => DatabaseBackupEngine.createBackup(
+        liveDbFile: targetLiveDb,
+        executeVacuumInto: (snapPath) async {
+          await writeQueue.enqueue(() async {
+            final escaped = snapPath.replaceAll("'", "''");
+            await db.customStatement("VACUUM INTO '$escaped';");
+          });
+        },
+        deviceId: 'SERVER_HUB',
+        tenantId: tenantId,
+        storeId: storeId,
+        databaseType: DatabaseType.centralMaster,
+        schemaVersion: db.schemaVersion,
+        appVersion: '1.0.0',
+        backupPassword: backupPassword ?? pepperManager.pepper,
+        storageProvider: LocalStorageProvider(_backupTargetDir),
+        isMonthlyArchive: isMonthlyArchive,
+      ),
+    );
+  }
+
+  /// `/health` için hassas veri (yol, hata ayrıntısı) içermeyen yedek özeti.
+  Map<String, dynamic> _publicBackupHealth() {
+    final policy = backupSchedule ?? BackupSchedulePolicy.disabled;
+    final state = _backupScheduleState ?? BackupScheduleState.empty;
+    return {
+      'schedule_enabled': policy.enabled,
+      'last_success_at': state.lastSuccessAt?.toUtc().toIso8601String(),
+      'overdue': policy.isOverdue(state: state, now: DateTime.now().toUtc()),
+      'consecutive_failures': state.consecutiveFailures,
+      'last_error_code': state.lastErrorCode,
+    };
+  }
+
+  Future<void> _startBackupScheduler() async {
+    final policy = backupSchedule;
+    final store = BackupScheduleStateStore(backupScheduleStateFile);
+    _backupScheduleState = await store.load();
+    if (policy == null || !policy.enabled) return;
+
+    final runner = ScheduledBackupRunner(
+      readPolicy: () => policy,
+      stateStore: store,
+      createBackup: () => createEncryptedHubBackup(),
+      pruneExpired: () => _backupOperationLock.synchronized(
+        BackupOperationKind.backup,
+        () => RetentionPolicyManager(policy: policy.retention).executePruning(
+          LocalStorageProvider(_backupTargetDir),
+          databaseType: DatabaseType.centralMaster,
+        ),
+      ),
+    );
+    _backupScheduler = BackupScheduler(
+      runner: runner,
+      checkInterval: backupCheckInterval,
+      onRun: (record) async {
+        _backupScheduleState = await store.load();
+        final outcome = record.success
+            ? 'BAŞARILI (${record.backupId}, ${record.sizeBytes} bayt, temizlenen: ${record.prunedCount})'
+            : 'BAŞARISIZ [${record.errorCode}] ${record.errorMessage}';
+        print('[BACKUP] Zamanlanmış Hub yedeği: $outcome');
+      },
+    )..start();
+  }
+
   /// Çakışma ve üzerine yazmayı önleyen, mikrosaniye ve kriptografik nonce içeren benzersiz dosya adı üretici
   String _generateUniqueBackupPath(Directory targetDir) {
     while (true) {
@@ -228,6 +727,7 @@ class SpikeServer {
           'timestamp': DateTime.now().toIso8601String(),
           'sqlite_version': 'masked', // Sistem sürümü sızıntısını önlemek için maskelendi
           'queue_metrics': writeQueue.metrics.toJson(),
+          'backup': _publicBackupHealth(),
         }),
         headers: {'content-type': 'application/json'},
       );
@@ -261,14 +761,35 @@ class SpikeServer {
       final port = req.requestedUri.port;
       final hubUrl = '$scheme://$host:$port';
 
-      var caFingerprint = 'UNKNOWN';
-      if (caCertPath != null && File(caCertPath!).existsSync()) {
-        caFingerprint = CertificateManager.computeSha256Fingerprint(File(caCertPath!).readAsBytesSync());
-      } else {
-        final envCert = Platform.environment['ROOT_CA_CERT_FILE'];
-        if (envCert != null && File(envCert).existsSync()) {
-          caFingerprint = CertificateManager.computeSha256Fingerprint(File(envCert).readAsBytesSync());
+      String? resolvedCaFingerprint;
+      if (caCertPath != null) {
+        try {
+          final caFile = File(caCertPath!);
+          if (caFile.existsSync()) {
+            resolvedCaFingerprint = CertificateManager.computeSha256Fingerprint(
+              caFile.readAsBytesSync(),
+            );
+          }
+        } on FileSystemException {
+          resolvedCaFingerprint = null;
         }
+      }
+
+      final String caFingerprint;
+      if (resolvedCaFingerprint != null) {
+        caFingerprint = resolvedCaFingerprint;
+      } else if (requireTls) {
+        return Response(
+          503,
+          body: jsonEncode({
+            'error': 'CA_CERT_UNAVAILABLE',
+            'code': 'ERR_CA_CERT_UNAVAILABLE',
+            'message': 'TLS etkin ancak eşleştirme kök CA sertifikası bulunamadı; eşleştirme oturumu başlatılamaz.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } else {
+        caFingerprint = 'UNKNOWN';
       }
 
       final sessionData = pairingManager.createSession(
@@ -287,12 +808,14 @@ class SpikeServer {
     // 2. Kök CA Sertifikasını İndir (Public)
     _router.get('/api/v1/pairing/ca-cert', (Request req) async {
       String? certContent;
-      if (caCertPath != null && File(caCertPath!).existsSync()) {
-        certContent = File(caCertPath!).readAsStringSync();
-      } else {
-        final envCert = Platform.environment['ROOT_CA_CERT_FILE'];
-        if (envCert != null && File(envCert).existsSync()) {
-          certContent = File(envCert).readAsStringSync();
+      if (caCertPath != null) {
+        try {
+          final caFile = File(caCertPath!);
+          if (caFile.existsSync()) {
+            certContent = caFile.readAsStringSync();
+          }
+        } on FileSystemException {
+          certContent = null;
         }
       }
 
@@ -423,10 +946,19 @@ class SpikeServer {
       final authError = _verifyLoopbackAndAdmin(req, actionName: 'Eşleştirme reddetme');
       if (authError != null) return authError;
 
+      final String sessionId;
       try {
-        final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
-        final sessionId = body['session_id'] as String;
+        final body = jsonDecode(await req.readAsString());
+        final raw = body is Map ? body['session_id'] : null;
+        if (raw is! String || raw.isEmpty) throw const FormatException('session_id zorunludur');
+        sessionId = raw;
+      } on FormatException catch (e) {
+        return Response(400,
+            body: jsonEncode({'error': 'BAD_REQUEST', 'message': 'Geçersiz istek gövdesi: ${e.message}'}),
+            headers: {'content-type': 'application/json'});
+      }
 
+      try {
         await pairingManager.rejectSession(
           sessionId: sessionId,
           db: db,
@@ -682,10 +1214,14 @@ class SpikeServer {
     });
 
 
-    // 4. Token İptali (Revoke Device - S-2)
+    // 4. Token İptali (Revoke Device - S-2; loopback + admin secret zorunlu)
     _router.post('/api/v1/devices/revoke', (Request req) async {
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'];
+      final loopbackDenied = _denyIfNotLoopback(req, actionName: 'Cihaz token iptali');
+      if (loopbackDenied != null) return loopbackDenied;
+
+      final effectiveAdminSecret = _effectiveAdminSecret;
       final providedAdminSecret = req.headers['x-admin-secret'] ??
+          req.headers['x-mms-admin-secret'] ??
           (req.headers['authorization']?.startsWith('Bearer ') == true
               ? req.headers['authorization']!.substring(7).trim()
               : null);
@@ -844,6 +1380,128 @@ class SpikeServer {
       );
     });
 
+    // 4.5.1. Çoklu Cihaz Satış Senkronizasyonu (Sales Downlink - Cursor Tabanlı)
+    _router.get('/api/v1/sales', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Cihaz yetkilendirmesi zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final queryParams = req.requestedUri.queryParameters;
+      final cursor = int.tryParse(queryParams['cursor'] ?? '0') ?? 0;
+      final rawLimit = int.tryParse(queryParams['limit'] ?? '50') ?? 50;
+      final limit = rawLimit.clamp(1, 100);
+
+      final salesQuery = db.select(db.sales)
+        ..where((s) => s.serverSeq.isBiggerThanValue(cursor))
+        ..orderBy([(s) => OrderingTerm.asc(s.serverSeq)])
+        ..limit(limit);
+
+      final salesList = await salesQuery.get();
+
+      final results = <Map<String, dynamic>>[];
+      int maxSeq = cursor;
+
+      for (final sale in salesList) {
+        final currentSeq = sale.serverSeq ?? 0;
+        if (currentSeq > maxSeq) {
+          maxSeq = currentSeq;
+        }
+
+        final saleItems = await (db.select(db.saleItems)..where((i) => i.saleId.equals(sale.id))).get();
+        final itemsPayload = <Map<String, dynamic>>[];
+
+        for (final item in saleItems) {
+          final prod = await (db.select(db.products)..where((p) => p.id.equals(item.productId))).getSingleOrNull();
+          itemsPayload.add({
+            'id': item.id,
+            'sale_id': item.saleId,
+            'product_id': item.productId,
+            'product_name': prod?.name ?? 'Ürün',
+            'unit': prod?.pricingUnit ?? 'adet',
+            'price_version_id': prod?.priceVersionId ?? 'pv_init',
+            'unit_price': item.unitPrice,
+            'quantity': item.quantity,
+            'total_price': item.totalPrice,
+          });
+        }
+
+        final refunds = await (db.select(db.refunds)..where((r) => r.saleId.equals(sale.id))).get();
+        final refundsPayload = <Map<String, dynamic>>[];
+        int totalRefundedInSale = 0;
+        for (final ref in refunds) {
+          totalRefundedInSale += ref.totalRefundAmount;
+          final refItems = await (db.select(db.refundItems)..where((ri) => ri.refundId.equals(ref.id))).get();
+          refundsPayload.add({
+            'id': ref.id,
+            'sale_id': ref.saleId,
+            'device_id': ref.deviceId,
+            'client_seq': ref.clientSeq,
+            'total_refund_amount': ref.totalRefundAmount,
+            'payment_method': ref.paymentMethod,
+            'reason': ref.reason,
+            'created_at': ref.createdAt.toIso8601String(),
+            'items': refItems.map((ri) => {
+              'id': ri.id,
+              'refund_id': ri.refundId,
+              'sale_item_id': ri.saleItemId,
+              'product_id': ri.productId,
+              'quantity': ri.quantity,
+              'unit_price': ri.unitPrice,
+              'refund_amount': ri.refundAmount,
+              'product_condition': ri.productCondition,
+            }).toList(),
+          });
+        }
+
+        String effectiveStatus = sale.status;
+        if (effectiveStatus != 'CANCELLED' &&
+            effectiveStatus != 'REFUNDED' &&
+            refunds.isNotEmpty) {
+          if (totalRefundedInSale >= sale.totalAmount) {
+            effectiveStatus = 'REFUNDED';
+          } else if (totalRefundedInSale > 0) {
+            effectiveStatus = 'PARTIALLY_REFUNDED';
+          }
+        }
+
+        results.add({
+          'id': sale.id,
+          'server_seq': currentSeq,
+          'device_id': sale.deviceId,
+          'client_seq': sale.clientSeq,
+          'total_amount': sale.totalAmount,
+          'payment_method': sale.paymentMethod,
+          'status': effectiveStatus,
+          'cancel_reason': sale.cancelReason,
+          'cancelled_at': sale.cancelledAt?.toIso8601String(),
+          'created_at': sale.createdAt.toIso8601String(),
+          'items': itemsPayload,
+          'refunds': refundsPayload,
+        });
+      }
+
+      return Response.ok(
+        jsonEncode({
+          'status': 'OK',
+          'sales': results,
+          'count': results.length,
+          'cursor': cursor,
+          'next_cursor': maxSeq,
+          'has_more': salesList.length == limit,
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
 
     // 4.6. Ürün Senkronizasyon Onayı (S5A-3 Product Sync ACK - Idempotent)
     _router.post('/api/v1/products/sync-ack', (Request req) async {
@@ -941,12 +1599,36 @@ class SpikeServer {
       );
     });
 
+    // 4.7. Ürün Ekleme / Güncelleme Senkronizasyonu (Outbox PRODUCT_UPSERT - Idempotent)
+    _router.post('/api/v1/products/upsert', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Ürün kaydı için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
 
-    // 5. Atomik Satış ve Stok Düşümü (Idempotent)
-    _router.post('/api/v1/sales', (Request req) async {
-      // device_id ASLA istemci payload'ından alınmaz; kimliği doğrulanmış request context'ten alınır
-      final deviceId = req.context['authenticated_device_id'] as String;
-      final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
+      final bodyStr = await req.readAsString();
+      Map<String, dynamic> body;
+      try {
+        body = jsonDecode(bodyStr) as Map<String, dynamic>;
+      } catch (_) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'Geçersiz JSON formatı.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
 
       final rawClientSeq = body['client_seq'];
       if (rawClientSeq is! int || rawClientSeq <= 0) {
@@ -962,6 +1644,1280 @@ class SpikeServer {
       }
       final clientSeq = rawClientSeq;
 
+      final productData = body['product'] as Map<String, dynamic>?;
+      if (productData == null) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_PRODUCT_DATA',
+            'message': 'product nesnesi zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final prodId = productData['id'] as String?;
+      final name = productData['name'] as String?;
+      final price = productData['price'] as int?;
+      final barcode = productData['barcode'] as String?;
+
+      if (prodId == null || prodId.trim().isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_PRODUCT_ID',
+            'message': 'Ürün kimliği (id) zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (name == null || name.trim().isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_NAME',
+            'message': 'Ürün adı zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (price == null || price <= 0) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_PRICE',
+            'message': 'Fiyat pozitif bir kuruş tamsayısı olmalıdır (> 0).',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final operationId = body['operation_id'] as String? ?? 'op_prod_${prodId}_$clientSeq';
+      final idempotencyKey = '$deviceId:$clientSeq';
+      final incomingCanonicalHash = CanonicalPayloadHasher.computeCanonicalV2(
+        operationType: 'PRODUCT_UPSERT',
+        body: body,
+      );
+
+      // Idempotency kontrolü (ProcessedOperations - replay & conflict önce çalışır)
+      final existingOp = await (db.select(db.processedOperations)
+            ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
+          .getSingleOrNull();
+
+      if (existingOp != null) {
+        return _evaluateExistingReceipt(
+          existingOp: existingOp,
+          operationType: 'PRODUCT_UPSERT',
+          incomingBody: body,
+          rawBody: bodyStr,
+          idempotencyKey: idempotencyKey,
+        );
+      }
+
+      try {
+        final txResult = await writeQueue.enqueue(() async {
+          return await db.transaction(() async {
+            // Transaction içi tekrar kontrol
+            final txReplay = await _checkExistingReceiptInTx(
+              idempotencyKey: idempotencyKey,
+              operationType: 'PRODUCT_UPSERT',
+              incomingBody: body,
+              rawBody: bodyStr,
+            );
+            if (txReplay != null) {
+              return txReplay;
+            }
+
+            // BK-02.1 Karar 3: Katı sequence gap kontrolü
+            await _assertExpectedClientSeqInTx(deviceId, clientSeq);
+
+            final existingProduct = await (db.select(db.products)
+                  ..where((p) => p.id.equals(prodId)))
+                .getSingleOrNull();
+
+            final now = DateTime.now();
+            final effectiveBarcode = barcode?.trim().isNotEmpty == true
+                ? barcode!.trim()
+                : (existingProduct?.barcode ?? prodId);
+
+            // Başka bir üründe bu barkod var mı?
+            final barcodeDuplicate = await (db.select(db.products)
+                  ..where((p) => p.barcode.equals(effectiveBarcode) & p.id.isNotValue(prodId)))
+                .getSingleOrNull();
+            if (barcodeDuplicate != null) {
+              throw _ValidationException(
+                409,
+                'ERR_DUPLICATE_BARCODE',
+                'Bu barkod ($effectiveBarcode) başka bir üründe kayıtlı: ${barcodeDuplicate.name}',
+              );
+            }
+
+            String priceVersionId;
+            if (existingProduct != null) {
+              priceVersionId = existingProduct.priceVersionId;
+              if (existingProduct.price != price) {
+                priceVersionId = 'pv_${now.microsecondsSinceEpoch}';
+                await db.into(db.productPriceHistories).insert(
+                  ProductPriceHistoriesCompanion(
+                    id: Value('ph_${now.microsecondsSinceEpoch}'),
+                    productId: Value(prodId),
+                    price: Value(price),
+                    validFrom: Value(now),
+                    createdAt: Value(now),
+                  ),
+                );
+              }
+
+              await (db.update(db.products)..where((p) => p.id.equals(prodId))).write(
+                ProductsCompanion(
+                  name: Value(name),
+                  barcode: Value(effectiveBarcode),
+                  price: Value(price),
+                  priceVersionId: Value(priceVersionId),
+                  // Faz 7A (Owner onayı 21.11.2026): Mevcut ürünün stoğu istemcinin mutlak
+                  // (bayat olabilecek) değeriyle EZİLMEZ. Stok yalnızca hareketlerle değişir:
+                  // SALE_CREATE / SALE_CANCEL / SALE_REFUND / STOCK_RECEIPT.
+                  stockUnit: Value(productData['stock_unit'] as String? ?? existingProduct.stockUnit),
+                  pricingUnit: Value(productData['pricing_unit'] as String? ?? existingProduct.pricingUnit),
+                  conversionFactorNumerator: Value(productData['conversion_factor_numerator'] as int? ?? existingProduct.conversionFactorNumerator),
+                  conversionFactorDenominator: Value(productData['conversion_factor_denominator'] as int? ?? existingProduct.conversionFactorDenominator),
+                  isActive: Value(productData['is_active'] as bool? ?? existingProduct.isActive),
+                  updatedAt: Value(now),
+                ),
+              );
+            } else {
+              priceVersionId = productData['price_version_id'] as String? ?? 'pv_init_${now.microsecondsSinceEpoch}';
+              await db.into(db.products).insert(
+                ProductsCompanion(
+                  id: Value(prodId),
+                  barcode: Value(effectiveBarcode),
+                  name: Value(name),
+                  price: Value(price),
+                  priceVersionId: Value(priceVersionId),
+                  stock: Value(productData['stock'] as int? ?? 0),
+                  stockUnit: Value(productData['stock_unit'] as String? ?? 'adet'),
+                  pricingUnit: Value(productData['pricing_unit'] as String? ?? 'adet'),
+                  conversionFactorNumerator: Value(productData['conversion_factor_numerator'] as int? ?? 1),
+                  conversionFactorDenominator: Value(productData['conversion_factor_denominator'] as int? ?? 1),
+                  isActive: Value(productData['is_active'] as bool? ?? true),
+                  updatedAt: Value(now),
+                ),
+              );
+
+              await db.into(db.productPriceHistories).insert(
+                ProductPriceHistoriesCompanion(
+                  id: Value('ph_${now.microsecondsSinceEpoch}'),
+                  productId: Value(prodId),
+                  price: Value(price),
+                  validFrom: Value(now),
+                  createdAt: Value(now),
+                ),
+              );
+            }
+
+            final res = {
+              'status': 'COMMITTED',
+              'operation_type': 'PRODUCT_UPSERT',
+              'device_id': deviceId,
+              'client_seq': clientSeq,
+              'product_id': prodId,
+              'price_version_id': priceVersionId,
+              'processed_at': now.toIso8601String(),
+              '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+              '__request_hash': incomingCanonicalHash,
+            };
+
+            final encoded = await _commitReceiptAndAdvanceHwmInTx(
+              operationId: operationId,
+              deviceId: deviceId,
+              idempotencyKey: idempotencyKey,
+              clientSeq: clientSeq,
+              operationType: 'PRODUCT_UPSERT',
+              canonicalHash: incomingCanonicalHash,
+              responsePayload: res,
+              committedAt: now,
+            );
+
+            return _MutationTxResult(isReplay: false, bodyJson: encoded);
+          });
+        });
+
+        return Response.ok(
+          txResult.bodyJson,
+          headers: {
+            'content-type': 'application/json',
+            if (txResult.isReplay) 'x-mms-idempotent-replay': 'true',
+          },
+        );
+      } on _IdempotencyConflictException catch (e) {
+        return _idempotencyConflictResponse(e.idempotencyKey);
+      } on _IdempotencyHashUnverifiableException catch (e) {
+        return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+      } on _SequenceGapException catch (e) {
+        return _sequenceGapResponse(e);
+      } on _ValidationException catch (e) {
+        return Response(
+          e.statusCode,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } catch (e, stack) {
+        stderr.writeln('PRODUCT_UPSERT işlenirken beklenmeyen hata: $e\n$stack');
+        return Response.internalServerError(
+          body: jsonEncode({
+            'error': 'INTERNAL_ERROR',
+            'code': 'ERR_INTERNAL_SERVER_ERROR',
+            'message': 'Ürün kaydedilirken sunucu hatası oluştu: $e',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+    });
+
+
+    // 4.8. Mevcut Ürüne Stok Girişi (Outbox STOCK_RECEIPT - Delta, Idempotent, FIFO)
+    // Owner onayı (21.11.2026): Mutlak stok yerine delta taşır; aynı receipt_id ikinci kez uygulanmaz.
+    _router.post('/api/v1/stock/receipts', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Stok girişi için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final bodyStr = await req.readAsString();
+      final Map<String, dynamic> body;
+      try {
+        body = jsonDecode(bodyStr) as Map<String, dynamic>;
+      } catch (_) {
+        return _validationErrorResponse(
+          _ValidationException(400, 'ERR_INVALID_JSON', 'Geçersiz JSON formatı.'),
+        );
+      }
+
+      final rawClientSeq = body['client_seq'];
+      final receiptId = (body['receipt_id'] as String?)?.trim() ?? '';
+      final productId = (body['product_id'] as String?)?.trim() ?? '';
+      final rawQuantity = body['quantity'];
+      final unit = (body['unit'] as String?)?.trim() ?? '';
+      final rawPurchase = body['unit_purchase_price'];
+      final rawNote = body['note'];
+
+      _ValidationException? invalid;
+      if (rawClientSeq is! int || rawClientSeq <= 0) {
+        invalid = _ValidationException(400, 'ERR_INVALID_CLIENT_SEQ', 'client_seq pozitif bir tamsayı (> 0) olmalıdır.');
+      } else if (receiptId.isEmpty || receiptId.length > 128) {
+        invalid = _ValidationException(400, 'ERR_INVALID_RECEIPT_ID', 'receipt_id zorunludur (en fazla 128 karakter).');
+      } else if (productId.isEmpty) {
+        invalid = _ValidationException(400, 'ERR_INVALID_PRODUCT_ID', 'product_id zorunludur.');
+      } else if (rawQuantity is! int || rawQuantity <= 0 || rawQuantity > 1000000000) {
+        invalid = _ValidationException(400, 'ERR_INVALID_QUANTITY', 'quantity pozitif milli-birim tamsayısı olmalıdır.');
+      } else if (unit.isEmpty) {
+        invalid = _ValidationException(400, 'ERR_INVALID_UNIT', 'unit zorunludur.');
+      } else if (rawPurchase != null &&
+          (rawPurchase is! int || rawPurchase < 0 || rawPurchase > 100000000000)) {
+        invalid = _ValidationException(
+            400, 'ERR_INVALID_PURCHASE_PRICE', 'unit_purchase_price negatif olmayan kuruş tamsayısı olmalıdır.');
+      } else if (rawNote != null && (rawNote is! String || rawNote.length > 200)) {
+        invalid = _ValidationException(400, 'ERR_INVALID_NOTE', 'note en fazla 200 karakterlik metin olmalıdır.');
+      }
+      if (invalid != null) {
+        return _validationErrorResponse(invalid);
+      }
+      final clientSeq = rawClientSeq as int;
+      final quantity = rawQuantity as int;
+      final purchasePrice = rawPurchase as int?;
+      final note = rawNote as String?;
+      final occurredAt = DateTime.tryParse(body['occurred_at'] as String? ?? '');
+
+      final operationId = body['operation_id'] as String? ?? 'op_stock_$receiptId';
+      final idempotencyKey = '$deviceId:$clientSeq';
+      final incomingCanonicalHash = CanonicalPayloadHasher.computeCanonicalV2(
+        operationType: 'STOCK_RECEIPT',
+        body: body,
+      );
+
+      final existingOp = await (db.select(db.processedOperations)
+            ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
+          .getSingleOrNull();
+      if (existingOp != null) {
+        return _evaluateExistingReceipt(
+          existingOp: existingOp,
+          operationType: 'STOCK_RECEIPT',
+          incomingBody: body,
+          rawBody: bodyStr,
+          idempotencyKey: idempotencyKey,
+        );
+      }
+
+      try {
+        final txResult = await writeQueue.enqueue(() async {
+          return await db.transaction(() async {
+            final txReplay = await _checkExistingReceiptInTx(
+              idempotencyKey: idempotencyKey,
+              operationType: 'STOCK_RECEIPT',
+              incomingBody: body,
+              rawBody: bodyStr,
+            );
+            if (txReplay != null) {
+              return txReplay;
+            }
+
+            await _assertExpectedClientSeqInTx(deviceId, clientSeq);
+
+            final product = await (db.select(db.products)
+                  ..where((p) => p.id.equals(productId)))
+                .getSingleOrNull();
+            if (product == null) {
+              throw _ValidationException(
+                  404, 'ERR_PRODUCT_NOT_FOUND', 'Stok girişi yapılacak ürün Hub üzerinde bulunamadı: $productId');
+            }
+            if (product.stockUnit != unit) {
+              throw _ValidationException(
+                422,
+                'ERR_UNIT_MISMATCH',
+                'Stok girişi birimi ($unit) ürünün stok birimiyle (${product.stockUnit}) uyuşmuyor.',
+              );
+            }
+
+            final now = DateTime.now();
+            final existingMovement = await (db.select(db.stockMovements)
+                  ..where((m) => m.id.equals(receiptId)))
+                .getSingleOrNull();
+
+            final String status;
+            final int newStock;
+            // Yinelenen giriş aynı operation_id ile yeni client_seq'te gelebilir; makbuz PK'sı
+            // (processed_operations.operation_id) çakışmasın diye seq ile ayrıştırılır.
+            var receiptOperationId = '$operationId#seq$clientSeq';
+            if (existingMovement != null) {
+              // Aynı stok girişi farklı client_seq ile tekrar geldi: ikinci kez UYGULANMAZ,
+              // ancak FIFO kuyruğu kilitlenmesin diye makbuz yazılır ve HWM ilerler.
+              final same = existingMovement.movementType == 'GIRIS' &&
+                  existingMovement.productId == productId &&
+                  existingMovement.quantity == quantity;
+              if (!same) {
+                throw _ValidationException(
+                  409,
+                  'ERR_STOCK_RECEIPT_CONFLICT',
+                  'receipt_id ($receiptId) farklı içerikle daha önce işlenmiş; stok değiştirilmedi.',
+                );
+              }
+              status = 'DUPLICATE_RECEIPT_IGNORED';
+              newStock = product.stock;
+            } else {
+              receiptOperationId = operationId;
+              if (product.stock > 9223372036854775807 - quantity) {
+                throw _ValidationException(422, 'ERR_STOCK_OVERFLOW', 'Stok artışı tamsayı sınırını aşıyor.');
+              }
+              // Read-modify-write yerine SQL seviyesinde atomik delta
+              await db.customUpdate(
+                'UPDATE products SET stock = stock + ?, updated_at = ? WHERE id = ?;',
+                variables: [
+                  Variable.withInt(quantity),
+                  Variable.withDateTime(now),
+                  Variable.withString(productId),
+                ],
+                updates: {db.products},
+              );
+              await db.into(db.stockMovements).insert(
+                    StockMovementsCompanion(
+                      id: Value(receiptId),
+                      productId: Value(productId),
+                      quantity: Value(quantity),
+                      unit: Value(unit),
+                      movementType: const Value('GIRIS'),
+                      referenceId: Value(receiptId),
+                      purchasePrice: Value(purchasePrice),
+                      note: Value(note),
+                      createdAt: Value(occurredAt ?? now),
+                    ),
+                  );
+              status = 'COMMITTED';
+              newStock = product.stock + quantity;
+            }
+
+            final res = {
+              'status': status,
+              'operation_type': 'STOCK_RECEIPT',
+              'device_id': deviceId,
+              'client_seq': clientSeq,
+              'receipt_id': receiptId,
+              'product_id': productId,
+              'new_stock': newStock,
+              'processed_at': now.toIso8601String(),
+              '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+              '__request_hash': incomingCanonicalHash,
+            };
+
+            final encoded = await _commitReceiptAndAdvanceHwmInTx(
+              operationId: receiptOperationId,
+              deviceId: deviceId,
+              idempotencyKey: idempotencyKey,
+              clientSeq: clientSeq,
+              operationType: 'STOCK_RECEIPT',
+              canonicalHash: incomingCanonicalHash,
+              responsePayload: res,
+              committedAt: now,
+            );
+            return _MutationTxResult(isReplay: false, bodyJson: encoded);
+          });
+        });
+
+        return Response.ok(
+          txResult.bodyJson,
+          headers: {
+            'content-type': 'application/json',
+            if (txResult.isReplay) 'x-mms-idempotent-replay': 'true',
+          },
+        );
+      } on _IdempotencyConflictException catch (e) {
+        return _idempotencyConflictResponse(e.idempotencyKey);
+      } on _IdempotencyHashUnverifiableException catch (e) {
+        return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+      } on _SequenceGapException catch (e) {
+        return _sequenceGapResponse(e);
+      } on _ValidationException catch (e) {
+        return _validationErrorResponse(e);
+      } catch (e, stack) {
+        stderr.writeln('STOCK_RECEIPT işlenirken beklenmeyen hata: $e\n$stack');
+        return Response.internalServerError(
+          body: jsonEncode({
+            'error': 'INTERNAL_ERROR',
+            'code': 'ERR_INTERNAL_SERVER_ERROR',
+            'message': 'Stok girişi işlenirken sunucu hatası oluştu.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+    });
+
+    // 5. Atomik Satış ve Stok Düşümü (Idempotent)
+    _router.post('/api/v1/sales', (Request req) async {
+      // device_id ASLA istemci payload'ından alınmaz; kimliği doğrulanmış request context'ten alınır
+      final deviceId = req.context['authenticated_device_id'] as String;
+      final bodyStr = await req.readAsString();
+      final Map<String, dynamic> body;
+      try {
+        final decoded = jsonDecode(bodyStr);
+        if (decoded is! Map<String, dynamic>) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_JSON',
+              'message': 'İstek gövdesi geçerli bir JSON nesnesi olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        body = decoded;
+      } catch (_) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'Geçersiz JSON formatı.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final rawClientSeq = body['client_seq'];
+      if (rawClientSeq is! int || rawClientSeq <= 0) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CLIENT_SEQ',
+            'message': 'client_seq pozitif bir tamsayı (> 0) olmalıdır.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      final clientSeq = rawClientSeq;
+      final operationType = CanonicalPayloadHasher.resolveSaleOperationType(body);
+      if (operationType != 'SALE_CREATE' &&
+          operationType != 'SALE_CANCEL' &&
+          operationType != 'SALE_REFUND') {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_UNSUPPORTED_OPERATION_TYPE',
+            'message': 'Desteklenmeyen satış işlem türü: $operationType',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final operationId = body['operation_id'] as String? ?? 'op_${DateTime.now().microsecondsSinceEpoch}';
+      final idempotencyKey = '$deviceId:$clientSeq';
+      final incomingCanonicalHash = CanonicalPayloadHasher.computeCanonicalV2(
+        operationType: operationType,
+        body: body,
+      );
+
+      // A. Önce Idempotency kontrolü (Inbox defteri - replay & conflict önce çalışır)
+      final existingOp = await (db.select(db.processedOperations)
+            ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
+          .getSingleOrNull();
+
+      if (existingOp != null) {
+        return _evaluateExistingReceipt(
+          existingOp: existingOp,
+          operationType: operationType,
+          incomingBody: body,
+          rawBody: bodyStr,
+          idempotencyKey: idempotencyKey,
+        );
+      }
+
+      // B. FAZ 1.3.3 & BK-02.1.1: SALE_CANCEL İşlemi (Fail-Closed İş Bütünlüğü)
+      if (operationType == 'SALE_CANCEL') {
+        final saleId = body['sale_id'] as String?;
+        final rawTargetClientSeq = body['target_client_seq'];
+        if (rawTargetClientSeq != null && rawTargetClientSeq is! int) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_CANCEL_REQUEST',
+              'message': 'target_client_seq tamsayı olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final targetClientSeq = rawTargetClientSeq as int?;
+        if (body.containsKey('reason') &&
+            (body['reason'] is! String || (body['reason'] as String).trim().isEmpty)) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_CANCEL_REQUEST',
+              'message': 'İptal gerekçesi (reason) boş olamaz.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final reason = (body['reason'] as String?)?.trim() ?? 'İptal';
+
+        if ((saleId == null || saleId.trim().isEmpty) && targetClientSeq == null) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_CANCEL_REQUEST',
+              'message': 'sale_id veya target_client_seq belirtilmelidir.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        try {
+          final txResult = await writeQueue.enqueue(() async {
+            return await db.transaction(() async {
+              final txReplay = await _checkExistingReceiptInTx(
+                idempotencyKey: idempotencyKey,
+                operationType: 'SALE_CANCEL',
+                incomingBody: body,
+                rawBody: bodyStr,
+              );
+              if (txReplay != null) {
+                return txReplay;
+              }
+
+              // BK-02.1 Karar 3: Katı sequence gap kontrolü
+              await _assertExpectedClientSeqInTx(deviceId, clientSeq);
+
+              // BK-02.1.1: Satış bulunamazsa 404 ile transaction geri alınır
+              final originalSale = await _resolveTargetSaleInTx(
+                deviceId: deviceId,
+                rawSaleId: saleId,
+                targetClientSeq: targetClientSeq,
+              );
+
+              if (originalSale.status == 'CANCELLED') {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_CANCELLED',
+                  'Bu satış (${originalSale.id}) zaten iptal edilmiştir; ikinci kez iptal edilemez.',
+                );
+              }
+              if (originalSale.status == 'REFUNDED') {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_REFUNDED',
+                  'Tamamen iade edilmiş satış (${originalSale.id}) iptal edilemez.',
+                );
+              }
+
+              final saleItems = await (db.select(db.saleItems)
+                    ..where((i) => i.saleId.equals(originalSale.id)))
+                  .get();
+
+              // Kısmi iade edilmiş kalemler (hem SELLABLE hem DAMAGED) tespit edilir
+              final existingRefunds = await (db.select(db.refunds)
+                    ..where((r) => r.saleId.equals(originalSale.id)))
+                  .get();
+              final refundedQtyBySaleItemId = <String, int>{};
+              for (final ref in existingRefunds) {
+                final refItems = await (db.select(db.refundItems)
+                      ..where((ri) => ri.refundId.equals(ref.id)))
+                    .get();
+                for (final ri in refItems) {
+                  final matched = _matchSaleItem(
+                    saleItems,
+                    saleItemId: ri.saleItemId,
+                    productId: ri.productId,
+                  );
+                  if (matched != null) {
+                    refundedQtyBySaleItemId[matched.id] =
+                        (refundedQtyBySaleItemId[matched.id] ?? 0) + ri.quantity;
+                  }
+                }
+              }
+
+              if (saleItems.isNotEmpty &&
+                  saleItems.every(
+                    (si) => (refundedQtyBySaleItemId[si.id] ?? 0) >= si.quantity,
+                  )) {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_REFUNDED',
+                  'Satışın (${originalSale.id}) tüm kalemleri zaten iade edilmiştir.',
+                );
+              }
+
+              const maxSafeInt = 0x7FFFFFFFFFFFFFFF;
+              final updatedStocks = <String, int>{};
+              final runningStockByProductId = <String, int>{};
+              final stockRestores = <Map<String, dynamic>>[];
+
+              // Doğrulama ve stok hesaplaması (yazım öncesi validasyon)
+              for (var i = 0; i < saleItems.length; i++) {
+                final item = saleItems[i];
+                final alreadyRefunded = refundedQtyBySaleItemId[item.id] ?? 0;
+                final remainingQty = item.quantity - alreadyRefunded;
+                if (remainingQty <= 0) continue;
+
+                final product = await (db.select(db.products)
+                      ..where((p) => p.id.equals(item.productId)))
+                    .getSingleOrNull();
+                if (product == null) {
+                  throw StateError(
+                    'İptal edilecek satış kalemi ürünü bulunamadı: ${item.productId}',
+                  );
+                }
+
+                final num = product.conversionFactorNumerator;
+                final den = product.conversionFactorDenominator;
+                if (num <= 0 || den <= 0) {
+                  throw StateError('Geçersiz dönüşüm katsayısı ($num / $den): ${product.name}');
+                }
+                if (remainingQty > maxSafeInt ~/ num) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_ARITHMETIC_OVERFLOW',
+                    'Birim dönüşümü çarpımında 64-bit tamsayı taşması riski: ${product.name}',
+                  );
+                }
+                final stockDelta = (remainingQty * num) ~/ den;
+                stockRestores.add({
+                  'index': i,
+                  'product': product,
+                  'stockDelta': stockDelta,
+                });
+              }
+
+              final maxSeqRow = await db.customSelect('SELECT COALESCE(MAX(server_seq), 0) as m FROM sales;').getSingle();
+              final nextServerSeq = (maxSeqRow.data['m'] as int) + 1;
+
+              await (db.update(db.sales)..where((s) => s.id.equals(originalSale.id))).write(
+                SalesCompanion(
+                  status: const Value('CANCELLED'),
+                  cancelReason: Value(reason),
+                  cancelledAt: Value(DateTime.now()),
+                  serverSeq: Value(nextServerSeq),
+                ),
+              );
+
+              for (final entry in stockRestores) {
+                final idx = entry['index'] as int;
+                final product = entry['product'] as Product;
+                final stockDelta = entry['stockDelta'] as int;
+                if (stockDelta > 0) {
+                  await db.into(db.stockMovements).insert(
+                        StockMovementsCompanion(
+                          id: Value('sm_cancel_${originalSale.id}_${product.id}_${DateTime.now().microsecondsSinceEpoch}_$idx'),
+                          productId: Value(product.id),
+                          quantity: Value(stockDelta),
+                          unit: Value(product.stockUnit),
+                          movementType: const Value('SATIS_IPTALI'),
+                          referenceId: Value(originalSale.id),
+                        ),
+                      );
+                }
+
+                final currentStock =
+                    runningStockByProductId[product.id] ?? product.stock;
+                final newStock = currentStock + stockDelta;
+                runningStockByProductId[product.id] = newStock;
+                await (db.update(db.products)..where((p) => p.id.equals(product.id)))
+                    .write(ProductsCompanion(stock: Value(newStock)));
+                updatedStocks[product.id] = newStock;
+              }
+
+              final committedAt = DateTime.now();
+              final responsePayload = {
+                'status': 'COMMITTED',
+                'operation_type': 'SALE_CANCEL',
+                'sale_id': originalSale.id,
+                'device_id': deviceId,
+                'client_seq': clientSeq,
+                'reason': reason,
+                'updated_stocks': updatedStocks,
+                'committed_at': committedAt.toIso8601String(),
+                '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+                '__request_hash': incomingCanonicalHash,
+              };
+
+              final encoded = await _commitReceiptAndAdvanceHwmInTx(
+                operationId: operationId,
+                deviceId: deviceId,
+                idempotencyKey: idempotencyKey,
+                clientSeq: clientSeq,
+                operationType: 'SALE_CANCEL',
+                canonicalHash: incomingCanonicalHash,
+                responsePayload: responsePayload,
+                committedAt: committedAt,
+              );
+
+              return _MutationTxResult(isReplay: false, bodyJson: encoded);
+            });
+          });
+
+          if (txResult.isReplay) {
+            return Response.ok(
+              txResult.bodyJson,
+              headers: {
+                'content-type': 'application/json',
+                'x-mms-idempotent-replay': 'true',
+              },
+            );
+          }
+
+          return Response(
+            201,
+            body: txResult.bodyJson,
+            headers: {'content-type': 'application/json'},
+          );
+        } on _IdempotencyConflictException catch (e) {
+          return _idempotencyConflictResponse(e.idempotencyKey);
+        } on _IdempotencyHashUnverifiableException catch (e) {
+          return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+        } on _SequenceGapException catch (e) {
+          return _sequenceGapResponse(e);
+        } on _ValidationException catch (e) {
+          return _validationErrorResponse(e);
+        } catch (e) {
+          stderr.writeln('[ERROR] Satış iptal transaction hatası: $e');
+          return Response.internalServerError(
+            body: jsonEncode({
+              'error': 'TRANSACTION_FAILED',
+              'code': 'ERR_TRANSACTION_FAILED',
+              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $e',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      }
+
+      // C. FAZ 1.3.4 & BK-02.1.1: SALE_REFUND İşlemi (Fail-Closed Miktar/Tutar/Durum Bütünlüğü)
+      if (operationType == 'SALE_REFUND') {
+        final refundId = body['refund_id'] as String?;
+        final saleId = body['sale_id'] as String?;
+        final rawTotalRefundAmount = body['total_refund_amount'];
+        final rawRefundItems = body['items'] as List?;
+        final rawTargetClientSeq = body['target_client_seq'];
+        if (rawTargetClientSeq != null && rawTargetClientSeq is! int) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_REFUND_REQUEST',
+              'message': 'target_client_seq tamsayı olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (body.containsKey('reason') &&
+            (body['reason'] is! String || (body['reason'] as String).trim().isEmpty)) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_REFUND_REQUEST',
+              'message': 'İade gerekçesi (reason) boş olamaz.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final reason = (body['reason'] as String?)?.trim() ?? 'İade';
+
+        if (refundId == null ||
+            refundId.trim().isEmpty ||
+            rawRefundItems == null ||
+            rawRefundItems.isEmpty) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_REFUND_REQUEST',
+              'message': 'refund_id ve en az bir kalem içeren items listesi zorunludur.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+
+        try {
+          final txResult = await writeQueue.enqueue(() async {
+            return await db.transaction(() async {
+              final txReplay = await _checkExistingReceiptInTx(
+                idempotencyKey: idempotencyKey,
+                operationType: 'SALE_REFUND',
+                incomingBody: body,
+                rawBody: bodyStr,
+              );
+              if (txReplay != null) {
+                return txReplay;
+              }
+
+              // BK-02.1 Karar 3: Katı sequence gap kontrolü
+              await _assertExpectedClientSeqInTx(deviceId, clientSeq);
+
+              final firstItemSaleId = rawRefundItems.first is Map
+                  ? (rawRefundItems.first as Map)['sale_id'] as String?
+                  : null;
+              final rawSaleId = saleId ?? firstItemSaleId;
+              final targetClientSeq = rawTargetClientSeq as int?;
+
+              // BK-02.1.1: Satış bulunamazsa 404 ERR_SALE_NOT_FOUND ile rollback yapılır
+              final origSale = await _resolveTargetSaleInTx(
+                deviceId: deviceId,
+                rawSaleId: rawSaleId,
+                targetClientSeq: targetClientSeq,
+              );
+              final effectiveSaleId = origSale.id;
+
+              if (origSale.status == 'CANCELLED') {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_CANCELLED',
+                  'İptal edilmiş satış ($effectiveSaleId) üzerinden iade yapılamaz.',
+                );
+              }
+              if (origSale.status == 'REFUNDED') {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_REFUNDED',
+                  'Tamamen iade edilmiş satış ($effectiveSaleId) üzerinden yeni iade yapılamaz.',
+                );
+              }
+
+              final saleItems = await (db.select(db.saleItems)
+                    ..where((i) => i.saleId.equals(effectiveSaleId)))
+                  .get();
+              if (saleItems.isEmpty) {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ITEMS_MISSING',
+                  'Satışa ($effectiveSaleId) ait kalem bulunamadı.',
+                );
+              }
+
+              final existingRefunds = await (db.select(db.refunds)
+                    ..where((r) => r.saleId.equals(effectiveSaleId)))
+                  .get();
+              final totalAlreadyRefunded = existingRefunds.fold<int>(
+                0,
+                (sum, r) => sum + r.totalRefundAmount,
+              );
+
+              final refundedQtyBySaleItemId = <String, int>{};
+              for (final ref in existingRefunds) {
+                final refItems = await (db.select(db.refundItems)
+                      ..where((ri) => ri.refundId.equals(ref.id)))
+                    .get();
+                for (final ri in refItems) {
+                  final matched = _matchSaleItem(
+                    saleItems,
+                    saleItemId: ri.saleItemId,
+                    productId: ri.productId,
+                  );
+                  if (matched != null) {
+                    refundedQtyBySaleItemId[matched.id] =
+                        (refundedQtyBySaleItemId[matched.id] ?? 0) + ri.quantity;
+                  }
+                }
+              }
+
+              if (totalAlreadyRefunded >= origSale.totalAmount ||
+                  saleItems.every(
+                    (si) => (refundedQtyBySaleItemId[si.id] ?? 0) >= si.quantity,
+                  )) {
+                throw _ValidationException(
+                  409,
+                  'ERR_SALE_ALREADY_REFUNDED',
+                  'Satış ($effectiveSaleId) zaten tamamen iade edilmiştir.',
+                );
+              }
+
+              var calculatedTotalRefundAmount = 0;
+              final validatedItems = <Map<String, dynamic>>[];
+
+              // Tüm iade kalemlerini herhangi bir DB yazımından ÖNCE doğrula
+              for (var i = 0; i < rawRefundItems.length; i++) {
+                final rawItem = rawRefundItems[i];
+                if (rawItem is! Map<String, dynamic>) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INVALID_REFUND_ITEM',
+                    'İade kalemi geçerli bir JSON nesnesi olmalıdır.',
+                  );
+                }
+
+                final pId = rawItem['product_id'] as String?;
+                final rawSaleItemId = rawItem['sale_item_id'] as String?;
+                final qty = rawItem['quantity'];
+                if (qty is! int || qty <= 0) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INVALID_REFUND_QUANTITY',
+                    'İade miktarı pozitif bir tamsayı (> 0) olmalıdır: $qty',
+                  );
+                }
+
+                final rawCondition = rawItem['product_condition'];
+                if (rawCondition != null &&
+                    rawCondition != 'SELLABLE' &&
+                    rawCondition != 'DAMAGED') {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INVALID_PRODUCT_CONDITION',
+                    'product_condition yalnızca SELLABLE veya DAMAGED olabilir: $rawCondition',
+                  );
+                }
+                final condition = (rawCondition as String?) ?? 'SELLABLE';
+
+                final matchedSaleItem = _matchSaleItem(
+                  saleItems,
+                  saleItemId: rawSaleItemId,
+                  productId: pId,
+                );
+                if (matchedSaleItem == null) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_REFUND_ITEM_NOT_IN_SALE',
+                    'İade edilmek istenen ürün ($pId) orijinal satış kalemlerinde bulunmuyor.',
+                  );
+                }
+
+                final alreadyRefundedQty = refundedQtyBySaleItemId[matchedSaleItem.id] ?? 0;
+                final maxReturnableQty = matchedSaleItem.quantity - alreadyRefundedQty;
+                if (qty > maxReturnableQty) {
+                  throw _ValidationException(
+                    409,
+                    'ERR_REFUND_EXCEEDS_SALE',
+                    'İade miktarı ($qty), kalan iade edilebilir miktarı ($maxReturnableQty) aşıyor (product_id=${matchedSaleItem.productId}).',
+                  );
+                }
+                refundedQtyBySaleItemId[matchedSaleItem.id] = alreadyRefundedQty + qty;
+
+                final effectiveUnitPrice = matchedSaleItem.unitPrice;
+                final providedUnitPrice = rawItem['unit_price'];
+                if (providedUnitPrice != null &&
+                    (providedUnitPrice is! int || providedUnitPrice != effectiveUnitPrice)) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_REFUND_UNIT_PRICE_MISMATCH',
+                    'İade birim fiyatı ($providedUnitPrice), satış anı snapshot birim fiyatıyla ($effectiveUnitPrice) eşleşmiyor.',
+                  );
+                }
+
+                const int maxSafeInt = 9223372036854775807;
+                if (effectiveUnitPrice > 0 && qty > (maxSafeInt - 500) ~/ effectiveUnitPrice) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INTEGER_OVERFLOW',
+                    'Birim fiyat ve iade miktarı çarpımı güvenli tamsayı sınırını aşıyor.',
+                  );
+                }
+
+                // Half-Up kuruş yuvarlama standardı (OD-01)
+                final expectedItemRefundAmount = ((effectiveUnitPrice * qty) + 500) ~/ 1000;
+                final providedRefundAmount = rawItem['refund_amount'];
+                if (providedRefundAmount != null &&
+                    (providedRefundAmount is! int ||
+                        providedRefundAmount != expectedItemRefundAmount)) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_REFUND_AMOUNT_MISMATCH',
+                    'Kalem iade tutarı ($providedRefundAmount), Half-Up beklenen tutarla ($expectedItemRefundAmount) eşleşmiyor.',
+                  );
+                }
+
+                if (calculatedTotalRefundAmount > maxSafeInt - expectedItemRefundAmount) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INTEGER_OVERFLOW',
+                    'Toplam iade tutarı güvenli tamsayı sınırını aşıyor.',
+                  );
+                }
+                calculatedTotalRefundAmount += expectedItemRefundAmount;
+
+                final product = await (db.select(db.products)
+                      ..where((p) => p.id.equals(matchedSaleItem.productId)))
+                    .getSingleOrNull();
+                if (product == null) {
+                  throw StateError(
+                    'İade kalemine ait ürün bulunamadı: ${matchedSaleItem.productId}',
+                  );
+                }
+
+                final num = product.conversionFactorNumerator;
+                final den = product.conversionFactorDenominator;
+                if (num <= 0 || den <= 0) {
+                  throw StateError('Geçersiz dönüşüm katsayısı ($num / $den): ${product.name}');
+                }
+                if (qty > maxSafeInt ~/ num) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_ARITHMETIC_OVERFLOW',
+                    'Birim dönüşümü çarpımında 64-bit tamsayı taşması riski: ${product.name}',
+                  );
+                }
+                if ((qty * num) % den != 0) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_UNIT_CONVERSION_PRECISION_LOSS',
+                    'İade miktarı ($qty) ürünün dönüşüm katsayısı ($num/$den) ile tam bölünemediği için stok hassasiyet kaybı oluştu: ${product.name}',
+                  );
+                }
+                final stockDelta = (qty * num) ~/ den;
+
+                validatedItems.add({
+                  'index': i,
+                  'saleItem': matchedSaleItem,
+                  'qty': qty,
+                  'unitPrice': effectiveUnitPrice,
+                  'refundAmount': expectedItemRefundAmount,
+                  'condition': condition,
+                  'product': product,
+                  'stockDelta': stockDelta,
+                });
+              }
+
+              if (rawTotalRefundAmount is! int || rawTotalRefundAmount <= 0) {
+                throw _ValidationException(
+                  400,
+                  'ERR_INVALID_REFUND_TOTAL',
+                  'total_refund_amount pozitif bir tamsayı (> 0) olmalıdır.',
+                );
+              }
+              final totalRefundAmount = rawTotalRefundAmount;
+
+              if (totalRefundAmount != calculatedTotalRefundAmount) {
+                throw _ValidationException(
+                  400,
+                  'ERR_REFUND_TOTAL_MISMATCH',
+                  'Toplam iade tutarı ($totalRefundAmount), kalem iade toplamlarıyla ($calculatedTotalRefundAmount) eşleşmiyor.',
+                );
+              }
+
+              if (totalAlreadyRefunded + totalRefundAmount > origSale.totalAmount) {
+                throw _ValidationException(
+                  409,
+                  'ERR_REFUND_EXCEEDS_SALE',
+                  'Kümülatif iade tutarı (${totalAlreadyRefunded + totalRefundAmount}), satış toplam tutarını (${origSale.totalAmount}) aşıyor.',
+                );
+              }
+
+              // Bütün doğrulamalar geçti — atomik yazımlar
+              final now = DateTime.now();
+              final updatedStocks = <String, int>{};
+              final runningStockByProductId = <String, int>{};
+              final maxSeqRow = await db.customSelect('SELECT COALESCE(MAX(server_seq), 0) as m FROM sales;').getSingle();
+              final nextServerSeq = (maxSeqRow.data['m'] as int) + 1;
+
+              await db.into(db.refunds).insert(
+                RefundsCompanion(
+                  id: Value(refundId.trim()),
+                  saleId: Value(effectiveSaleId),
+                  deviceId: Value(deviceId),
+                  clientSeq: Value(clientSeq),
+                  totalRefundAmount: Value(totalRefundAmount),
+                  paymentMethod: Value(origSale.paymentMethod),
+                  reason: Value(reason),
+                  createdAt: Value(now),
+                ),
+              );
+
+              for (final entry in validatedItems) {
+                final idx = entry['index'] as int;
+                final matchedSaleItem = entry['saleItem'] as SaleItem;
+                final qty = entry['qty'] as int;
+                final unitPrice = entry['unitPrice'] as int;
+                final itemRefundAmount = entry['refundAmount'] as int;
+                final condition = entry['condition'] as String;
+                final product = entry['product'] as Product;
+                final stockDelta = entry['stockDelta'] as int;
+
+                await db.into(db.refundItems).insert(
+                  RefundItemsCompanion(
+                    id: Value('refitem_${refundId.trim()}_${matchedSaleItem.productId}_${now.microsecondsSinceEpoch}_$idx'),
+                    refundId: Value(refundId.trim()),
+                    saleItemId: Value(matchedSaleItem.id),
+                    productId: Value(matchedSaleItem.productId),
+                    quantity: Value(qty),
+                    unitPrice: Value(unitPrice),
+                    refundAmount: Value(itemRefundAmount),
+                    productCondition: Value(condition),
+                    createdAt: Value(now),
+                  ),
+                );
+
+                if (condition == 'SELLABLE') {
+                  await db.into(db.stockMovements).insert(
+                        StockMovementsCompanion(
+                          id: Value('sm_ref_${refundId.trim()}_${product.id}_${now.microsecondsSinceEpoch}_$idx'),
+                          productId: Value(product.id),
+                          quantity: Value(stockDelta),
+                          unit: Value(product.stockUnit),
+                          movementType: const Value('MUSTERI_IADESI'),
+                          referenceId: Value(refundId.trim()),
+                        ),
+                      );
+
+                  final baseStock = runningStockByProductId[product.id] ?? product.stock;
+                  final newStock = baseStock + stockDelta;
+                  runningStockByProductId[product.id] = newStock;
+                  await (db.update(db.products)..where((p) => p.id.equals(product.id)))
+                      .write(ProductsCompanion(stock: Value(newStock)));
+                  updatedStocks[product.id] = newStock;
+                } else {
+                  await db.into(db.stockMovements).insert(
+                        StockMovementsCompanion(
+                          id: Value('sm_fire_${refundId.trim()}_${product.id}_${now.microsecondsSinceEpoch}_$idx'),
+                          productId: Value(product.id),
+                          quantity: Value(stockDelta),
+                          unit: Value(product.stockUnit),
+                          movementType: const Value('FIRE_KAYIP'),
+                          referenceId: Value(refundId.trim()),
+                        ),
+                      );
+                }
+              }
+
+              final allItemsFullyRefunded = saleItems.every(
+                (si) => (refundedQtyBySaleItemId[si.id] ?? 0) >= si.quantity,
+              );
+              final newStatus =
+                  (allItemsFullyRefunded || (totalAlreadyRefunded + totalRefundAmount) >= origSale.totalAmount)
+                      ? 'REFUNDED'
+                      : 'PARTIALLY_REFUNDED';
+
+              await (db.update(db.sales)..where((s) => s.id.equals(effectiveSaleId))).write(
+                SalesCompanion(
+                  serverSeq: Value(nextServerSeq),
+                  status: Value(newStatus),
+                ),
+              );
+
+              final committedAt = DateTime.now();
+              final responsePayload = {
+                'status': 'COMMITTED',
+                'operation_type': 'SALE_REFUND',
+                'refund_id': refundId.trim(),
+                'sale_id': effectiveSaleId,
+                'device_id': deviceId,
+                'client_seq': clientSeq,
+                'total_refund_amount': totalRefundAmount,
+                'reason': reason,
+                'updated_stocks': updatedStocks,
+                'committed_at': committedAt.toIso8601String(),
+                '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+                '__request_hash': incomingCanonicalHash,
+              };
+
+              final encoded = await _commitReceiptAndAdvanceHwmInTx(
+                operationId: operationId,
+                deviceId: deviceId,
+                idempotencyKey: idempotencyKey,
+                clientSeq: clientSeq,
+                operationType: 'SALE_REFUND',
+                canonicalHash: incomingCanonicalHash,
+                responsePayload: responsePayload,
+                committedAt: committedAt,
+              );
+
+              return _MutationTxResult(isReplay: false, bodyJson: encoded);
+            });
+          });
+
+          if (txResult.isReplay) {
+            return Response.ok(
+              txResult.bodyJson,
+              headers: {
+                'content-type': 'application/json',
+                'x-mms-idempotent-replay': 'true',
+              },
+            );
+          }
+
+          return Response(
+            201,
+            body: txResult.bodyJson,
+            headers: {'content-type': 'application/json'},
+          );
+        } on _IdempotencyConflictException catch (e) {
+          return _idempotencyConflictResponse(e.idempotencyKey);
+        } on _IdempotencyHashUnverifiableException catch (e) {
+          return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+        } on _SequenceGapException catch (e) {
+          return _sequenceGapResponse(e);
+        } on _ValidationException catch (e) {
+          return _validationErrorResponse(e);
+        } catch (e) {
+          stderr.writeln('[ERROR] Kısmi iade transaction hatası: $e');
+          return Response.internalServerError(
+            body: jsonEncode({
+              'error': 'TRANSACTION_FAILED',
+              'code': 'ERR_TRANSACTION_FAILED',
+              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $e',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      }
+
+      // D. FAZ 1.2 / 1.3: Normal Satış (SALE_CREATE)
       final rawTotalAmount = body['total_amount'];
       if (rawTotalAmount is! int || rawTotalAmount <= 0 || rawTotalAmount > 100000000000) {
         return Response(
@@ -989,44 +2945,7 @@ class SpikeServer {
         );
       }
       final items = rawItems;
-
-      final operationId = body['operation_id'] as String;
-      final idempotencyKey = '$deviceId:$clientSeq';
       final rawPaymentMethod = body['payment_method'];
-      final incomingHash = computeSaleRequestHash(body);
-
-      // A. Önce Idempotency kontrolü (Inbox defteri)
-      final existingOp = await (db.select(db.processedOperations)
-            ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
-          .getSingleOrNull();
-
-      if (existingOp != null) {
-        final cachedJson = jsonDecode(existingOp.resultPayload) as Map<String, dynamic>;
-        final cachedHash = cachedJson['__request_hash'] as String?;
-        final isMismatch = (cachedHash != null && cachedHash != incomingHash) ||
-            (cachedHash == null && cachedJson['total_amount'] != totalAmount);
-
-        if (isMismatch) {
-          return Response(
-            409,
-            body: jsonEncode({
-              'error': 'CONFLICT',
-              'code': 'ERR_IDEMPOTENCY_PAYLOAD_MISMATCH',
-              'message': 'Aynı idempotency key ($idempotencyKey) farklı bir işlem yükü ile tekrar gönderilemez.',
-              'idempotency_key': idempotencyKey,
-            }),
-            headers: {'content-type': 'application/json'},
-          );
-        }
-
-        return Response.ok(
-          existingOp.resultPayload,
-          headers: {
-            'content-type': 'application/json',
-            'x-mms-idempotent-replay': 'true',
-          },
-        );
-      }
 
       // Kanonik ödeme yöntemi doğrulaması:
       // Yeni satışlarda yalnız 'CASH' ve 'CARD' kabul edilir; eksik, null, metin dışı
@@ -1046,21 +2965,20 @@ class SpikeServer {
 
       // B. Yeni işlem: Tekil yazıcı kuyruğunda atomik transaction işlet
       try {
-        final result = await writeQueue.enqueue(() async {
+        final txResult = await writeQueue.enqueue(() async {
           return await db.transaction(() async {
-            final checkAgain = await (db.select(db.processedOperations)
-                  ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
-                .getSingleOrNull();
-            if (checkAgain != null) {
-              final checkJson = jsonDecode(checkAgain.resultPayload) as Map<String, dynamic>;
-              final checkHash = checkJson['__request_hash'] as String?;
-              final isMismatch = (checkHash != null && checkHash != incomingHash) ||
-                  (checkHash == null && checkJson['total_amount'] != totalAmount);
-              if (isMismatch) {
-                throw _IdempotencyConflictException(idempotencyKey);
-              }
-              return checkJson;
+            final txReplay = await _checkExistingReceiptInTx(
+              idempotencyKey: idempotencyKey,
+              operationType: 'SALE_CREATE',
+              incomingBody: body,
+              rawBody: bodyStr,
+            );
+            if (txReplay != null) {
+              return txReplay;
             }
+
+            // BK-02.1 Karar 3: Katı sequence gap kontrolü
+            await _assertExpectedClientSeqInTx(deviceId, clientSeq);
 
             int calculatedTotalAmount = 0;
             final itemValidations = <Map<String, dynamic>>[];
@@ -1204,6 +3122,8 @@ class SpikeServer {
             }
 
             final saleId = 'sale_${DateTime.now().microsecondsSinceEpoch}';
+            final maxSeqRow = await db.customSelect('SELECT COALESCE(MAX(server_seq), 0) as m FROM sales;').getSingle();
+            final nextServerSeq = (maxSeqRow.data['m'] as int) + 1;
 
             await db.into(db.sales).insert(
                   SalesCompanion(
@@ -1212,6 +3132,8 @@ class SpikeServer {
                     clientSeq: Value(clientSeq),
                     totalAmount: Value(totalAmount),
                     paymentMethod: Value(paymentMethod),
+                    serverSeq: Value(nextServerSeq),
+                    status: const Value('COMPLETED'),
                   ),
                 );
 
@@ -1261,47 +3183,57 @@ class SpikeServer {
               updatedStocks[pId] = newStock;
             }
 
+            final committedAt = DateTime.now();
             final responsePayload = {
               'status': 'COMMITTED',
+              'operation_type': 'SALE_CREATE',
               'sale_id': saleId,
               'device_id': deviceId,
               'client_seq': clientSeq,
               'total_amount': totalAmount,
               'updated_stocks': updatedStocks,
-              'committed_at': DateTime.now().toIso8601String(),
-              '__request_hash': incomingHash,
+              'committed_at': committedAt.toIso8601String(),
+              '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+              '__request_hash': incomingCanonicalHash,
             };
 
-            await db.into(db.processedOperations).insert(
-                  ProcessedOperationsCompanion(
-                    operationId: Value(operationId),
-                    deviceId: Value(deviceId),
-                    idempotencyKey: Value(idempotencyKey),
-                    resultPayload: Value(jsonEncode(responsePayload)),
-                  ),
-                );
+            final encoded = await _commitReceiptAndAdvanceHwmInTx(
+              operationId: operationId,
+              deviceId: deviceId,
+              idempotencyKey: idempotencyKey,
+              clientSeq: clientSeq,
+              operationType: 'SALE_CREATE',
+              canonicalHash: incomingCanonicalHash,
+              responsePayload: responsePayload,
+              committedAt: committedAt,
+            );
 
-            return responsePayload;
+            return _MutationTxResult(isReplay: false, bodyJson: encoded);
           });
         });
+
+        if (txResult.isReplay) {
+          return Response.ok(
+            txResult.bodyJson,
+            headers: {
+              'content-type': 'application/json',
+              'x-mms-idempotent-replay': 'true',
+            },
+          );
+        }
 
         // S5A-2: Commit-before-ACK (Drift SQLite transaction tamamlandıktan sonra 201 Created döner)
         return Response(
           201,
-          body: jsonEncode(result),
+          body: txResult.bodyJson,
           headers: {'content-type': 'application/json'},
         );
       } on _IdempotencyConflictException catch (e) {
-        return Response(
-          409,
-          body: jsonEncode({
-            'error': 'CONFLICT',
-            'code': 'ERR_IDEMPOTENCY_PAYLOAD_MISMATCH',
-            'message': 'Aynı idempotency key (${e.idempotencyKey}) farklı bir işlem yükü ile tekrar gönderilemez.',
-            'idempotency_key': e.idempotencyKey,
-          }),
-          headers: {'content-type': 'application/json'},
-        );
+        return _idempotencyConflictResponse(e.idempotencyKey);
+      } on _IdempotencyHashUnverifiableException catch (e) {
+        return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+      } on _SequenceGapException catch (e) {
+        return _sequenceGapResponse(e);
       } on _ValidationException catch (e) {
         return Response(
           e.statusCode,
@@ -1325,8 +3257,239 @@ class SpikeServer {
       }
     });
 
+    // 5.1. BK-02.1: Authenticated Cihaz Sequence / High-Water Mark Durumu (Salt-Okunur)
+    _router.get('/api/v1/sync/device-state', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Cihaz senkronizasyon durumu için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final snapshot = await DeviceSequenceInspector.inspectDevice(db, deviceId);
+      final hwm = snapshot.hwmSummary;
+
+      return Response.ok(
+        jsonEncode({
+          'device_id': deviceId,
+          'tenant_id': tenantId,
+          'store_id': storeId,
+          'hub_id': hubId,
+          'high_water_mark_seq': hwm.contiguousHwm,
+          'max_seen_client_seq': hwm.maxSeenClientSeq,
+          'expected_next_client_seq': hwm.expectedNextClientSeq,
+          'committed_operation_count': hwm.committedOperationCount,
+          'has_sequence_gaps': hwm.hasSequenceGaps,
+          'missing_seq_sample': hwm.missingSeqSample,
+          'unverifiable_receipt_count': snapshot.unverifiableReceiptCount,
+          'latest_server_sale_seq': snapshot.latestServerSaleSeq,
+          'last_committed_at': snapshot.lastCommittedAt?.toIso8601String(),
+          'server_time': DateTime.now().toUtc().toIso8601String(),
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
+    // 5.2. BK-02.1: Authenticated İşlem Makbuzları Sorgulama (Salt-Okunur, Cihaz İzolasyonlu)
+    _router.post('/api/v1/sync/receipts', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Makbuz sorgulama için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final bodyStr = await req.readAsString();
+      final Map<String, dynamic> body;
+      try {
+        final decoded = jsonDecode(bodyStr);
+        if (decoded is! Map<String, dynamic>) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_JSON',
+              'message': 'İstek gövdesi geçerli bir JSON nesnesi olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        body = decoded;
+      } catch (_) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'Geçersiz JSON formatı.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      // İsteğe bağlı olarak gövdede device_id belirtilmişse kimliği doğrulanmış cihazla uyuşması zorunludur
+      final requestedDeviceId = body['device_id'];
+      if (requestedDeviceId != null && requestedDeviceId.toString().trim() != deviceId) {
+        return Response(
+          403,
+          body: jsonEncode({
+            'error': 'FORBIDDEN',
+            'code': 'ERR_DEVICE_ID_MISMATCH',
+            'message': 'Başka bir cihazın işlem makbuzları sorgulanamaz.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final rawClientSeqs = body['client_seqs'];
+      if (rawClientSeqs is! List) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CLIENT_SEQS',
+            'message': 'client_seqs alanı pozitif tamsayılardan oluşan bir liste olmalıdır.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (rawClientSeqs.length > 500) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_RECEIPTS_BATCH_TOO_LARGE',
+            'message': 'Tek istekte en fazla 500 client_seq makbuzu sorgulanabilir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final uniqueSeqs = <int>[];
+      final seenSeqs = <int>{};
+      for (final rawSeq in rawClientSeqs) {
+        if (rawSeq is! int || rawSeq <= 0) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_CLIENT_SEQS',
+              'message': 'client_seqs listesindeki tüm değerler pozitif tamsayı (> 0) olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        if (seenSeqs.add(rawSeq)) {
+          uniqueSeqs.add(rawSeq);
+        }
+      }
+
+      final snapshot = await DeviceSequenceInspector.inspectDevice(db, deviceId);
+      final hwm = snapshot.hwmSummary;
+
+      final receipts = <Map<String, dynamic>>[];
+      if (uniqueSeqs.isNotEmpty) {
+        final uniqueKeys = uniqueSeqs.map((s) => '$deviceId:$s').toList();
+        final matchedOps = await (db.select(db.processedOperations)
+              ..where((o) =>
+                  o.deviceId.equals(deviceId) &
+                  (o.clientSeq.isIn(uniqueSeqs) | o.idempotencyKey.isIn(uniqueKeys))))
+            .get();
+
+        final bySeq = <int, ProcessedOperation>{};
+        for (final op in matchedOps) {
+          if (op.clientSeq != null && op.clientSeq! > 0) {
+            bySeq[op.clientSeq!] = op;
+          } else {
+            final sepIdx = op.idempotencyKey.lastIndexOf(':');
+            if (sepIdx > 0 && sepIdx < op.idempotencyKey.length - 1) {
+              final parsed = int.tryParse(op.idempotencyKey.substring(sepIdx + 1));
+              if (parsed != null && parsed > 0) {
+                bySeq.putIfAbsent(parsed, () => op);
+              }
+            }
+          }
+        }
+
+        for (final seq in uniqueSeqs) {
+          final op = bySeq[seq];
+          if (op == null) {
+            receipts.add({
+              'client_seq': seq,
+              'status': 'NOT_FOUND',
+              'is_hash_verifiable': false,
+            });
+            continue;
+          }
+
+          final hasValidHash = CanonicalPayloadHasher.isValidSha256Hex(op.requestHash);
+          final hasVersion = op.hashVersion != null && op.hashVersion!.trim().isNotEmpty;
+          final verifiable = hasValidHash && hasVersion;
+
+          if (!verifiable) {
+            receipts.add({
+              'client_seq': seq,
+              'status': 'UNVERIFIABLE_LEGACY',
+              'operation_id': op.operationId,
+              'operation_type': op.operationType,
+              'request_hash': null,
+              'hash_version': null,
+              'is_hash_verifiable': false,
+              'processed_at': op.processedAt.toIso8601String(),
+            });
+          } else {
+            receipts.add({
+              'client_seq': seq,
+              'status': 'FOUND',
+              'operation_id': op.operationId,
+              'operation_type': op.operationType,
+              'request_hash': op.requestHash,
+              'hash_version': op.hashVersion,
+              'is_hash_verifiable': true,
+              'processed_at': op.processedAt.toIso8601String(),
+            });
+          }
+        }
+      }
+
+      return Response.ok(
+        jsonEncode({
+          'device_id': deviceId,
+          'tenant_id': tenantId,
+          'store_id': storeId,
+          'hub_id': hubId,
+          'high_water_mark_seq': hwm.contiguousHwm,
+          'max_seen_client_seq': hwm.maxSeenClientSeq,
+          'expected_next_client_seq': hwm.expectedNextClientSeq,
+          'has_sequence_gaps': hwm.hasSequenceGaps,
+          'receipts': receipts,
+          'server_time': DateTime.now().toUtc().toIso8601String(),
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
     // 6. Canlı Snapshot / Yedekleme Uç Noktası (VACUUM INTO - Hardened & Çakışma Korumalı)
     _router.post('/api/v1/backup/snapshot', (Request req) async {
+      // SEC-SNAP (Faz 7B): Bu uç ŞİFRESİZ bir merkezi DB kopyası (cihaz token hash/salt
+      // değerleri dahil) üretir. Kasa cihazı token'ı ile erişilemez; yalnızca loopback +
+      // yapılandırılmış ADMIN_SECRET (Owner) ile çağrılabilir. Rutin yedekler için şifreli
+      // `/api/v1/admin/backup` ve zamanlanmış yedekleme kullanılır.
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: "Şifresiz bakım snapshot'ı");
+      if (adminDenied != null) return adminDenied;
+
       final bodyStr = await req.readAsString();
       Map<String, dynamic> body = {};
       if (bodyStr.isNotEmpty) {
@@ -1356,45 +3519,45 @@ class SpikeServer {
 
       // Güvenlik Kuralı: İstemcinin verdiği keyfi dosya yolu KESİNLİKLE kabul edilmez.
       // Dosya yolu sunucu tarafında sabit ve korumalı dizinde üretilir.
-      final targetDir = Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
-      if (!targetDir.existsSync()) {
-        targetDir.createSync(recursive: true);
-      }
+      // Not: /backup/snapshot eşzamanlı isteklerde writeQueue üzerinden sıralanır ve
+      // benzersiz nonce dosya adı üretir; restore sırasında admissionGate + pauseForMaintenance ile engellenir.
+      final targetDir = _backupTargetDir;
+      try {
+        if (!targetDir.existsSync()) {
+          targetDir.createSync(recursive: true);
+        }
+        final safeBackupPath = _generateUniqueBackupPath(targetDir);
 
-      // Eşzamanlı isteklerde çakışmayı ve üzerine yazmayı önleyen benzersiz dosya yolu
-      final safeBackupPath = _generateUniqueBackupPath(targetDir);
+        await writeQueue.enqueue(() async {
+          final escapedPath = safeBackupPath.replaceAll("'", "''");
+          await db.customStatement("VACUUM INTO '$escapedPath';");
+        });
 
-      await writeQueue.enqueue(() async {
-        final escapedPath = safeBackupPath.replaceAll("'", "''");
-        await db.customStatement("VACUUM INTO '$escapedPath';");
-      });
-
-      return Response.ok(
-        jsonEncode({
-          'status': 'SUCCESS',
-          'backup_path': safeBackupPath,
-          'timestamp': DateTime.now().toIso8601String(),
-        }),
-        headers: {'content-type': 'application/json'},
-      );
-    });
-
-    // 6.1. S5A-4: Merkezi Veritabanı Şifreli Yedekleme (Encrypted Backup with Manifest)
-    _router.post('/api/v1/admin/backup', (Request req) async {
-      final providedAdminSecret = req.headers['x-mms-admin-secret'] ?? '';
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'] ?? 'adm_sec';
-
-      if (providedAdminSecret.isEmpty ||
-          !_constantTimeEquals(utf8.encode(providedAdminSecret), utf8.encode(effectiveAdminSecret))) {
-        return Response.forbidden(
+        return Response.ok(
           jsonEncode({
-            'error': 'FORBIDDEN',
-            'code': 'ERR_INVALID_ADMIN_SECRET',
-            'message': 'Yedekleme işlemi için geçerli bir admin secret gereklidir.',
+            'status': 'SUCCESS',
+            'backup_path': safeBackupPath,
+            'timestamp': DateTime.now().toIso8601String(),
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } catch (e) {
+        return Response.internalServerError(
+          body: jsonEncode({
+            'error': 'SNAPSHOT_FAILED',
+            'message': 'Anlık görüntü yedeklemesi başarısız oldu.',
           }),
           headers: {'content-type': 'application/json'},
         );
       }
+    });
+
+    // 6.1. S5A-4: Merkezi Veritabanı Şifreli Yedekleme (Encrypted Backup with Manifest)
+    _router.post('/api/v1/admin/backup', (Request req) async {
+      // SEC: Sabit varsayılan admin secret fallback'i kaldırıldı. Yalnızca loopback + yapılandırılmış
+      // ADMIN_SECRET ile erişilir; yapılandırılmamışsa fail-closed 503 döner.
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: 'Yedekleme/geri yükleme yönetimi');
+      if (adminDenied != null) return adminDenied;
 
       final bodyStr = await req.readAsString();
       Map<String, dynamic> body = {};
@@ -1404,30 +3567,12 @@ class SpikeServer {
         } catch (_) {}
       }
 
-      final targetDir = Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
-      final storage = LocalStorageProvider(targetDir);
       final backupPassword = body['backup_password'] as String? ?? pepperManager.pepper;
       final isMonthly = body['is_monthly_archive'] as bool? ?? false;
 
-      final targetLiveDb = dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
-
       try {
-        final result = await DatabaseBackupEngine.createBackup(
-          liveDbFile: targetLiveDb,
-          executeVacuumInto: (snapPath) async {
-            await writeQueue.enqueue(() async {
-              final escaped = snapPath.replaceAll("'", "''");
-              await db.customStatement("VACUUM INTO '$escaped';");
-            });
-          },
-          deviceId: 'SERVER_HUB',
-          tenantId: 'tenant_default',
-          storeId: 'store_main',
-          databaseType: DatabaseType.centralMaster,
-          schemaVersion: 1,
-          appVersion: '1.0.0',
+        final result = await createEncryptedHubBackup(
           backupPassword: backupPassword,
-          storageProvider: storage,
           isMonthlyArchive: isMonthly,
         );
 
@@ -1437,6 +3582,17 @@ class SpikeServer {
             'backup_id': result.backupId,
             'manifest': result.manifest.toJson(),
             'created_at': result.createdAt.toIso8601String(),
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } on BackupException catch (e) {
+        final status = e.code == BackupOperationLock.busyErrorCode ? 409 : 500;
+        return Response(
+          status,
+          body: jsonEncode({
+            'error': e.code == BackupOperationLock.busyErrorCode ? 'BACKUP_BUSY' : 'BACKUP_FAILED',
+            'code': e.code,
+            'message': e.message,
           }),
           headers: {'content-type': 'application/json'},
         );
@@ -1453,23 +3609,12 @@ class SpikeServer {
 
     // 6.2. S5A-4: Yedekleri Listeleme
     _router.get('/api/v1/admin/backups', (Request req) async {
-      final providedAdminSecret = req.headers['x-mms-admin-secret'] ?? '';
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'] ?? 'adm_sec';
+      // SEC: Sabit varsayılan admin secret fallback'i kaldırıldı. Yalnızca loopback + yapılandırılmış
+      // ADMIN_SECRET ile erişilir; yapılandırılmamışsa fail-closed 503 döner.
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: 'Yedekleme/geri yükleme yönetimi');
+      if (adminDenied != null) return adminDenied;
 
-      if (providedAdminSecret.isEmpty ||
-          !_constantTimeEquals(utf8.encode(providedAdminSecret), utf8.encode(effectiveAdminSecret))) {
-        return Response.forbidden(
-          jsonEncode({
-            'error': 'FORBIDDEN',
-            'code': 'ERR_INVALID_ADMIN_SECRET',
-            'message': 'Admin secret gereklidir.',
-          }),
-          headers: {'content-type': 'application/json'},
-        );
-      }
-
-      final targetDir = Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
-      final storage = LocalStorageProvider(targetDir);
+      final storage = LocalStorageProvider(_backupTargetDir);
       final backups = await storage.listBackups();
 
       return Response.ok(
@@ -1484,22 +3629,37 @@ class SpikeServer {
 
     // 6.3. S5A-4: Kontrollü ve Koruyucu Yedekli Geri Yükleme (Restore)
     _router.post('/api/v1/admin/restore', (Request req) async {
-      final providedAdminSecret = req.headers['x-mms-admin-secret'] ?? '';
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'] ?? 'adm_sec';
+      // SEC: Sabit varsayılan admin secret fallback'i kaldırıldı. Yalnızca loopback + yapılandırılmış
+      // ADMIN_SECRET ile erişilir; yapılandırılmamışsa fail-closed 503 döner.
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: 'Yedekleme/geri yükleme yönetimi');
+      if (adminDenied != null) return adminDenied;
 
-      if (providedAdminSecret.isEmpty ||
-          !_constantTimeEquals(utf8.encode(providedAdminSecret), utf8.encode(effectiveAdminSecret))) {
-        return Response.forbidden(
-          jsonEncode({
-            'error': 'FORBIDDEN',
-            'code': 'ERR_INVALID_ADMIN_SECRET',
-            'message': 'Geri yükleme işlemi için geçerli bir admin secret gereklidir.',
+      final Map<String, dynamic> body;
+      try {
+        final decoded = jsonDecode(await req.readAsString());
+        if (decoded is! Map<String, dynamic>) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_JSON',
+              'message': 'İstek gövdesi geçerli bir JSON nesnesi olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        body = decoded;
+      } on FormatException {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'İstek gövdesi geçerli JSON biçiminde olmalıdır.',
           }),
           headers: {'content-type': 'application/json'},
         );
       }
-
-      final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
       final backupId = body['backup_id'] as String?;
       final backupPassword = body['backup_password'] as String? ?? pepperManager.pepper;
 
@@ -1511,56 +3671,78 @@ class SpikeServer {
         );
       }
 
-      final targetDir = Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
-      final storage = LocalStorageProvider(targetDir);
-      final safetyDir = Directory(p.join(targetDir.path, 'safety_snapshots'));
+      final storage = LocalStorageProvider(_backupTargetDir);
+      final safetyDir = Directory(p.join(_backupTargetDir.path, 'safety_snapshots'));
       final targetLiveDb = dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
 
       try {
-        final result = await DatabaseBackupEngine.restoreBackup(
-          backupId: backupId,
-          liveDbFile: targetLiveDb,
-          backupPassword: backupPassword,
-          storageProvider: storage,
-          expectedDeviceId: 'SERVER_HUB',
-          expectedTenantId: 'tenant_default',
-          expectedDatabaseType: DatabaseType.centralMaster,
-          currentSchemaVersion: 1,
-          minSupportedSchemaVersion: 1,
-          pauseLiveDb: () async {
-            // 1. Yeni API işlemlerini geçici olarak durdur ve devam edenlerin tamamlanmasını bekle
-            await lifecycle.admissionGate.pauseForMaintenance(allowedRemaining: 1);
-            // 2. Devam eden yazma kuyruğu işlerinin bitmesini bekle
-            await writeQueue.pauseForMaintenance();
-            // 3. SQLite WAL checkpoint yap ve bağlantıyı güvenle kapat
-            try {
-              await db.checkpointWal(mode: 'TRUNCATE');
-            } catch (_) {}
-            await db.close();
-          },
-          resumeLiveDb: () async {
-            // 4. Veritabanı bağlantısını yeniden aç
-            this.db = SpikeDatabase(targetLiveDb);
-            lifecycle.db = this.db;
-            // 5. Yazma kuyruğunu ve API kabul kapısını yeniden aç
-            writeQueue.resumeAfterMaintenance();
-            lifecycle.admissionGate.resumeAfterMaintenance();
-          },
-          safetyBackupDir: safetyDir,
+        final result = await _backupOperationLock.synchronized(
+          BackupOperationKind.restore,
+          () => DatabaseBackupEngine.restoreBackup(
+            backupId: backupId,
+            liveDbFile: targetLiveDb,
+            backupPassword: backupPassword,
+            storageProvider: storage,
+            expectedDeviceId: 'SERVER_HUB',
+            expectedTenantId: tenantId,
+            expectedStoreId: storeId,
+            expectedDatabaseType: DatabaseType.centralMaster,
+            currentSchemaVersion: db.schemaVersion,
+            minSupportedSchemaVersion: 1,
+            applySchemaMigration: (File stagingFile, int fromVersion, int toVersion) async {
+              final stagingDb = SpikeDatabase(stagingFile);
+              try {
+                // Drift onUpgrade / beforeOpen staging DB üzerinde çalışır ve v2'ye yükseltir.
+                await stagingDb.customSelect('SELECT COUNT(*) FROM processed_operations;').getSingle();
+                final cp = await stagingDb.checkpointWal(mode: 'TRUNCATE');
+                if (!cp.isSuccess) {
+                  throw StateError('Staging DB WAL checkpoint tamamlanamadı: $cp');
+                }
+                await stagingDb.customStatement('PRAGMA journal_mode = DELETE;');
+              } finally {
+                await stagingDb.close();
+              }
+            },
+            pauseLiveDb: () async {
+              // 1. Yeni API işlemlerini geçici olarak durdur ve devam edenlerin tamamlanmasını bekle
+              await lifecycle.admissionGate.pauseForMaintenance(allowedRemaining: 1);
+              // 2. Devam eden yazma kuyruğu işlerinin bitmesini bekle
+              await writeQueue.pauseForMaintenance();
+              // 3. SQLite WAL checkpoint yap ve bağlantıyı güvenle kapat
+              try {
+                await db.checkpointWal(mode: 'TRUNCATE');
+              } catch (_) {}
+              await db.close();
+            },
+            resumeLiveDb: () async {
+              // 4. Veritabanı bağlantısını yeniden aç
+              this.db = SpikeDatabase(targetLiveDb);
+              lifecycle.db = this.db;
+              // 5. Yazma kuyruğunu ve API kabul kapısını yeniden aç
+              writeQueue.resumeAfterMaintenance();
+              lifecycle.admissionGate.resumeAfterMaintenance();
+            },
+            safetyBackupDir: safetyDir,
+          ),
         );
+
+        await _verifyOrInitializeHubIdentity();
 
         return Response.ok(
           jsonEncode({
             'status': 'RESTORED',
             'backup_id': result.backupId,
             'safety_backup_path': result.safetyBackupPath,
+            // SEC-SAFETY: true → güvenlik kopyası DPAPI pepper ile şifreli .mmsbak.
+            'safety_backup_encrypted': result.safetyBackupEncrypted,
             'restored_at': result.restoredAt.toIso8601String(),
           }),
           headers: {'content-type': 'application/json'},
         );
       } on BackupException catch (e) {
+        final status = e.code == BackupOperationLock.busyErrorCode ? 409 : 400;
         return Response(
-          400,
+          status,
           body: jsonEncode({
             'error': 'RESTORE_FAILED',
             'code': e.code,
@@ -1579,35 +3761,60 @@ class SpikeServer {
       }
     });
 
+    // 6.3.1 Faz 3: Zamanlanmış yedek durumu ve geçmişi (Owner / loopback + admin)
+    _router.get('/api/v1/admin/backup/status', (Request req) async {
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: 'Yedekleme durumu');
+      if (adminDenied != null) return adminDenied;
+      final policy = backupSchedule ?? BackupSchedulePolicy.disabled;
+      final state = await BackupScheduleStateStore(backupScheduleStateFile).load();
+      _backupScheduleState = state;
+      return Response.ok(
+        jsonEncode({
+          'status': 'SUCCESS',
+          'policy': policy.toJson(),
+          'state': state.toJson(),
+          'next_due_at': policy.nextDueAt(state)?.toUtc().toIso8601String(),
+          'overdue': policy.isOverdue(state: state, now: DateTime.now().toUtc()),
+          'backup_dir': _backupTargetDir.path,
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    });
+
     // 6.4. S5A-4: Saklama Süresi Temizliği (Retention Prune)
     _router.post('/api/v1/admin/backup/prune', (Request req) async {
-      final providedAdminSecret = req.headers['x-mms-admin-secret'] ?? '';
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'] ?? 'adm_sec';
+      // SEC: Sabit varsayılan admin secret fallback'i kaldırıldı. Yalnızca loopback + yapılandırılmış
+      // ADMIN_SECRET ile erişilir; yapılandırılmamışsa fail-closed 503 döner.
+      final adminDenied = _verifyLoopbackAndAdmin(req, actionName: 'Yedekleme/geri yükleme yönetimi');
+      if (adminDenied != null) return adminDenied;
 
-      if (providedAdminSecret.isEmpty ||
-          !_constantTimeEquals(utf8.encode(providedAdminSecret), utf8.encode(effectiveAdminSecret))) {
-        return Response.forbidden(
+      final storage = LocalStorageProvider(_backupTargetDir);
+      try {
+        final pruned = await _backupOperationLock.synchronized(
+          BackupOperationKind.backup,
+          () => const RetentionPolicyManager().executePruning(storage),
+        );
+
+        return Response.ok(
           jsonEncode({
-            'error': 'FORBIDDEN',
-            'code': 'ERR_INVALID_ADMIN_SECRET',
-            'message': 'Admin secret gereklidir.',
+            'status': 'PRUNED',
+            'count': pruned.length,
+            'pruned_backup_ids': pruned,
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } on BackupException catch (e) {
+        final status = e.code == BackupOperationLock.busyErrorCode ? 409 : 500;
+        return Response(
+          status,
+          body: jsonEncode({
+            'error': e.code == BackupOperationLock.busyErrorCode ? 'BACKUP_BUSY' : 'PRUNE_FAILED',
+            'code': e.code,
+            'message': e.message,
           }),
           headers: {'content-type': 'application/json'},
         );
       }
-
-      final targetDir = Directory(backupDirectory ?? p.join(Directory.current.path, 'backups'));
-      final storage = LocalStorageProvider(targetDir);
-      final pruned = await const RetentionPolicyManager().executePruning(storage);
-
-      return Response.ok(
-        jsonEncode({
-          'status': 'PRUNED',
-          'count': pruned.length,
-          'pruned_backup_ids': pruned,
-        }),
-        headers: {'content-type': 'application/json'},
-      );
     });
 
     // 7. Kuyruk Metrikleri
@@ -1647,7 +3854,7 @@ class SpikeServer {
       }
 
       // B. Güvenli Admin Secret Yapılandırma Kontrolü
-      final effectiveAdminSecret = adminSecret ?? Platform.environment['ADMIN_SECRET'];
+      final effectiveAdminSecret = _effectiveAdminSecret;
       if (effectiveAdminSecret == null || effectiveAdminSecret.isEmpty) {
         return Response(
           503,
@@ -1709,18 +3916,23 @@ class SpikeServer {
         .addMiddleware(createSecureCorsMiddleware())
         .addMiddleware(createBodyLimitMiddleware(maxBytes: 2 * 1024 * 1024))
         .addMiddleware(createAuthMiddleware(
-          db: db,
+          dbProvider: () => db,
           isDraining: () => writeQueue.isDraining || !lifecycle.admissionGate.isOpen,
           pepperManager: pepperManager,
           writeQueue: writeQueue,
           requireTls: requireTls,
+          expectedTenantId: tenantId,
+          expectedStoreId: storeId,
+          requireTenantStoreHeaders: requireTenantStoreHeaders,
           publicPaths: [
             '/health',
+            '/api/v1/backup/snapshot', // SEC-SNAP: cihaz token'ı yerine loopback + admin secret
             '/api/v1/admin/shutdown',
             '/api/v1/admin/backup',
             '/api/v1/admin/backups',
             '/api/v1/admin/restore',
             '/api/v1/admin/backup/prune',
+            '/api/v1/admin/backup/status',
             '/api/v1/devices/revoke',
             '/api/v1/pairing/session',
             '/api/v1/pairing/requests',
@@ -1742,7 +3954,12 @@ class SpikeServer {
     InternetAddress? address,
     int port = 8080,
     Duration cleanupInterval = const Duration(seconds: 15),
+    bool enableDiscovery = true,
+    int discoveryPort = HubDiscoveryResponder.defaultDiscoveryPort,
   }) async {
+    // BK-02.1: Pilot tek-tenant / tek-store kimlik doğrulaması ve başlangıç mührü
+    await _verifyOrInitializeHubIdentity();
+
     // S-4: Startup reconcile - sunucu açılışında onaylanmamış yarım kalan cihazları temizle
     await PairingDeliveryBuffer.startupReconcile(db: db, writeQueue: writeQueue);
 
@@ -1754,6 +3971,24 @@ class SpikeServer {
       securityContext: securityContext,
     );
     lifecycle.attachServer(_httpServer!);
+
+    // Faz 1.1: UDP Discovery dinleyicisini başlat
+    if (enableDiscovery) {
+      try {
+        _discoveryResponder = HubDiscoveryResponder(
+          httpPort: port,
+          discoveryPort: discoveryPort,
+          hubId: hubId,
+          bindAddress: address,
+        );
+        await _discoveryResponder!.start();
+      } catch (e) {
+        print('[WARN] UDP Discovery başlatılamadı: $e');
+      }
+    }
+
+    // Faz 3: Zamanlanmış şifreli Hub yedeği (yedek hatası servisi durdurmaz)
+    await _startBackupScheduler();
 
     // FINDING-2: Periyodik teslimat zaman aşımı temizleyicisi (15-30 sn)
     _pairingCleanupTimer?.cancel();
@@ -1774,25 +4009,149 @@ class SpikeServer {
   Future<void> stop() async {
     _pairingCleanupTimer?.cancel();
     _pairingCleanupTimer = null;
+    // Devam eden zamanlanmış yedek bitmeden DB kapatılmaz.
+    await _backupScheduler?.stop();
+    _backupScheduler = null;
+    await _discoveryResponder?.stop();
+    _discoveryResponder = null;
     await lifecycle.shutdown();
   }
 }
 
-void main(List<String> args) async {
-  configureSqliteNative();
+class HubStartupArgException implements Exception {
+  final int exitCode;
+  final String message;
 
-  int port = int.tryParse(Platform.environment['PORT'] ?? '8080') ?? 8080;
-  String dbPath = Platform.environment['DB_PATH'] ?? 'spike_master.db';
-  String? backupDir = Platform.environment['BACKUP_DIR'];
-  String? adminSecret = Platform.environment['ADMIN_SECRET'];
-  String? pepperPath = Platform.environment['PEPPER_FILE'];
-  String? certPath = Platform.environment['TLS_CERT'];
-  String? keyPath = Platform.environment['TLS_KEY'];
-  bool enableTls = Platform.environment['ENABLE_TLS'] == 'true';
+  const HubStartupArgException(this.exitCode, this.message);
+
+  @override
+  String toString() => 'HubStartupArgException($exitCode): $message';
+}
+
+class ResolvedHubStartupConfig {
+  final String? environmentName;
+  final int port;
+  final int discoveryPort;
+  final bool enableDiscovery;
+  final String dbPath;
+  final String? backupDir;
+  final String? adminSecret;
+  final String? pepperPath;
+  final String? certPath;
+  final String? keyPath;
+  final String? caCertPath;
+  final bool enableTls;
+  final String tenantId;
+  final String storeId;
+  final String hubId;
+  final bool requireTenantStoreHeaders;
+  final BackupSchedulePolicy backupSchedule;
+  final bool loadedFromConfigFile;
+
+  const ResolvedHubStartupConfig({
+    this.environmentName,
+    required this.port,
+    required this.discoveryPort,
+    required this.enableDiscovery,
+    required this.dbPath,
+    this.backupDir,
+    this.adminSecret,
+    this.pepperPath,
+    this.certPath,
+    this.keyPath,
+    this.caCertPath,
+    required this.enableTls,
+    required this.tenantId,
+    required this.storeId,
+    required this.hubId,
+    required this.requireTenantStoreHeaders,
+    required this.backupSchedule,
+    required this.loadedFromConfigFile,
+  });
+}
+
+/// REL-01: Başlangıç argümanlarını ve (yalnızca `--config=` verilmemişse) ortam
+/// değişkenlerini çözümler. `--config=` verildiğinde `hub_config.json` TEK kaynak
+/// olarak kullanılır; hiçbir ortam değişkeni (ör. `ROOT_CA_CERT_FILE`) sızmaz.
+ResolvedHubStartupConfig resolveHubStartupConfig(
+  List<String> args, {
+  Map<String, String>? environment,
+}) {
+  final env = environment ?? Platform.environment;
+
+  // REL-01: --config verilirse TEK yapılandırma kaynağıdır. Ortam değişkenleri ve
+  // diğer yapılandırma bayrakları birlikte kullanılamaz (çelişen değer riski).
+  final configArg = args.where((a) => a.startsWith('--config=')).toList();
+  if (configArg.isNotEmpty) {
+    final otherFlags = args.where((a) => !a.startsWith('--config=')).toList();
+    if (configArg.length > 1 || otherFlags.isNotEmpty) {
+      throw HubStartupArgException(
+        64,
+        '[REL-01] --config yalnızca tek başına kullanılabilir; ek bayraklar: ${otherFlags.join(' ')}',
+      );
+    }
+    final HubConfig cfg;
+    try {
+      cfg = HubConfig.load(
+        File(configArg.single.substring('--config='.length).replaceAll('"', '')),
+      );
+    } on HubConfigException catch (e) {
+      throw HubStartupArgException(
+        78,
+        '[REL-01] Hub yapılandırması geçersiz: ${e.message}',
+      );
+    }
+    return ResolvedHubStartupConfig(
+      environmentName: cfg.environment,
+      port: cfg.port,
+      discoveryPort: cfg.discoveryPort,
+      enableDiscovery: cfg.enableDiscovery,
+      dbPath: cfg.dbPath,
+      backupDir: cfg.backupDir,
+      adminSecret: cfg.readAdminSecret(),
+      pepperPath: cfg.pepperPath,
+      certPath: cfg.certPath,
+      keyPath: cfg.keyPath,
+      caCertPath: cfg.caCertPath,
+      enableTls: cfg.enableTls,
+      tenantId: cfg.tenantId,
+      storeId: cfg.storeId,
+      hubId: cfg.hubId,
+      requireTenantStoreHeaders: cfg.requireTenantStoreHeaders,
+      backupSchedule: cfg.backupSchedule,
+      loadedFromConfigFile: true,
+    );
+  }
+
+  int port = int.tryParse(env['PORT'] ?? '8080') ?? 8080;
+  int discoveryPort = int.tryParse(env['DISCOVERY_PORT'] ?? '8946') ?? 8946;
+  bool enableDiscovery = env['ENABLE_DISCOVERY'] != 'false';
+  String dbPath = env['DB_PATH'] ?? 'spike_master.db';
+  String? backupDir = env['BACKUP_DIR'];
+  String? adminSecret = env['ADMIN_SECRET'];
+  String? pepperPath = env['PEPPER_FILE'];
+  String? certPath = env['TLS_CERT'];
+  String? keyPath = env['TLS_KEY'];
+  // Geliştirme / bayraklı mod için geriye dönük kök CA ortam değişkeni desteği.
+  String? caCertPath = env['ROOT_CA_CERT_FILE'];
+  bool enableTls = env['ENABLE_TLS'] == 'true';
+  String tenantId = env['HUB_TENANT_ID'] ?? SpikeServer.defaultTenantId;
+  String storeId = env['HUB_STORE_ID'] ?? SpikeServer.defaultStoreId;
+  String hubId = env['HUB_ID'] ?? SpikeServer.defaultHubId;
+  bool requireTenantStoreHeaders = env['REQUIRE_TENANT_STORE_HEADERS'] != 'false';
+  // Faz 3: Geliştirme (bayraklı) modunda zamanlanmış yedek varsayılan kapalı; üretimde
+  // (--config) varsayılan 24 saat. BACKUP_INTERVAL_HOURS / --backup-interval-hours ile açılır.
+  BackupSchedulePolicy backupSchedule = BackupSchedulePolicy(
+    interval: Duration(hours: int.tryParse(env['BACKUP_INTERVAL_HOURS'] ?? '0') ?? 0),
+  );
 
   for (final arg in args) {
     if (arg.startsWith('--port=')) {
       port = int.tryParse(arg.substring(7)) ?? port;
+    } else if (arg.startsWith('--discovery-port=')) {
+      discoveryPort = int.tryParse(arg.substring(17)) ?? discoveryPort;
+    } else if (arg == '--no-discovery') {
+      enableDiscovery = false;
     } else if (arg.startsWith('--db-path=')) {
       dbPath = arg.substring(10);
     } else if (arg.startsWith('--backup-dir=')) {
@@ -1807,56 +4166,128 @@ void main(List<String> args) async {
     } else if (arg.startsWith('--key=')) {
       keyPath = arg.substring(6);
       enableTls = true;
+    } else if (arg.startsWith('--ca-cert=')) {
+      caCertPath = arg.substring(10);
     } else if (arg == '--tls') {
       enableTls = true;
+    } else if (arg.startsWith('--tenant-id=')) {
+      tenantId = arg.substring(12);
+    } else if (arg.startsWith('--store-id=')) {
+      storeId = arg.substring(11);
+    } else if (arg.startsWith('--hub-id=')) {
+      hubId = arg.substring(9);
+    } else if (arg.startsWith('--backup-interval-hours=')) {
+      final hours = int.tryParse(arg.substring('--backup-interval-hours='.length)) ?? 0;
+      backupSchedule = BackupSchedulePolicy(interval: Duration(hours: hours.clamp(0, 168)));
+    } else if (arg == '--require-tenant-store-headers') {
+      requireTenantStoreHeaders = true;
+    } else if (arg == '--allow-missing-tenant-store-headers') {
+      // Yalnızca eski (başlık göndermeyen) istemcilerle geçiş dönemi için bilinçli gevşetme.
+      requireTenantStoreHeaders = false;
+      stderr.writeln('[UYARI] Tenant/store başlık zorunluluğu devre dışı bırakıldı (--allow-missing-tenant-store-headers).');
     }
   }
 
-  final db = SpikeDatabase(File(dbPath));
-  final queue = WriteQueue();
+  return ResolvedHubStartupConfig(
+    port: port,
+    discoveryPort: discoveryPort,
+    enableDiscovery: enableDiscovery,
+    dbPath: dbPath,
+    backupDir: backupDir,
+    adminSecret: adminSecret,
+    pepperPath: pepperPath,
+    certPath: certPath,
+    keyPath: keyPath,
+    caCertPath: caCertPath,
+    enableTls: enableTls,
+    tenantId: tenantId,
+    storeId: storeId,
+    hubId: hubId,
+    requireTenantStoreHeaders: requireTenantStoreHeaders,
+    backupSchedule: backupSchedule,
+    loadedFromConfigFile: false,
+  );
+}
 
-  // PepperManager başlat
-  final pepperManager = PepperManager(File(pepperPath ?? 'pepper.dpapi'));
-  pepperManager.initialize();
+Future<SpikeServer> startHubFromArgs(
+  List<String> args, {
+  Map<String, String>? environment,
+}) async {
+  configureSqliteNative();
 
-  SecurityContext? securityContext;
-  if (enableTls) {
-    if (certPath == null || keyPath == null) {
-      throw TlsConfigurationException('TLS etkinleştirildi ancak --cert veya --key dosyaları belirtilmedi.');
-    }
-    securityContext = CertificateManager.createServerSecurityContext(
-      certChainPath: certPath,
-      privateKeyPath: keyPath,
+  final startup = resolveHubStartupConfig(args, environment: environment);
+
+  if (startup.loadedFromConfigFile) {
+    stdout.writeln(
+      '[REL-01] Yapılandırma yüklendi (${startup.environmentName}): '
+      'port=${startup.port} tls=${startup.enableTls}',
     );
   }
 
-  final existingCola = await (db.select(db.products)..where((p) => p.id.equals('prod_cola'))).getSingleOrNull();
-  if (existingCola == null) {
-    await db.into(db.products).insert(
-          ProductsCompanion(
-            id: const Value('prod_cola'),
-            barcode: const Value('869000000001'),
-            name: const Value('Kutu Kola 330ml'),
-            price: const Value(2500),
-            stock: const Value(100),
-          ),
-        );
+  final dbFile = File(startup.dbPath);
+  if (!dbFile.parent.existsSync()) {
+    dbFile.parent.createSync(recursive: true);
+  }
+  final db = SpikeDatabase(dbFile);
+  final queue = WriteQueue();
+
+  // PepperManager başlat
+  final pepperManager = PepperManager(File(startup.pepperPath ?? 'pepper.dpapi'));
+  pepperManager.initialize();
+
+  SecurityContext? securityContext;
+  if (startup.enableTls) {
+    if (startup.certPath == null || startup.keyPath == null) {
+      throw TlsConfigurationException('TLS etkinleştirildi ancak --cert veya --key dosyaları belirtilmedi.');
+    }
+    securityContext = CertificateManager.createServerSecurityContext(
+      certChainPath: startup.certPath!,
+      privateKeyPath: startup.keyPath!,
+    );
   }
 
   final server = SpikeServer(
     db: db,
-    dbFile: File(dbPath),
+    dbFile: dbFile,
     writeQueue: queue,
-    backupDirectory: backupDir,
-    adminSecret: adminSecret,
+    backupDirectory: startup.backupDir,
+    adminSecret: startup.adminSecret,
     pepperManager: pepperManager,
     securityContext: securityContext,
-    requireTls: enableTls,
+    requireTls: startup.enableTls,
+    caCertPath: startup.caCertPath,
+    tenantId: startup.tenantId,
+    storeId: startup.storeId,
+    hubId: startup.hubId,
+    requireTenantStoreHeaders: startup.requireTenantStoreHeaders,
+    backupSchedule: startup.backupSchedule,
+    allowAdminEnvFallback: !startup.loadedFromConfigFile,
+    environment: environment,
   );
-  await server.start(port: port);
+  await server.start(
+    port: startup.port,
+    enableDiscovery: startup.enableDiscovery,
+    discoveryPort: startup.discoveryPort,
+  );
 
-  stdout.writeln('MARKET MMS SPIKE-01 Backend çalışıyor: http://0.0.0.0:$port');
-  stdout.writeln('Veritabanı: $dbPath');
+  final schemeLabel = startup.enableTls ? 'https' : 'http';
+  stdout.writeln('MARKET MMS SPIKE-01 Backend çalışıyor: $schemeLabel://0.0.0.0:${startup.port}');
+  if (startup.enableDiscovery) {
+    stdout.writeln('UDP Discovery dinleniyor: UDP 0.0.0.0:${startup.discoveryPort}');
+  }
+  stdout.writeln('Veritabanı: ${startup.dbPath}');
+
+  return server;
+}
+
+void main(List<String> args) async {
+  final SpikeServer server;
+  try {
+    server = await startHubFromArgs(args);
+  } on HubStartupArgException catch (e) {
+    stderr.writeln(e.message);
+    exit(e.exitCode);
+  }
 
   await server.lifecycle.onShutdown;
   server.stop();

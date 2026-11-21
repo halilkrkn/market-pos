@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../domain/barcode_input_sanitizer.dart';
 import '../domain/cart_state.dart';
 import '../domain/money.dart';
 import '../domain/pos_exceptions.dart';
@@ -11,35 +12,39 @@ import '../domain/pos_repository.dart';
 class CartNotifier extends StateNotifier<CartState> {
   final PosRepository repository;
   final String Function() readDeviceId;
+  final bool Function()? isHubOffline;
   final Future<void> Function()? onSaleCommitted;
   bool _isCompletingSale = false;
 
   CartNotifier({
     required this.repository,
     required this.readDeviceId,
+    this.isHubOffline,
     this.onSaleCommitted,
   }) : super(CartState.empty());
 
   /// Barkod okutulduğunda yerel katalogdan sorgular; pasif ve bilinmeyen barkodları reddeder (`OD-03`, `R-01`).
   Future<bool> scanBarcode(String rawBarcode) async {
-    final trimmed = rawBarcode.trim();
-    if (trimmed.isEmpty) {
+    final sanitized = BarcodeInputSanitizer.sanitize(rawBarcode);
+    if (!sanitized.isValid) {
+      if (!mounted) return false;
       state = state.copyWith(
-        errorMessage: 'Lütfen geçerli bir barkod giriniz.',
+        errorMessage: sanitized.errorMessage,
         infoMessage: null,
       );
       return false;
     }
 
     try {
-      final result = await repository.findByBarcode(trimmed);
+      final result = await repository.findByBarcode(sanitized.normalized);
+      if (!mounted) return false;
       switch (result.status) {
         case BarcodeLookupStatus.found:
           return addProduct(result.product!);
         case BarcodeLookupStatus.inactiveProduct:
           state = state.copyWith(
             errorMessage:
-                'Pasif ürün satışa eklenemez: ${result.product?.name ?? trimmed}.',
+                'Pasif ürün satışa eklenemez: ${result.product?.name ?? sanitized.normalized}.',
             infoMessage: null,
           );
           return false;
@@ -248,11 +253,14 @@ class CartNotifier extends StateNotifier<CartState> {
       final changeNote = completed.cashChangeCents != null
           ? ' • Para Üstü: ${Money.formatCents(completed.cashChangeCents!)}'
           : '';
+      final offline = isHubOffline?.call() ?? false;
+      final completionMessage = offline
+          ? 'Satış çevrimdışı kaydedildi ($methodLabel • ${Money.formatCents(completed.totalAmountCents)}$changeNote). Bağlantı sağlandığında otomatik senkronize edilecektir.'
+          : 'Satış tamamlandı ($methodLabel • ${Money.formatCents(completed.totalAmountCents)}$changeNote).';
 
       state = CartState.empty(
         lastCompletedSale: completed,
-        infoMessage:
-            'Satış tamamlandı ($methodLabel • ${Money.formatCents(completed.totalAmountCents)}$changeNote).',
+        infoMessage: completionMessage,
       );
 
       // Veritabanı işlemi kesinleştikten sonra callback hatası satışı geri almaz/başarısız göstermez

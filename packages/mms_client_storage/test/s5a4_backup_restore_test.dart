@@ -315,9 +315,13 @@ void main() {
       expect(restoredSales.length, equals(1));
       expect(restoredSales.first.clientSeq, equals(1));
 
-      // 5. Pre-restore koruyucu yedeğin oluşturulduğunu teyit et
-      final safetyFiles = safetyBackupDir.listSync().where((f) => f.path.endsWith('.db')).toList();
+      // 5. Pre-restore koruyucu yedeğin oluşturulduğunu teyit et.
+      // SEC-SAFETY (21.11.2026): Başarılı restore sonrası koruyucu yedek şifreli .mmsbak
+      // olarak saklanır; şifresiz .db diskte kalmaz (restore_safety_snapshot_encryption_test).
+      final safetyFiles = safetyBackupDir.listSync().where((f) => f.path.endsWith('.mmsbak')).toList();
       expect(safetyFiles, isNotEmpty);
+      expect(safetyBackupDir.listSync().where((f) => f.path.endsWith('.db')), isEmpty);
+      expect(restoreRes.safetyBackupEncrypted, isTrue);
     });
 
     test('6. Hatalı Şifre: Yanlış parola ile restore reddedilir ve canlı DB korunur', () async {

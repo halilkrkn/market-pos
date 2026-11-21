@@ -1,4 +1,4 @@
-# uninstall_mms_service.ps1 — Market MMS Windows Servis Durdurma ve Kaldirma Betigi (v2.0)
+﻿# uninstall_mms_service.ps1 — Market MMS Windows Servis Durdurma ve Kaldirma Betigi (v2.0)
 [CmdletBinding()]
 param(
     [string]$ServiceName = "MarketMMSService",

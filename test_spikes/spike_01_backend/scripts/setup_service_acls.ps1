@@ -1,4 +1,4 @@
-# setup_service_acls.ps1 — Market MMS Service SID & Temel NTFS ACL Betigi (v2.0)
+﻿# setup_service_acls.ps1 — Market MMS Service SID & Temel NTFS ACL Betigi (v2.0)
 [CmdletBinding()]
 param(
     [string]$BaseDir = "$env:ProgramData\MarketMMS",

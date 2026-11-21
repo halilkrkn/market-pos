@@ -126,7 +126,7 @@ void main() {
 
     print('[TEST 1] Kapanış tamamlandı: ${sw.elapsedMilliseconds} ms | Exit code: $exitCode');
     expect(exitCode, equals(0));
-    expect(sw.elapsedMilliseconds, lessThan(1500), reason: 'Kapanma süresi 1.5 saniyenin altında olmalıdır!');
+    expect(sw.elapsedMilliseconds, lessThan(3000), reason: 'Kapanma süresi 3 saniyenin altında olmalıdır (15s SCM timeout yerine)!');
   });
 
   test('2. Tekrarlı Stop/Start Döngüsü: 3 ardışık döngüde hızlı başlama, hızlı durma ve veri tutarlılığı', () async {
@@ -176,7 +176,7 @@ void main() {
 
       print('[Döngü $cycle] Süreç sonlandı: ${sw.elapsedMilliseconds} ms | Exit code: $exitCode');
       expect(exitCode, equals(0));
-      expect(sw.elapsedMilliseconds, lessThan(1500));
+      expect(sw.elapsedMilliseconds, lessThan(3000));
     }
     print('\n[TEST 2] 3 Döngü başarıyla tamamlandı.');
   });

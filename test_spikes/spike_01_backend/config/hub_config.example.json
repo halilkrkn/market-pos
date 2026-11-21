@@ -1,0 +1,25 @@
+{
+  "environment": "production",
+  "port": 8945,
+  "discovery_port": 8946,
+  "enable_discovery": true,
+  "db_path": "../data/market_master.db",
+  "backup_dir": "../backups",
+  "pepper_file": "../security/pepper.dpapi",
+  "admin_secret_file": "../security/admin_secret.txt",
+  "tls": {
+    "enabled": true,
+    "cert": "../certs/server.crt",
+    "key": "../certs/server.key",
+    "ca_cert": "../certs/ca.crt"
+  },
+  "tenant_id": "default-tenant",
+  "store_id": "default-store",
+  "hub_id": "MMS-HUB-MASTER",
+  "require_tenant_store_headers": true,
+  "backup_schedule": {
+    "interval_hours": 24,
+    "daily_retention_days": 30,
+    "monthly_retention_months": 12
+  }
+}

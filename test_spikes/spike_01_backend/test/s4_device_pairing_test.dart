@@ -1690,6 +1690,108 @@ void main() {
       final bodyWrong = await resWrongSecret.readAsString();
       expect(bodyWrong, contains('ERR_INVALID_ADMIN_SECRET'));
     });
+
+    // TC-33: Owner onay/red ekranının (PairingApprovalPanel) dayandığı Hub uçları.
+    test('TC-33: Bekleyen talepler listelenir; Owner reddi talebi kapatır, cihaz token alamaz ve tekrar onaylanamaz', () async {
+      final sRes = await http.post(Uri.parse('$baseUrl/api/v1/pairing/session'), headers: adminHeaders);
+      final sJson = jsonDecode(sRes.body) as Map<String, dynamic>;
+      final sessionId = sJson['session_id'] as String;
+      final pairingSecret = sJson['pairing_secret'] as String;
+
+      final reqRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/request'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'session_id': sessionId,
+          'pairing_secret': pairingSecret,
+          'device_id': 'DEV_REJECT_01',
+          'name': 'Reddedilecek Kasa',
+          'client_public_key': base64Encode(clientPublicKey),
+        }),
+      );
+      expect(reqRes.statusCode, anyOf(200, 202));
+
+      // 1. Liste: yalnızca admin; talep görünür ve gizli değer içermez.
+      final unauthorized = await http.get(Uri.parse('$baseUrl/api/v1/pairing/requests'));
+      expect(unauthorized.statusCode, anyOf(401, 403));
+      final cashier = await http.get(
+        Uri.parse('$baseUrl/api/v1/pairing/requests'),
+        headers: {'authorization': 'Bearer mms_dt_cashier_token_sample'},
+      );
+      expect(cashier.statusCode, anyOf(401, 403));
+
+      final listRes = await http.get(Uri.parse('$baseUrl/api/v1/pairing/requests'), headers: adminHeaders);
+      expect(listRes.statusCode, 200);
+      final pending = (jsonDecode(listRes.body)['requests'] as List).cast<Map<String, dynamic>>();
+      final mine = pending.where((r) => r['session_id'] == sessionId).toList();
+      expect(mine, hasLength(1));
+      expect(mine.single['device_id'], 'DEV_REJECT_01');
+      expect(listRes.body, isNot(contains(pairingSecret)), reason: 'pairing secret listede sızmamalı');
+
+      // 2. Admin olmayan red girişimi reddedilir; talep bekler durumda kalır.
+      final rogueReject = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/reject'),
+        headers: {'content-type': 'application/json', 'x-admin-secret': 'yanlis'},
+        body: jsonEncode({'session_id': sessionId}),
+      );
+      expect(rogueReject.statusCode, 403);
+
+      // 3. Owner reddi.
+      final rejectRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/reject'),
+        headers: adminHeaders,
+        body: jsonEncode({'session_id': sessionId}),
+      );
+      expect(rejectRes.statusCode, 200);
+      expect(jsonDecode(rejectRes.body)['status'], 'REJECTED');
+
+      // 4. Reddedilen talep listeden düşer, tekrar onaylanamaz/reddedilemez, cihaz token alamaz.
+      final listAfter = await http.get(Uri.parse('$baseUrl/api/v1/pairing/requests'), headers: adminHeaders);
+      expect((jsonDecode(listAfter.body)['requests'] as List).where((r) => r['session_id'] == sessionId), isEmpty);
+
+      final approveAfter = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/approve'),
+        headers: adminHeaders,
+        body: jsonEncode({'session_id': sessionId}),
+      );
+      expect(approveAfter.statusCode, 400);
+      final rejectAgain = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/reject'),
+        headers: adminHeaders,
+        body: jsonEncode({'session_id': sessionId}),
+      );
+      expect(rejectAgain.statusCode, 400);
+
+      final pollCh = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/poll-challenge'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({'session_id': sessionId, 'pairing_secret': pairingSecret}),
+      );
+      expect(pollCh.statusCode, 403);
+
+      final device = await (server.db.select(server.db.devices)..where((d) => d.deviceId.equals('DEV_REJECT_01'))).get();
+      expect(device, isEmpty, reason: 'reddedilen cihaz DB\'ye yazılmamalı');
+      final audit = await (server.db.select(server.db.deviceAuditLogs)
+            ..where((a) => a.deviceId.equals('DEV_REJECT_01') & a.action.equals('PAIRING_REJECTED')))
+          .get();
+      expect(audit, hasLength(1));
+    });
+
+    test('TC-34: Bozuk gövdeli /reject ve /approve istekleri 500 değil 400 döner', () async {
+      for (final path in ['/api/v1/pairing/reject', '/api/v1/pairing/approve']) {
+        for (final body in ['{bozuk', jsonEncode({'session_id': 42}), jsonEncode({})]) {
+          final res = await http.post(Uri.parse('$baseUrl$path'), headers: adminHeaders, body: body);
+          expect(res.statusCode, 400, reason: '$path gövde=$body');
+        }
+      }
+      // Bilinmeyen oturum: istemci hatası (4xx), sunucu hatası değil.
+      final unknown = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/reject'),
+        headers: adminHeaders,
+        body: jsonEncode({'session_id': 'sess_yok'}),
+      );
+      expect(unknown.statusCode, inInclusiveRange(400, 499));
+    });
   });
 }
 

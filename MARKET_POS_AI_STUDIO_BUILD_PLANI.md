@@ -255,7 +255,7 @@ Temel veri modeli v1.1 ile tam uyumlu olarak korunmuştur.
 
 - Para değerleri kesinlikle floating-point ile tutulamaz ve hesaplanamaz; kuruş bazlı tamsayılar (`int` / `BIGINT`) veya özel Value Object (`Money`) ile saklanır. Diğer sayısal işlemlerde (gramaj, ağırlık, oran, ölçüm ve istatistik gibi) problem alanına uygun sayısal temsil ayrıca belirlenir.
 - Satış satırları, satış anındaki birim fiyat ve ürün adını snapshot olarak saklar; ürünün sonradan fiyatının değişmesi geçmiş satışları etkileyemez.
-- **Alt Kuruş Yuvarlama Politikası (`OPEN DECISION`):** Kesirli miktar veya birim maliyet hesaplarında ortaya çıkabilecek alt kuruşların yuvarlama yöntemi proje sahibi tarafından henüz onaylanmamış olup `OPEN DECISION` statüsündedir.
+- **Alt Kuruş Yuvarlama Politikası (`CONFIRMED — OD-01`, 11 Kasım 2026):** *(Tarihsel karar notu: Bu belgenin v1.4 yayın tarihinde `OPEN DECISION` olarak bırakılan alt kuruş yuvarlama yöntemi, 11 Kasım 2026 tarihli Proje Sahibi `OD-01` kararıyla kesinleştirilmiştir.)* Para tutarları integer kuruş olarak saklanır, alt kuruş hesaplamalarında Windows, Android ve Master Hub genelinde **Half-Up** yuvarlama uygulanır (milli-unit `quantity` ölçeğinde örnek: `((unitPrice * quantity) + 500) ~/ 1000`) ve UI gösterim standardı iki ondalık basamaktır (ör. `12.50 TL`).
 
 ---
 

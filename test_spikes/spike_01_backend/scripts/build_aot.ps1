@@ -1,4 +1,4 @@
-# build_aot.ps1 — Market MMS Dart AOT Derleme Betigi
+﻿# build_aot.ps1 — Market MMS Dart AOT Derleme Betigi
 [CmdletBinding()]
 param(
     [string]$OutputDir,
@@ -45,9 +45,23 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
 Push-Location $spikeRoot
 try {
-    $compileOutput = dart compile exe bin\server.dart -o $outputExePath 2>&1
+    $bundleDir = Join-Path $OutputDir "bundle"
+    $compileOutput = dart build cli -t bin\server.dart -o $bundleDir 2>&1
     if ($LASTEXITCODE -ne 0) {
         throw "Dart AOT derleme basarisiz oldu (Exit code: $LASTEXITCODE)`n$compileOutput"
+    }
+    $generatedExe = Join-Path $bundleDir "bundle\bin\server.exe"
+    $generatedDll = Join-Path $bundleDir "bundle\lib\sqlite3.dll"
+    if (Test-Path $generatedExe) {
+        Copy-Item -Path $generatedExe -Destination $outputExePath -Force
+    }
+    if (Test-Path $generatedDll) {
+        Copy-Item -Path $generatedDll -Destination (Join-Path $OutputDir "sqlite3.dll") -Force
+        $outputLibDir = Join-Path $OutputDir "lib"
+        if (!(Test-Path $outputLibDir)) {
+            New-Item -ItemType Directory -Path $outputLibDir -Force | Out-Null
+        }
+        Copy-Item -Path $generatedDll -Destination (Join-Path $outputLibDir "sqlite3.dll") -Force
     }
 } finally {
     Pop-Location

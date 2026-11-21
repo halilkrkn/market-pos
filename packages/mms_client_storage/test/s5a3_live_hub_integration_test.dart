@@ -19,7 +19,7 @@ void main() {
   late ClientStorageRepository clientRepo;
   late ClientSyncService syncService;
 
-  const testPort = 8945;
+  const testPort = 8995;
   const hubUrl = 'http://127.0.0.1:$testPort';
   const testDeviceId = 'DEV_WIN_LIVE';
   const rawToken = 'test_token_live_secret_9988';

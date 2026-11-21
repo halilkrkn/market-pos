@@ -108,7 +108,7 @@ void main() {
         Uri.parse('$baseUrl/api/v1/backup/snapshot'),
         headers: {
           'content-type': 'application/json',
-          'authorization': 'Bearer $validToken',
+          'x-mms-admin-secret': testAdminSecret,
         },
         body: jsonEncode({'target_path': maliciousSql}),
       );
@@ -128,7 +128,7 @@ void main() {
         Uri.parse('$baseUrl/api/v1/backup/snapshot'),
         headers: {
           'content-type': 'application/json',
-          'authorization': 'Bearer $validToken',
+          'x-mms-admin-secret': testAdminSecret,
         },
         body: jsonEncode({'target_path': dangerousPath}),
       );
@@ -142,6 +142,25 @@ void main() {
       expect(File(dangerousPath).existsSync(), isFalse);
     });
 
+    test('3b. SEC-SNAP: Kasa cihazı token\'ı ile ŞİFRESİZ merkezi DB snapshot\'ı alınamaz (admin + loopback zorunlu)', () async {
+      final backupsDir = Directory(p.join(tempDir.path, 'backups'));
+      final before = backupsDir.existsSync() ? backupsDir.listSync().length : 0;
+
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/v1/backup/snapshot'),
+        headers: {
+          'content-type': 'application/json',
+          'authorization': 'Bearer $validToken',
+        },
+        body: jsonEncode({}),
+      );
+
+      expect(res.statusCode, anyOf(401, 403),
+          reason: 'Şifresiz DB kopyası (token hash/salt dahil) yalnızca Owner/admin tarafından alınabilmeli.');
+      final after = backupsDir.existsSync() ? backupsDir.listSync().length : 0;
+      expect(after, before, reason: 'Yetkisiz istekte diske dosya yazılmamalı (disk doldurma koruması).');
+    });
+
     test('4. Eşzamanlı (Concurrent) Backup İstekleri Çakışmamalı ve Her Biri Benzersiz Dosya Üretmelidir', () async {
       // 3 eşzamanlı yedekleme isteği gönder
       final futures = List.generate(3, (_) {
@@ -149,7 +168,7 @@ void main() {
           Uri.parse('$baseUrl/api/v1/backup/snapshot'),
           headers: {
             'content-type': 'application/json',
-            'authorization': 'Bearer $validToken',
+            'x-mms-admin-secret': testAdminSecret,
           },
           body: jsonEncode({}),
         );
@@ -187,7 +206,7 @@ void main() {
         },
         body: jsonEncode({
           'operation_id': 'op_error_leak_test',
-          'client_seq': 999,
+          'client_seq': 1,
           'total_amount': 2500,
           'payment_method': 'CASH',
           'items': [

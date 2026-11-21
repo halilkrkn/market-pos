@@ -188,7 +188,7 @@ class CertificateManager {
         throw TlsConfigurationException('CSR oluşturulamadı: ${csrRes.stderr}');
       }
 
-      // -days -1 ile geçmişte süresi bitmiş sertifika imzala
+      // Geçmişte süresi bitmiş sertifika imzala (OpenSSL 3.x uyumlu)
       final signRes = Process.runSync(openssl, [
         'x509',
         '-req',
@@ -201,8 +201,10 @@ class CertificateManager {
         '-CAcreateserial',
         '-out',
         serverCertPath,
-        '-days',
-        '-1',
+        '-not_before',
+        '20200101000000Z',
+        '-not_after',
+        '20200102000000Z',
       ]);
 
       if (signRes.exitCode != 0) {

@@ -342,9 +342,11 @@ void main() {
       print('[Döngü $cycle] Süreç PID: $pid');
 
       // 1 geçerli satış yap
+      final normalSeq = 4 + cycle;
+      final crashSeq = normalSeq + 1;
       final normalPayload = {
         'operation_id': 'op_cycle_${cycle}_committed',
-        'client_seq': 100 + cycle,
+        'client_seq': normalSeq,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'items': [
@@ -364,7 +366,7 @@ void main() {
       // Yarım kalacak satış gönder ve öldür
       final crashPayload = {
         'operation_id': 'op_cycle_${cycle}_interrupted',
-        'client_seq': 200 + cycle,
+        'client_seq': crashSeq,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'simulated_delay_ms': 2000,
@@ -398,7 +400,7 @@ void main() {
       expect(rawDb.select('PRAGMA foreign_key_check;').isEmpty, isTrue);
 
       // Yarıda kesilen işlemin yazılmadığını doğrula
-      final interrupted = rawDb.select("SELECT * FROM sales WHERE client_seq = ${200 + cycle};");
+      final interrupted = rawDb.select("SELECT * FROM sales WHERE client_seq = $crashSeq;");
       expect(interrupted.isEmpty, isTrue);
 
       rawDb.dispose();

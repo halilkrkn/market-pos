@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/theme/design_tokens.dart';
 import '../../domain/cart_item.dart';
 import '../../domain/money.dart';
 
@@ -9,11 +10,13 @@ import '../../domain/money.dart';
 class QuantityEditDialog extends StatefulWidget {
   final CartItem item;
   final String? Function(String rawQuantity) onValidateAndApply;
+  final bool showKeyboardHints;
 
   const QuantityEditDialog({
     super.key,
     required this.item,
     required this.onValidateAndApply,
+    this.showKeyboardHints = true,
   });
 
   @override
@@ -54,87 +57,88 @@ class _QuantityEditDialogState extends State<QuantityEditDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.mmsColors;
     final hasRatio = widget.item.conversionFactorDenominator > 1;
+
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             Navigator.of(context).pop(),
       },
-      child: AlertDialog(
+      child: AppDialog(
         key: const Key('quantity_edit_dialog'),
-        title: const Text('Miktar Düzenle [F2]'),
-        content: SizedBox(
-          width: 400,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text(
-                widget.item.productName,
-                style: const TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textMainLight,
-                ),
+        title:
+            widget.showKeyboardHints ? 'Miktar Düzenle [F2]' : 'Miktar Düzenle',
+        icon: Icons.scale_rounded,
+        iconColor: colors.emerald,
+        maxWidth: 420,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.item.productName,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: colors.textPrimary,
               ),
-              const SizedBox(height: 6),
-              Text(
-                'Birim: ${widget.item.pricingUnit} • 0 girilirse satır sepetten silinir.',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  color: AppTheme.textMutedLight,
-                ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Birim: ${widget.item.pricingUnit} • 0 girilirse satır sepetten silinir.',
+              style: TextStyle(
+                fontSize: 12.5,
+                color: colors.textSecondary,
               ),
-              if (hasRatio) ...[
-                const SizedBox(height: 4),
-                Text(
-                  'Dönüşüm oranı paydası: ${widget.item.conversionFactorDenominator} (${widget.item.stockUnit})',
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: AppTheme.posWarningText,
-                    fontWeight: FontWeight.w600,
-                  ),
+            ),
+            if (hasRatio) ...[
+              const SizedBox(height: 4),
+              Text(
+                'Dönüşüm oranı paydası: ${widget.item.conversionFactorDenominator} (${widget.item.stockUnit})',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: colors.warningText,
+                  fontWeight: FontWeight.w600,
                 ),
-              ],
-              const SizedBox(height: 12),
-              TextField(
-                key: const Key('quantity_edit_input'),
-                controller: _controller,
-                autofocus: true,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  fontFeatures: AppTheme.tabularFiguresFeature,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Miktar (${widget.item.pricingUnit})',
-                  hintText: 'Ör: 1, 0.5, 0.345',
-                  border: const OutlineInputBorder(),
-                  errorText: _inlineError,
-                ),
-                onSubmitted: (_) => _submit(),
               ),
             ],
-          ),
+            const SizedBox(height: MmsSpacing.md),
+            TextField(
+              key: const Key('quantity_edit_input'),
+              controller: _controller,
+              autofocus: true,
+              keyboardType:
+                  const TextInputType.numberWithOptions(decimal: true),
+              style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+                color: colors.textPrimary,
+                fontFeatures: MmsTypography.tabularFigures,
+              ),
+              decoration: InputDecoration(
+                labelText: 'Miktar (${widget.item.pricingUnit})',
+                hintText: 'Ör: 1, 0.5, 0.345',
+                errorText: _inlineError,
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+          ],
         ),
         actions: [
-          OutlinedButton(
+          AppButton(
+            label: widget.showKeyboardHints ? 'İptal [Esc]' : 'İptal',
+            variant: AppButtonVariant.secondary,
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('İptal [Esc]'),
           ),
-          ElevatedButton(
+          AppButton(
             key: const Key('quantity_edit_confirm'),
+            label: 'Uygula',
+            variant: AppButtonVariant.emerald,
             onPressed: _submit,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryBlue,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Uygula'),
           ),
         ],
       ),
     );
   }
 }
-

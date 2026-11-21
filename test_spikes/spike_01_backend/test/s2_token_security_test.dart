@@ -467,7 +467,7 @@ void main() {
           },
           body: jsonEncode({
             'operation_id': 'op_conc_1',
-            'client_seq': 101,
+            'client_seq': 1,
             'total_amount': 2500,
             'payment_method': 'CASH',
             'items': [
@@ -533,7 +533,7 @@ void main() {
         },
         body: jsonEncode({
           'operation_id': 'op_persist_tx',
-          'client_seq': 201,
+          'client_seq': 1,
           'total_amount': 2500,
           'payment_method': 'CASH',
           'items': [

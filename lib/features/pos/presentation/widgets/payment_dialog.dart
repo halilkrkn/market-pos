@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/theme/design_tokens.dart';
 import '../../domain/money.dart';
 import '../../domain/pos_repository.dart';
 
@@ -9,6 +10,7 @@ import '../../domain/pos_repository.dart';
 class PaymentDialog extends StatefulWidget {
   final int totalCents;
   final PaymentMethod initialMethod;
+  final bool showKeyboardHints;
   final Future<({PosCompletedSale? sale, String? errorMessage})> Function({
     required PaymentMethod paymentMethod,
     int? cashReceivedCents,
@@ -20,6 +22,7 @@ class PaymentDialog extends StatefulWidget {
     required this.totalCents,
     required this.initialMethod,
     required this.onConfirmSale,
+    this.showKeyboardHints = true,
   });
 
   @override
@@ -113,6 +116,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.mmsColors;
+
     return PopScope(
       canPop: !_isSubmitting,
       child: CallbackShortcuts(
@@ -126,199 +131,180 @@ class _PaymentDialogState extends State<PaymentDialog> {
               _selectPaymentMethod(PaymentMethod.card),
         },
         child: FocusScope(
-          autofocus: true,
-          child: Dialog(
-        key: const Key('payment_dialog'),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 580),
-          padding: const EdgeInsets.all(20),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Ödeme ve Tahsilat',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.textMainLight,
-                      ),
-                    ),
-                    IconButton(
-                      tooltip: 'İptal [Esc]',
-                      onPressed:
-                          _isSubmitting ? null : () => Navigator.of(context).pop(),
-                      style: IconButton.styleFrom(
-                        minimumSize: const Size(48, 48),
-                      ),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                const Divider(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
-                  children: [
-                    const Text(
-                      'Ödenecek Tutar:',
-                      style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
-                        color: AppTheme.textMutedLight,
-                      ),
-                    ),
-                    Text(
-                      Money.formatCents(widget.totalCents),
-                      style: const TextStyle(
-                        fontSize: 30,
-                        fontWeight: FontWeight.w900,
-                        color: AppTheme.textMainLight,
-                        fontFeatures: AppTheme.tabularFiguresFeature,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('payment_method_cash'),
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => _selectPaymentMethod(PaymentMethod.cash),
-                        icon: const Icon(Icons.payments_outlined),
-                        label: const Text('NAKİT [F10]'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(120, 50),
-                          backgroundColor: _selectedMethod == PaymentMethod.cash
-                              ? AppTheme.posCashBg
-                              : AppTheme.cardBgLight,
-                          foregroundColor: _selectedMethod == PaymentMethod.cash
-                              ? AppTheme.posCashText
-                              : AppTheme.textMainLight,
-                          side: BorderSide(
-                            color: _selectedMethod == PaymentMethod.cash
-                                ? AppTheme.posCashAction
-                                : AppTheme.borderSubtle,
-                            width: _selectedMethod == PaymentMethod.cash ? 2 : 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: OutlinedButton.icon(
-                        key: const Key('payment_method_card'),
-                        onPressed: _isSubmitting
-                            ? null
-                            : () => _selectPaymentMethod(PaymentMethod.card),
-                        icon: const Icon(Icons.credit_card),
-                        label: const Text('KART [F9]'),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(120, 50),
-                          backgroundColor: _selectedMethod == PaymentMethod.card
-                              ? AppTheme.posInfoBg
-                              : AppTheme.cardBgLight,
-                          foregroundColor: _selectedMethod == PaymentMethod.card
-                              ? AppTheme.primaryBlue
-                              : AppTheme.textMainLight,
-                          side: BorderSide(
-                            color: _selectedMethod == PaymentMethod.card
-                                ? AppTheme.primaryBlue
-                                : AppTheme.borderSubtle,
-                            width: _selectedMethod == PaymentMethod.card ? 2 : 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                if (_selectedMethod == PaymentMethod.cash)
-                  _buildCashSection()
-                else
-                  _buildCardSection(),
-                if (_submitError != null) ...[
-                  const SizedBox(height: 12),
+          autofocus: widget.showKeyboardHints,
+          child: AppDialog(
+            key: const Key('payment_dialog'),
+            title: 'Ödeme ve Tahsilat',
+            icon: Icons.point_of_sale_rounded,
+            iconColor: colors.emerald,
+            maxWidth: 580,
+            onClose: _isSubmitting ? null : () => Navigator.of(context).pop(),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.all(MmsSpacing.md),
                     decoration: BoxDecoration(
-                      color: AppTheme.posDangerBg,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: AppTheme.posDangerText),
+                      color: colors.surfaceSubtle,
+                      borderRadius: BorderRadius.circular(MmsRadius.md),
+                      border: Border.all(color: colors.border),
                     ),
-                    child: Text(
-                      _submitError!,
-                      style: const TextStyle(
-                        color: AppTheme.posDangerText,
-                        fontWeight: FontWeight.w600,
-                      ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        Text(
+                          'Ödenecek Tutar:',
+                          style: TextStyle(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
+                            color: colors.textSecondary,
+                          ),
+                        ),
+                        Flexible(
+                          child: FittedBox(
+                            fit: BoxFit.scaleDown,
+                            child: Text(
+                              Money.formatCents(widget.totalCents),
+                              style: TextStyle(
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                color: colors.textPrimary,
+                                fontFeatures: MmsTypography.tabularFigures,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 20),
-                Row(
-                  children: [
-                    Expanded(
-                      flex: 1,
-                      child: OutlinedButton(
-                        key: const Key('payment_cancel_button'),
-                        onPressed:
-                            _isSubmitting ? null : () => Navigator.of(context).pop(),
-                        style: OutlinedButton.styleFrom(
-                          minimumSize: const Size(100, 54),
+                  const SizedBox(height: MmsSpacing.md),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('payment_method_cash'),
+                          onPressed: _isSubmitting
+                              ? null
+                              : () => _selectPaymentMethod(PaymentMethod.cash),
+                          icon: const Icon(Icons.payments_outlined, size: 19),
+                          label: Text(
+                            widget.showKeyboardHints ? 'NAKİT [F10]' : 'NAKİT',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(110, 50),
+                            backgroundColor:
+                                _selectedMethod == PaymentMethod.cash
+                                    ? colors.successBg
+                                    : colors.surface,
+                            foregroundColor:
+                                _selectedMethod == PaymentMethod.cash
+                                    ? colors.successText
+                                    : colors.textPrimary,
+                            side: BorderSide(
+                              color: _selectedMethod == PaymentMethod.cash
+                                  ? colors.emerald
+                                  : colors.borderStrong,
+                              width:
+                                  _selectedMethod == PaymentMethod.cash ? 2 : 1,
+                            ),
+                          ),
                         ),
-                        child: const Text('İptal [Esc]'),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      flex: 2,
-                      child: ElevatedButton(
-                        key: const Key('payment_confirm_button'),
-                        onPressed: _canSubmit ? _submit : null,
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: const Size(180, 54),
-                          backgroundColor: _selectedMethod == PaymentMethod.cash
-                              ? AppTheme.posCashAction
-                              : AppTheme.primaryBlue,
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: const Color(0xFFCBD5E1),
-                          disabledForegroundColor: const Color(0xFF475569),
+                      const SizedBox(width: MmsSpacing.sm),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          key: const Key('payment_method_card'),
+                          onPressed: _isSubmitting
+                              ? null
+                              : () => _selectPaymentMethod(PaymentMethod.card),
+                          icon: const Icon(Icons.credit_card_rounded, size: 19),
+                          label: Text(
+                            widget.showKeyboardHints ? 'KART [F9]' : 'KART',
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(110, 50),
+                            backgroundColor:
+                                _selectedMethod == PaymentMethod.card
+                                    ? colors.infoBg
+                                    : colors.surface,
+                            foregroundColor:
+                                _selectedMethod == PaymentMethod.card
+                                    ? colors.infoText
+                                    : colors.textPrimary,
+                            side: BorderSide(
+                              color: _selectedMethod == PaymentMethod.card
+                                  ? colors.info
+                                  : colors.borderStrong,
+                              width:
+                                  _selectedMethod == PaymentMethod.card ? 2 : 1,
+                            ),
+                          ),
                         ),
-                        child: _isSubmitting
-                            ? const SizedBox(
-                                width: 22,
-                                height: 22,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2.5,
-                                  color: Colors.white,
-                                ),
-                              )
-                            : const Text('SATIŞI TAMAMLA'),
                       ),
-                    ),
+                    ],
+                  ),
+                  const SizedBox(height: MmsSpacing.md),
+                  if (_selectedMethod == PaymentMethod.cash)
+                    _buildCashSection(context)
+                  else
+                    _buildCardSection(context),
+                  if (_submitError != null) ...[
+                    const SizedBox(height: MmsSpacing.sm),
+                    AppErrorState(message: _submitError!, inline: true),
                   ],
-                ),
-              ],
+                ],
+              ),
             ),
+            actions: [
+              OutlinedButton(
+                key: const Key('payment_cancel_button'),
+                onPressed:
+                    _isSubmitting ? null : () => Navigator.of(context).pop(),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(100, 52),
+                ),
+                child: Text(
+                  widget.showKeyboardHints ? 'İptal [Esc]' : 'İptal',
+                ),
+              ),
+              ElevatedButton(
+                key: const Key('payment_confirm_button'),
+                onPressed: _canSubmit ? _submit : null,
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size(180, 52),
+                  backgroundColor: _selectedMethod == PaymentMethod.cash
+                      ? colors.emerald
+                      : colors.primary,
+                  foregroundColor: _selectedMethod == PaymentMethod.cash
+                      ? colors.onEmerald
+                      : colors.onPrimary,
+                  disabledBackgroundColor: colors.neutralBg,
+                  disabledForegroundColor: colors.textTertiary,
+                ),
+                child: _isSubmitting
+                    ? SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          color: colors.onPrimary,
+                        ),
+                      )
+                    : const Text('SATIŞI TAMAMLA'),
+              ),
+            ],
           ),
         ),
-      ),
-      ),
       ),
     );
   }
 
-  Widget _buildCashSection() {
+  Widget _buildCashSection(BuildContext context) {
+    final colors = context.mmsColors;
     final received = _parsedCashCents;
     final bool hasInput = _cashController.text.trim().isNotEmpty;
 
@@ -327,33 +313,33 @@ class _PaymentDialogState extends State<PaymentDialog> {
       statusBox = _buildChangeBox(
         title: 'Alınan Nakit Tutarı Giriniz',
         amountText: '0.00 TL',
-        bgColor: AppTheme.surfaceLight,
-        borderColor: AppTheme.borderSubtle,
-        textColor: AppTheme.textMutedLight,
+        bgColor: colors.surfaceSubtle,
+        borderColor: colors.border,
+        textColor: colors.textSecondary,
       );
     } else if (received == null) {
       statusBox = _buildChangeBox(
         title: 'Geçersiz TL Biçimi',
         amountText: 'Ör: 50.00',
-        bgColor: AppTheme.posDangerBg,
-        borderColor: AppTheme.posDangerText,
-        textColor: AppTheme.posDangerText,
+        bgColor: colors.dangerBg,
+        borderColor: colors.danger,
+        textColor: colors.dangerText,
       );
     } else if (received < widget.totalCents) {
       statusBox = _buildChangeBox(
         title: 'Eksik Tutar (Satış Onayı Kilitli)',
         amountText: Money.formatCents(widget.totalCents - received),
-        bgColor: AppTheme.posDangerBg,
-        borderColor: AppTheme.posDangerText,
-        textColor: AppTheme.posDangerText,
+        bgColor: colors.dangerBg,
+        borderColor: colors.danger,
+        textColor: colors.dangerText,
       );
     } else {
       statusBox = _buildChangeBox(
         title: 'Verilecek Para Üstü',
         amountText: Money.formatCents(received - widget.totalCents),
-        bgColor: AppTheme.posCashBg,
-        borderColor: AppTheme.posCashAction,
-        textColor: AppTheme.posCashText,
+        bgColor: colors.successBg,
+        borderColor: colors.emerald,
+        textColor: colors.successText,
       );
     }
 
@@ -361,8 +347,8 @@ class _PaymentDialogState extends State<PaymentDialog> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Wrap(
-          spacing: 8,
-          runSpacing: 8,
+          spacing: MmsSpacing.xs,
+          runSpacing: MmsSpacing.xs,
           children: [
             _presetButton('Tam Tutar', () => _setCashPreset(widget.totalCents)),
             _presetButton('50 TL', () => _setCashPreset(5000)),
@@ -377,21 +363,21 @@ class _PaymentDialogState extends State<PaymentDialog> {
             }),
           ],
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: MmsSpacing.sm),
         TextField(
           key: const Key('cash_received_input'),
           controller: _cashController,
           autofocus: true,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w800,
-            fontFeatures: AppTheme.tabularFiguresFeature,
+            color: colors.textPrimary,
+            fontFeatures: MmsTypography.tabularFigures,
           ),
           decoration: const InputDecoration(
             labelText: 'Müşteriden Alınan Nakit (TL)',
             hintText: 'Ör: 100.00',
-            border: OutlineInputBorder(),
           ),
           onChanged: (_) => setState(() {
             _submitError = null;
@@ -399,46 +385,46 @@ class _PaymentDialogState extends State<PaymentDialog> {
           // R-06: USB HID Enter sızıntısı tutarı doğrulamadan satışı asla otomatik tamamlamaz
           onSubmitted: (_) => setState(() {}),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: MmsSpacing.sm),
         statusBox,
       ],
     );
   }
 
-  Widget _buildCardSection() {
+  Widget _buildCardSection(BuildContext context) {
+    final colors = context.mmsColors;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(MmsSpacing.md),
           decoration: BoxDecoration(
-            color: AppTheme.posInfoBg,
-            borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color: AppTheme.primaryBlue.withValues(alpha: 0.4),
-            ),
+            color: colors.infoBg,
+            borderRadius: BorderRadius.circular(MmsRadius.sm),
+            border: Border.all(color: colors.info.withValues(alpha: 0.4)),
           ),
-          child: const Text(
+          child: Text(
             'Harici banka POS terminaline otomatik tutar gönderilmez (INV-05). '
             'Tahsil edilecek tutarı harici POS cihazına elle giriniz.',
             style: TextStyle(
               fontSize: 13.5,
-              color: AppTheme.textMainLight,
-              height: 1.4,
+              color: colors.infoText,
+              height: 1.45,
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: MmsSpacing.sm),
         Material(
-          color: AppTheme.surfaceLight,
+          color: colors.surfaceSubtle,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(8),
-            side: const BorderSide(color: AppTheme.borderSubtle),
+            borderRadius: BorderRadius.circular(MmsRadius.sm),
+            side: BorderSide(color: colors.border),
           ),
           clipBehavior: Clip.antiAlias,
           child: CheckboxListTile(
             key: const Key('card_manual_confirm_checkbox'),
             value: _externalPosConfirmed,
+            activeColor: colors.emerald,
             onChanged: _isSubmitting
                 ? null
                 : (checked) {
@@ -450,10 +436,10 @@ class _PaymentDialogState extends State<PaymentDialog> {
             controlAffinity: ListTileControlAffinity.leading,
             title: Text(
               'Harici banka POS terminaline ${Money.formatCents(widget.totalCents)} tutarını elle girdiğimi ve ödemenin onaylandığını teyit ediyorum.',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
-                color: AppTheme.textMainLight,
+                color: colors.textPrimary,
               ),
             ),
           ),
@@ -466,15 +452,15 @@ class _PaymentDialogState extends State<PaymentDialog> {
     return OutlinedButton(
       onPressed: _isSubmitting ? null : onTap,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size(84, 48),
+        minimumSize: const Size(80, 46),
         padding: const EdgeInsets.symmetric(horizontal: 12),
       ),
       child: Text(
         label,
         style: const TextStyle(
-          fontSize: 13.5,
+          fontSize: 13,
           fontWeight: FontWeight.w700,
-          fontFeatures: AppTheme.tabularFiguresFeature,
+          fontFeatures: MmsTypography.tabularFigures,
         ),
       ),
     );
@@ -488,31 +474,38 @@ class _PaymentDialogState extends State<PaymentDialog> {
     required Color textColor,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      padding: const EdgeInsets.symmetric(
+        vertical: MmsSpacing.md,
+        horizontal: MmsSpacing.md,
+      ),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(MmsRadius.md),
         border: Border.all(color: borderColor, width: 1.5),
       ),
       child: Column(
         children: [
           Text(
             title,
+            textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w700,
               color: textColor,
-              letterSpacing: 0.4,
+              letterSpacing: 0.3,
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            amountText,
-            style: TextStyle(
-              fontSize: 32,
-              fontWeight: FontWeight.w900,
-              color: textColor,
-              fontFeatures: AppTheme.tabularFiguresFeature,
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              amountText,
+              style: TextStyle(
+                fontSize: 32,
+                fontWeight: FontWeight.w900,
+                color: textColor,
+                fontFeatures: MmsTypography.tabularFigures,
+              ),
             ),
           ),
         ],
@@ -520,4 +513,3 @@ class _PaymentDialogState extends State<PaymentDialog> {
     );
   }
 }
-

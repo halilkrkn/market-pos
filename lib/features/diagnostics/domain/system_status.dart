@@ -1,6 +1,13 @@
 import 'package:mms_contracts/mms_contracts.dart';
 
-enum BackendConnectionState { checking, online, offline, draining }
+enum BackendConnectionState {
+  checking,
+  online,
+  offline,
+  draining,
+  tlsPinMismatch,
+  tlsCertError,
+}
 
 enum LocalDatabaseState { initializing, ready, error }
 
@@ -16,6 +23,7 @@ class SystemStatus {
   final OutboxSummary outboxSummary;
   final int localSalesCount;
   final int localProductsCount;
+  final int localMetricsRevision;
   final DateTime lastChecked;
   final String? errorMessage;
   final String localDbPath;
@@ -31,6 +39,7 @@ class SystemStatus {
     required this.outboxSummary,
     required this.localSalesCount,
     required this.localProductsCount,
+    this.localMetricsRevision = 0,
     required this.lastChecked,
     required this.localDbPath,
     this.errorMessage,
@@ -53,6 +62,7 @@ class SystemStatus {
       outboxSummary: outboxSummary ?? OutboxSummary.empty(),
       localSalesCount: 0,
       localProductsCount: 0,
+      localMetricsRevision: 0,
       lastChecked: DateTime.now(),
       localDbPath: localDbPath,
     );
@@ -69,6 +79,7 @@ class SystemStatus {
     OutboxSummary? outboxSummary,
     int? localSalesCount,
     int? localProductsCount,
+    int? localMetricsRevision,
     DateTime? lastChecked,
     String? errorMessage,
     String? localDbPath,
@@ -84,6 +95,7 @@ class SystemStatus {
       outboxSummary: outboxSummary ?? this.outboxSummary,
       localSalesCount: localSalesCount ?? this.localSalesCount,
       localProductsCount: localProductsCount ?? this.localProductsCount,
+      localMetricsRevision: localMetricsRevision ?? this.localMetricsRevision,
       lastChecked: lastChecked ?? this.lastChecked,
       errorMessage: errorMessage,
       localDbPath: localDbPath ?? this.localDbPath,

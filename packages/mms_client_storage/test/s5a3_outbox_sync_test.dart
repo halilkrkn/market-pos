@@ -54,6 +54,47 @@ class MockSyncTransport implements SyncTransport {
     );
   }
 
+  @override
+  Future<SyncResponse> postProductUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    callCount++;
+    final body = jsonDecode(payload) as Map<String, dynamic>;
+    final clientSeq = body['client_seq'] as int? ?? 1;
+
+    recordedCalls.add({
+      'hubUrl': hubUrl,
+      'token': token,
+      'payload': body,
+      'clientSeq': clientSeq,
+      'type': 'PRODUCT_UPSERT',
+    });
+
+    if (shouldThrowSocketException) {
+      return SyncResponse.networkError('Ağ kesintisi: Bağlantı koptu.');
+    }
+
+    if (scriptedResponses.containsKey(clientSeq)) {
+      return scriptedResponses[clientSeq]!;
+    }
+
+    if (defaultResponse != null) {
+      return defaultResponse!;
+    }
+
+    return SyncResponse(
+      statusCode: 200,
+      body: jsonEncode({
+        'status': 'COMMITTED',
+        'operation_type': 'PRODUCT_UPSERT',
+        'client_seq': clientSeq,
+      }),
+    );
+  }
+
   String? nextSyncSessionId = 'sync_sess_test_1001';
 
   @override
@@ -107,6 +148,34 @@ class MockSyncTransport implements SyncTransport {
       }),
     );
   }
+
+  @override
+  Future<SyncResponse> getSales({
+    required String hubUrl,
+    required String token,
+    int cursor = 0,
+    int limit = 50,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    return SyncResponse(
+      statusCode: 200,
+      body: jsonEncode({
+        'status': 'OK',
+        'sales': [],
+        'next_cursor': cursor,
+        'has_more': false,
+      }),
+    );
+  }
+
+  @override
+  Future<SyncResponse> postStockReceipt({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"status":"COMMITTED"}');
 
   @override
   void close() {}

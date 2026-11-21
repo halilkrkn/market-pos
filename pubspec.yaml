@@ -11,9 +11,11 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: ^1.0.8
-  drift: ^2.20.0
+  crypto: ^3.0.3
+  drift: ^2.32.0
   flutter_riverpod: ^2.5.1
   http: ^1.2.2
+  mobile_scanner: ^7.0.1
   path: ^1.9.0
   mms_client_storage:
     path: packages/mms_client_storage
@@ -23,7 +25,16 @@ dependencies:
 dev_dependencies:
   flutter_test:
     sdk: flutter
+  integration_test:
+    sdk: flutter
+  sqlite3: ^3.1.0
   flutter_lints: ^6.0.0
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/branding/mms_logo.png
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Variable.ttf

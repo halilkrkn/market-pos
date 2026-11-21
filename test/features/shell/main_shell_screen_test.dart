@@ -9,6 +9,9 @@ import 'package:market_pos/app/app.dart';
 import 'package:market_pos/core/network/api_client.dart';
 import 'package:market_pos/core/storage/local_database_service.dart';
 import 'package:market_pos/features/diagnostics/application/system_status_notifier.dart';
+import 'package:market_pos/features/shell/presentation/widgets/cashier_header_bar.dart';
+import 'package:market_pos/features/sync/domain/sync_coordinator_state.dart';
+import 'package:market_pos/features/sync/sync_providers.dart';
 
 void main() {
   group('MainShellScreen & MarketPosApp - Windows Arayüz Temeli Testleri', () {
@@ -150,6 +153,33 @@ void main() {
 
       // Çevrimiçi rozeti korunmalı
       expect(find.text('ÇEVRİMİÇİ (HUB CANLI)'), findsAtLeastNWidgets(1));
+    });
+
+    testWidgets(
+        '4. Startup Provider Yaşam Döngüsü: CashierHeaderBar render edildiğinde BackgroundSyncCoordinator erken başlatılır',
+        (WidgetTester tester) async {
+      tester.view.physicalSize = const Size(1280, 720);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.resetPhysicalSize);
+
+      await tester.pumpWidget(createTestApp());
+      await tester.pumpAndSettle();
+
+      // ProviderScope içindeki container'a erişerek koordinatörün oluşturulmuş ve başlatılmış olduğunu doğrula
+      final element = tester.element(find.byType(CashierHeaderBar));
+      final container = ProviderScope.containerOf(element);
+      final coordinatorState =
+          container.read(backgroundSyncCoordinatorProvider);
+
+      expect(coordinatorState, isNotNull);
+      // Başlangıçta startup ve ardından Hub bağlantısı doğrulandığında connectivityRestored tetiklenir
+      expect(
+        coordinatorState.lastTriggerReason,
+        anyOf(
+          SyncTriggerReason.startup,
+          SyncTriggerReason.connectivityRestored,
+        ),
+      );
     });
   });
 }

@@ -1,22 +1,39 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/platform/mms_ui_profile.dart';
+import '../../../../core/theme/design_tokens.dart';
+import '../../../barcode_scanner/barcode_scanner_providers.dart';
+import '../../../barcode_scanner/domain/camera_scan_result.dart';
+import '../../../barcode_scanner/domain/continuous_scan_session.dart';
 import '../../../diagnostics/application/system_status_notifier.dart';
+import '../../../shell/domain/app_destination.dart';
+import '../../../shell/shell_providers.dart';
+import '../../../sync/domain/sync_coordinator_state.dart';
+import '../../../sync/sync_providers.dart';
+import '../../application/hardware_barcode_buffer.dart';
+import '../../domain/barcode_input_sanitizer.dart';
 import '../../domain/cart_item.dart';
-import '../../domain/cart_state.dart';
 import '../../domain/money.dart';
 import '../../domain/pos_repository.dart';
 import '../../pos_providers.dart';
-import '../widgets/cart_item_row.dart';
+import '../widgets/desktop_pos_view.dart';
 import '../widgets/help_shortcuts_dialog.dart';
+import '../widgets/mobile_pos_view.dart';
 import '../widgets/payment_dialog.dart';
 import '../widgets/product_search_dialog.dart';
 import '../widgets/quantity_edit_dialog.dart';
-import '../widgets/virtual_numpad_panel.dart';
 
-/// Faz 1.2 Kasa Satış (POS) Ekranı — Windows Masaüstü Çift Panelli Ergonomi.
+/// MARKET MMS — Kasa / POS Ekranı Koordinatörü.
+///
+/// Windows masaüstünde [DesktopPosView] (çift panel, USB HID odağı, kısayollar),
+/// Android telefon ve tablette [MobilePosView] (tek elle kullanım, başparmak
+/// bölgesi sabit ödeme barı, harici HID tarayıcı desteği) görünümlerini ortak
+/// [cartProvider] üzerinden sunar.
 class PosScreen extends ConsumerStatefulWidget {
   const PosScreen({super.key});
 
@@ -27,10 +44,58 @@ class PosScreen extends ConsumerStatefulWidget {
 class _PosScreenState extends ConsumerState<PosScreen> {
   final TextEditingController _barcodeController = TextEditingController();
   final FocusNode _barcodeFocusNode = FocusNode();
+  final HardwareBarcodeBuffer _hidBuffer = HardwareBarcodeBuffer();
   int _activeModalCount = 0;
+  bool _isSubmittingBarcode = false;
+
+  static final Map<LogicalKeyboardKey, String> _digitKeyFallback = {
+    LogicalKeyboardKey.digit0: '0',
+    LogicalKeyboardKey.digit1: '1',
+    LogicalKeyboardKey.digit2: '2',
+    LogicalKeyboardKey.digit3: '3',
+    LogicalKeyboardKey.digit4: '4',
+    LogicalKeyboardKey.digit5: '5',
+    LogicalKeyboardKey.digit6: '6',
+    LogicalKeyboardKey.digit7: '7',
+    LogicalKeyboardKey.digit8: '8',
+    LogicalKeyboardKey.digit9: '9',
+    LogicalKeyboardKey.numpad0: '0',
+    LogicalKeyboardKey.numpad1: '1',
+    LogicalKeyboardKey.numpad2: '2',
+    LogicalKeyboardKey.numpad3: '3',
+    LogicalKeyboardKey.numpad4: '4',
+    LogicalKeyboardKey.numpad5: '5',
+    LogicalKeyboardKey.numpad6: '6',
+    LogicalKeyboardKey.numpad7: '7',
+    LogicalKeyboardKey.numpad8: '8',
+    LogicalKeyboardKey.numpad9: '9',
+  };
+
+  static final Set<LogicalKeyboardKey> _functionKeys = {
+    LogicalKeyboardKey.f1,
+    LogicalKeyboardKey.f2,
+    LogicalKeyboardKey.f3,
+    LogicalKeyboardKey.f4,
+    LogicalKeyboardKey.f5,
+    LogicalKeyboardKey.f6,
+    LogicalKeyboardKey.f7,
+    LogicalKeyboardKey.f8,
+    LogicalKeyboardKey.f9,
+    LogicalKeyboardKey.f10,
+    LogicalKeyboardKey.f11,
+    LogicalKeyboardKey.f12,
+  };
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleHardwareKeyEvent);
+  }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleHardwareKeyEvent);
+    _hidBuffer.reset();
     _barcodeController.dispose();
     _barcodeFocusNode.dispose();
     super.dispose();
@@ -39,7 +104,8 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   bool get _isIdle => _activeModalCount == 0;
 
   void _refocusBarcodeIfIdle() {
-    if (!mounted || !_isIdle) return;
+    final keepFocus = ref.read(mmsUiProfileProvider).keepBarcodeFieldFocused;
+    if (!mounted || !_isIdle || !keepFocus) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && _isIdle && _barcodeFocusNode.canRequestFocus) {
         _barcodeFocusNode.requestFocus();
@@ -47,11 +113,93 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     });
   }
 
+  String? _extractHidCharacter(KeyDownEvent event) {
+    final char = event.character;
+    if (char != null &&
+        char.length == 1 &&
+        RegExp(r'^[\x21-\x7E]$').hasMatch(char)) {
+      return char;
+    }
+    return _digitKeyFallback[event.logicalKey];
+  }
+
+  bool _hasActiveEditableFocus() {
+    if (_barcodeFocusNode.hasFocus) return true;
+    final focusContext = FocusManager.instance.primaryFocus?.context;
+    if (focusContext == null) return false;
+    return focusContext.widget is EditableText ||
+        focusContext.findAncestorWidgetOfExactType<EditableText>() != null ||
+        focusContext.findAncestorStateOfType<EditableTextState>() != null;
+  }
+
+  bool _handleHardwareKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    if (!mounted || !_isIdle) {
+      _hidBuffer.reset();
+      return false;
+    }
+    if (ref.read(activeDestinationProvider) != AppDestination.pos) {
+      _hidBuffer.reset();
+      return false;
+    }
+
+    final uiProfile = ref.read(mmsUiProfileProvider);
+    if (!uiProfile.enableGlobalHidScannerCapture) return false;
+
+    if (_hasActiveEditableFocus()) {
+      _hidBuffer.reset();
+      return false;
+    }
+
+    final hardwareKeyboard = HardwareKeyboard.instance;
+    if (hardwareKeyboard.isControlPressed ||
+        hardwareKeyboard.isAltPressed ||
+        hardwareKeyboard.isMetaPressed) {
+      _hidBuffer.reset();
+      return false;
+    }
+
+    if (_functionKeys.contains(event.logicalKey)) {
+      _hidBuffer.reset();
+      return false;
+    }
+
+    if (event.logicalKey == LogicalKeyboardKey.escape) {
+      _hidBuffer.reset();
+      if (!uiProfile.enableDesktopFunctionShortcuts) {
+        _handleEscapeWhenIdle();
+        return true;
+      }
+      return false;
+    }
+
+    final isTerminator =
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter ||
+        (event.logicalKey == LogicalKeyboardKey.tab &&
+            _hidBuffer.hasBufferedInput);
+    if (isTerminator) {
+      final scanned = _hidBuffer.commit();
+      if (scanned != null) {
+        unawaited(_submitScannedBarcode(scanned));
+        return true;
+      }
+      return false;
+    }
+
+    final ch = _extractHidCharacter(event);
+    if (ch != null) {
+      _hidBuffer.feedCharacter(ch);
+    }
+    return false;
+  }
+
   Future<T?> _showPosModal<T>(
     WidgetBuilder builder, {
     bool barrierDismissible = true,
   }) async {
     if (!mounted) return null;
+    _hidBuffer.reset();
     _activeModalCount++;
     _barcodeFocusNode.canRequestFocus = false;
     _barcodeFocusNode.unfocus();
@@ -71,15 +219,26 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   }
 
   Future<void> _submitBarcode() async {
-    if (!_isIdle) return;
-    final raw = _barcodeController.text.trim();
-    if (raw.isEmpty) {
+    if (!_isIdle || _isSubmittingBarcode) return;
+    final raw = _barcodeController.text;
+    if (BarcodeInputSanitizer.stripControlChars(raw).trim().isEmpty) {
+      _barcodeController.clear();
       _refocusBarcodeIfIdle();
       return;
     }
     _barcodeController.clear();
-    await ref.read(cartProvider.notifier).scanBarcode(raw);
-    _refocusBarcodeIfIdle();
+    await _submitScannedBarcode(raw);
+  }
+
+  Future<void> _submitScannedBarcode(String raw) async {
+    if (!_isIdle || _isSubmittingBarcode) return;
+    _isSubmittingBarcode = true;
+    try {
+      await ref.read(cartProvider.notifier).scanBarcode(raw);
+    } finally {
+      _isSubmittingBarcode = false;
+      _refocusBarcodeIfIdle();
+    }
   }
 
   void _appendNumpadChar(String value) {
@@ -103,9 +262,12 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   Future<void> _openProductSearchDialog() async {
     if (!_isIdle) return;
     final repo = ref.read(posRepositoryProvider);
+    final showKeyboardHints =
+        ref.read(mmsUiProfileProvider).showKeyboardShortcuts;
     await _showPosModal<void>(
       (_) => ProductSearchDialog(
         repository: repo,
+        showKeyboardHints: showKeyboardHints,
         onSelectProduct: (product) {
           ref.read(cartProvider.notifier).addProduct(product);
         },
@@ -117,17 +279,23 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (!_isIdle) return;
     final item = targetItem ?? ref.read(cartProvider).selectedItem;
     if (item == null) return;
+    final showKeyboardHints =
+        ref.read(mmsUiProfileProvider).showKeyboardShortcuts;
 
     await _showPosModal<void>(
       (_) => QuantityEditDialog(
         item: item,
+        showKeyboardHints: showKeyboardHints,
         onValidateAndApply: (rawQuantity) {
-          final ok = ref.read(cartProvider.notifier).updateQuantityFromInput(
+          final ok = ref
+              .read(cartProvider.notifier)
+              .updateQuantityFromInput(
                 productId: item.productId,
                 rawQuantity: rawQuantity,
               );
           if (!ok) {
-            return ref.read(cartProvider).errorMessage ?? 'Miktar güncellenemedi.';
+            return ref.read(cartProvider).errorMessage ??
+                'Miktar güncellenemedi.';
           }
           return null;
         },
@@ -137,31 +305,37 @@ class _PosScreenState extends ConsumerState<PosScreen> {
 
   Future<void> _openClearCartDialog() async {
     if (!_isIdle || ref.read(cartProvider).isEmpty) return;
+    final colors = context.mmsColors;
+    final showKeyboardHints =
+        ref.read(mmsUiProfileProvider).showKeyboardShortcuts;
+
     final confirmed = await _showPosModal<bool>(
       (dialogContext) => CallbackShortcuts(
         bindings: {
           const SingleActivator(LogicalKeyboardKey.escape): () =>
               Navigator.of(dialogContext).pop(false),
         },
-        child: AlertDialog(
+        child: AppDialog(
           key: const Key('clear_cart_confirm_dialog'),
-          title: const Text('Sepeti Temizle'),
-          content: const Text(
+          title: 'Sepeti Temizle',
+          icon: Icons.delete_sweep_rounded,
+          iconColor: colors.danger,
+          maxWidth: 440,
+          content: Text(
             'Sepetteki tüm ürünleri kaldırmak istediğinize emin misiniz?',
+            style: TextStyle(fontSize: 14, color: colors.textSecondary),
           ),
           actions: [
-            OutlinedButton(
+            AppButton(
+              label: showKeyboardHints ? 'Vazgeç [Esc]' : 'Vazgeç',
+              variant: AppButtonVariant.secondary,
               onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Vazgeç [Esc]'),
             ),
-            ElevatedButton(
+            AppButton(
               key: const Key('clear_cart_confirm_yes'),
+              label: 'Sepeti Temizle',
+              variant: AppButtonVariant.danger,
               onPressed: () => Navigator.of(dialogContext).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.statusOffline,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Sepeti Temizle'),
             ),
           ],
         ),
@@ -177,25 +351,29 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     if (!_isIdle) return;
     final cartState = ref.read(cartProvider);
     if (!cartState.canCheckout) return;
+    final showKeyboardHints =
+        ref.read(mmsUiProfileProvider).showKeyboardShortcuts;
 
     await _showPosModal<PosCompletedSale>(
       (_) => PaymentDialog(
         totalCents: cartState.totalCents,
         initialMethod: method,
-        onConfirmSale: ({
-          required paymentMethod,
-          cashReceivedCents,
-          required externalPosConfirmed,
-        }) async {
-          final notifier = ref.read(cartProvider.notifier);
-          final sale = await notifier.completeSale(
-            paymentMethod: paymentMethod,
-            cashReceivedCents: cashReceivedCents,
-            externalPosConfirmed: externalPosConfirmed,
-          );
-          final err = mounted ? ref.read(cartProvider).errorMessage : null;
-          return (sale: sale, errorMessage: err);
-        },
+        showKeyboardHints: showKeyboardHints,
+        onConfirmSale:
+            ({
+              required paymentMethod,
+              cashReceivedCents,
+              required externalPosConfirmed,
+            }) async {
+              final notifier = ref.read(cartProvider.notifier);
+              final sale = await notifier.completeSale(
+                paymentMethod: paymentMethod,
+                cashReceivedCents: cashReceivedCents,
+                externalPosConfirmed: externalPosConfirmed,
+              );
+              final err = mounted ? ref.read(cartProvider).errorMessage : null;
+              return (sale: sale, errorMessage: err);
+            },
       ),
       barrierDismissible: false,
     );
@@ -204,6 +382,73 @@ class _PosScreenState extends ConsumerState<PosScreen> {
   Future<void> _openHelpDialog() async {
     if (!_isIdle) return;
     await _showPosModal<void>((_) => const HelpShortcutsDialog());
+  }
+
+  Future<void> _openCameraBarcodeScanner() async {
+    if (!_isIdle || _isSubmittingBarcode) return;
+    _hidBuffer.reset();
+    _activeModalCount++;
+    _barcodeFocusNode.canRequestFocus = false;
+    _barcodeFocusNode.unfocus();
+
+    CameraScanResult scanResult;
+    try {
+      // Faz 2 §4.1: Kamera açık kalır; her okunan ürün doğrudan sepete eklenir,
+      // aynı ürün tekrar okutulunca satır miktarı artar.
+      scanResult = await ref.read(cameraBarcodeScannerProvider).scanContinuously(
+        context,
+        title: 'Kasada Barkod Tara',
+        subtitle: 'Ürünleri sırayla çerçeveye hizalayın; bitince "Taramayı Bitir"',
+        onBarcode: _addCameraBarcodeToCart,
+      );
+    } finally {
+      _activeModalCount--;
+      if (mounted && _isIdle) {
+        _barcodeFocusNode.canRequestFocus = true;
+        _refocusBarcodeIfIdle();
+      }
+    }
+
+    if (!mounted) return;
+    switch (scanResult.status) {
+      case CameraScanStatus.scanned:
+        if (scanResult.barcode != null) {
+          await _addCameraBarcodeToCart(scanResult.barcode!);
+        }
+        break;
+      case CameraScanStatus.permissionDenied:
+      case CameraScanStatus.error:
+      case CameraScanStatus.unsupportedPlatform:
+        AppSnackbar.show(
+          context,
+          message:
+              scanResult.errorMessage ?? 'Kamera ile barkod okunamadı.',
+          tone: AppBadgeTone.warning,
+        );
+        break;
+      case CameraScanStatus.cancelled:
+        break;
+    }
+  }
+
+  /// Kamera ile okunan barkodu yerel katalogda arar ve sepete ekler; tarayıcıda
+  /// gösterilecek geri bildirimi döner. İnternet/Hub gerektirmez.
+  Future<ScanFeedback> _addCameraBarcodeToCart(String barcode) async {
+    final notifier = ref.read(cartProvider.notifier);
+    final added = await notifier.scanBarcode(barcode);
+    final cart = ref.read(cartProvider);
+    if (added) {
+      final item = cart.selectedItem;
+      if (item == null) return const ScanFeedback.success('Ürün sepete eklendi.');
+      return ScanFeedback.success(
+        'Sepete eklendi: ${item.productName} · '
+        '${Money.formatMilliWithUnit(item.quantityMilli, item.pricingUnit)}',
+      );
+    }
+    final message = cart.errorMessage ?? 'Barkod sepete eklenemedi.';
+    return message.contains('bulunamadı')
+        ? ScanFeedback.notFound('Ürün bulunamadı: $barcode')
+        : ScanFeedback.error(message);
   }
 
   void _handleEscapeWhenIdle() {
@@ -220,665 +465,107 @@ class _PosScreenState extends ConsumerState<PosScreen> {
     final cartState = ref.watch(cartProvider);
     final prefsState = ref.watch(posPreferencesProvider);
     final systemStatus = ref.watch(systemStatusProvider);
+    final syncState = ref.watch(backgroundSyncCoordinatorProvider);
+    final uiProfile = ref.watch(mmsUiProfileProvider);
+    final useMobilePos = uiProfile.useMobileLayout(context.windowClass);
 
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.f1): _openHelpDialog,
-        const SingleActivator(LogicalKeyboardKey.f2): () => _openQuantityDialog(),
-        const SingleActivator(LogicalKeyboardKey.f9): () =>
-            _openPaymentDialog(PaymentMethod.card),
-        const SingleActivator(LogicalKeyboardKey.f10): () =>
-            _openPaymentDialog(PaymentMethod.cash),
-        const SingleActivator(LogicalKeyboardKey.escape): _handleEscapeWhenIdle,
-      },
-      child: Column(
-        children: [
-          _buildBarcodeToolbar(prefsState.showVirtualNumpad),
-          if (cartState.errorMessage != null)
-            _buildFeedbackBanner(
-              message: cartState.errorMessage!,
-              bgColor: AppTheme.posDangerBg,
-              borderColor: AppTheme.posDangerText,
-              textColor: AppTheme.posDangerText,
-              icon: Icons.error_outline,
-            ),
-          if (cartState.infoMessage != null)
-            _buildFeedbackBanner(
-              message: cartState.infoMessage!,
-              bgColor: AppTheme.posCashBg,
-              borderColor: AppTheme.posCashAction,
-              textColor: AppTheme.posCashText,
-              icon: Icons.check_circle_outline,
-            ),
-          Expanded(
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                final isWide = constraints.maxWidth >= 900;
-                if (isWide) {
-                  return Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        flex: 6,
-                        child: _buildCartPanel(cartState),
-                      ),
-                      const VerticalDivider(
-                        width: 1,
-                        thickness: 1,
-                        color: AppTheme.borderSubtle,
-                      ),
-                      Expanded(
-                        flex: 4,
-                        child: _buildActionPanel(
-                          cartState: cartState,
-                          showNumpad: prefsState.showVirtualNumpad,
-                          pendingOutboxCount: systemStatus.pendingOutboxCount,
-                        ),
-                      ),
-                    ],
-                  );
-                }
+    void toggleNumpad() {
+      ref.read(posPreferencesProvider.notifier).toggleVirtualNumpad();
+      _refocusBarcodeIfIdle();
+    }
 
-                return SingleChildScrollView(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: 360,
-                        child: _buildCartPanel(cartState),
-                      ),
-                      const Divider(height: 1, color: AppTheme.borderSubtle),
-                      _buildActionPanel(
-                        cartState: cartState,
-                        showNumpad: prefsState.showVirtualNumpad,
-                        pendingOutboxCount: systemStatus.pendingOutboxCount,
-                        embedScrollable: true,
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+    void retrySync() {
+      ref.read(systemStatusProvider.notifier).refreshStatus();
+      ref
+          .read(backgroundSyncCoordinatorProvider.notifier)
+          .triggerSync(reason: SyncTriggerReason.manual);
+    }
 
-  Widget _buildBarcodeToolbar(bool showVirtualNumpad) {
-    final barcodeField = TextField(
-      key: const Key('barcode_input_field'),
-      controller: _barcodeController,
-      focusNode: _barcodeFocusNode,
-      autofocus: true,
-      style: const TextStyle(
-        fontSize: 16,
-        fontWeight: FontWeight.w600,
-        fontFeatures: AppTheme.tabularFiguresFeature,
-      ),
-      decoration: const InputDecoration(
-        hintText: 'Barkod okutun veya yazıp Enter tuşuna basın...',
-        prefixIcon: Icon(Icons.qr_code_scanner),
-        border: OutlineInputBorder(),
-        isDense: true,
-        contentPadding: EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
-        ),
-      ),
-      onSubmitted: (_) => _submitBarcode(),
-    );
+    void clearMessages() {
+      ref.read(cartProvider.notifier).clearMessages();
+      _refocusBarcodeIfIdle();
+    }
 
-    final addButton = ElevatedButton.icon(
-      key: const Key('barcode_add_button'),
-      onPressed: _submitBarcode,
-      icon: const Icon(Icons.add),
-      label: const Text('Ekle'),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AppTheme.primaryBlue,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(88, 48),
-      ),
-    );
+    void selectProduct(String productId) {
+      ref.read(cartProvider.notifier).selectProduct(productId);
+      _refocusBarcodeIfIdle();
+    }
 
-    final searchButton = OutlinedButton.icon(
-      key: const Key('open_product_search_button'),
-      onPressed: _openProductSearchDialog,
-      icon: const Icon(Icons.search),
-      label: const Text('Ürün Ara'),
-      style: OutlinedButton.styleFrom(
-        minimumSize: const Size(124, 48),
-      ),
-    );
+    void incrementProduct(String productId) {
+      ref.read(cartProvider.notifier).incrementProduct(productId);
+      _refocusBarcodeIfIdle();
+    }
 
-    final numpadToggle = InkWell(
-      key: const Key('virtual_numpad_toggle'),
-      onTap: () {
-        ref.read(posPreferencesProvider.notifier).toggleVirtualNumpad();
-        _refocusBarcodeIfIdle();
-      },
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        constraints: const BoxConstraints(minHeight: 48),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: showVirtualNumpad ? AppTheme.posInfoBg : AppTheme.surfaceLight,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: showVirtualNumpad
-                ? AppTheme.primaryBlue
-                : AppTheme.borderSubtle,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.dialpad,
-              size: 18,
-              color: showVirtualNumpad
-                  ? AppTheme.primaryBlue
-                  : AppTheme.textMutedLight,
-            ),
-            const SizedBox(width: 6),
-            Text(
-              'Sanal Numpad',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w700,
-                color: showVirtualNumpad
-                    ? AppTheme.primaryBlue
-                    : AppTheme.textMainLight,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    void decrementProduct(String productId) {
+      ref.read(cartProvider.notifier).decrementProduct(productId);
+      _refocusBarcodeIfIdle();
+    }
 
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        color: AppTheme.cardBgLight,
-        border: Border(bottom: BorderSide(color: AppTheme.borderSubtle)),
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (constraints.maxWidth >= 760) {
-            return Row(
-              children: [
-                Expanded(child: barcodeField),
-                const SizedBox(width: 10),
-                addButton,
-                const SizedBox(width: 10),
-                searchButton,
-                const SizedBox(width: 12),
-                numpadToggle,
-              ],
-            );
-          }
+    void editItemQuantity(CartItem item) {
+      ref.read(cartProvider.notifier).selectProduct(item.productId);
+      _openQuantityDialog(item);
+    }
 
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              barcodeField,
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  addButton,
-                  searchButton,
-                  numpadToggle,
-                ],
-              ),
-            ],
-          );
-        },
-      ),
-    );
-  }
+    void removeProduct(String productId) {
+      ref.read(cartProvider.notifier).removeProduct(productId);
+      _refocusBarcodeIfIdle();
+    }
 
-  Widget _buildFeedbackBanner({
-    required String message,
-    required Color bgColor,
-    required Color borderColor,
-    required Color textColor,
-    required IconData icon,
-  }) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: bgColor,
-        border: Border(bottom: BorderSide(color: borderColor, width: 1.5)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: textColor, size: 20),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(
-                fontSize: 13.5,
-                fontWeight: FontWeight.w700,
-                color: textColor,
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: 'Kapat',
-            onPressed: () {
-              ref.read(cartProvider.notifier).clearMessages();
-              _refocusBarcodeIfIdle();
-            },
-            style: IconButton.styleFrom(
-              minimumSize: const Size(48, 48),
-              foregroundColor: textColor,
-            ),
-            icon: const Icon(Icons.close, size: 18),
-          ),
-        ],
-      ),
-    );
-  }
+    if (useMobilePos) {
+      return MobilePosView(
+        barcodeController: _barcodeController,
+        barcodeFocusNode: _barcodeFocusNode,
+        cartState: cartState,
+        showVirtualNumpad: prefsState.showVirtualNumpad,
+        systemStatus: systemStatus,
+        syncState: syncState,
+        onSubmitBarcode: _submitBarcode,
+        onAppendNumpadChar: _appendNumpadChar,
+        onBackspaceNumpad: _backspaceNumpad,
+        onClearBarcode: _barcodeController.clear,
+        onOpenCameraScanner: uiProfile.supportsCameraBarcodeScanning
+            ? _openCameraBarcodeScanner
+            : null,
+        onToggleVirtualNumpad: toggleNumpad,
+        onOpenProductSearch: _openProductSearchDialog,
+        onEditItemQuantity: editItemQuantity,
+        onOpenClearCartDialog: _openClearCartDialog,
+        onOpenPaymentDialog: _openPaymentDialog,
+        onRetrySync: retrySync,
+        onClearMessages: clearMessages,
+        onSelectProduct: selectProduct,
+        onIncrementProduct: incrementProduct,
+        onDecrementProduct: decrementProduct,
+        onRemoveProduct: removeProduct,
+      );
+    }
 
-  Widget _buildCartPanel(CartState cartState) {
-    return Container(
-      color: AppTheme.cardBgLight,
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceLight,
-              border: Border(bottom: BorderSide(color: AppTheme.borderSubtle)),
-            ),
-            child: LayoutBuilder(
-              builder: (context, constraints) {
-                if (constraints.maxWidth >= 560) {
-                  return const Row(
-                    children: [
-                      SizedBox(
-                        width: 32,
-                        child: Text(
-                          '#',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textMutedLight,
-                          ),
-                        ),
-                      ),
-                      Expanded(
-                        flex: 4,
-                        child: Text(
-                          'Ürün & Birim Fiyat',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textMutedLight,
-                          ),
-                        ),
-                      ),
-                      Text(
-                        'Miktar',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textMutedLight,
-                        ),
-                      ),
-                      SizedBox(width: 96),
-                      SizedBox(
-                        width: 112,
-                        child: Text(
-                          'Tutar',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.textMutedLight,
-                          ),
-                        ),
-                      ),
-                      SizedBox(width: 56),
-                    ],
-                  );
-                }
-
-                return const Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Sepet Kalemleri',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.textMutedLight,
-                        ),
-                      ),
-                    ),
-                    Text(
-                      'Tutar',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w700,
-                        color: AppTheme.textMutedLight,
-                      ),
-                    ),
-                  ],
-                );
-              },
-            ),
-          ),
-          Expanded(
-            child: cartState.isEmpty
-                ? const Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.shopping_cart_outlined,
-                          size: 48,
-                          color: AppTheme.textMutedLight,
-                        ),
-                        SizedBox(height: 12),
-                        Text(
-                          'Sepet boş. Barkod okutun veya "Ürün Ara" ile ürün ekleyin.',
-                          style: TextStyle(
-                            fontSize: 14.5,
-                            color: AppTheme.textMutedLight,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : ListView.builder(
-                    itemCount: cartState.items.length,
-                    itemBuilder: (context, index) {
-                      final item = cartState.items[index];
-                      return CartItemRow(
-                        index: index,
-                        item: item,
-                        isSelected: cartState.selectedItem?.productId == item.productId,
-                        onSelect: () {
-                          ref
-                              .read(cartProvider.notifier)
-                              .selectProduct(item.productId);
-                          _refocusBarcodeIfIdle();
-                        },
-                        onIncrement: () {
-                          ref
-                              .read(cartProvider.notifier)
-                              .incrementProduct(item.productId);
-                          _refocusBarcodeIfIdle();
-                        },
-                        onDecrement: () {
-                          ref
-                              .read(cartProvider.notifier)
-                              .decrementProduct(item.productId);
-                          _refocusBarcodeIfIdle();
-                        },
-                        onEditQuantity: () {
-                          ref
-                              .read(cartProvider.notifier)
-                              .selectProduct(item.productId);
-                          _openQuantityDialog(item);
-                        },
-                        onRemove: () {
-                          ref
-                              .read(cartProvider.notifier)
-                              .removeProduct(item.productId);
-                          _refocusBarcodeIfIdle();
-                        },
-                      );
-                    },
-                  ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceLight,
-              border: Border(top: BorderSide(color: AppTheme.borderSubtle)),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Expanded(
-                  child: Text(
-                    'Toplam: ${cartState.lineCount} Kalem',
-                    style: const TextStyle(
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.textMainLight,
-                      fontFeatures: AppTheme.tabularFiguresFeature,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton.icon(
-                  key: const Key('clear_cart_button'),
-                  onPressed: cartState.isEmpty ? null : _openClearCartDialog,
-                  icon: const Icon(Icons.clear_all),
-                  label: const Text('Sepeti Temizle'),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.posDangerText,
-                    minimumSize: const Size(140, 48),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionPanel({
-    required CartState cartState,
-    required bool showNumpad,
-    required int pendingOutboxCount,
-    bool embedScrollable = false,
-  }) {
-    final topSection = Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Wrap(
-          alignment: WrapAlignment.spaceBetween,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 10,
-                vertical: 8,
-              ),
-              decoration: BoxDecoration(
-                color: AppTheme.cardBgLight,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: AppTheme.borderSubtle),
-              ),
-              child: Text(
-                'Bekleyen Outbox: $pendingOutboxCount',
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.textMainLight,
-                  fontFeatures: AppTheme.tabularFiguresFeature,
-                ),
-              ),
-            ),
-            OutlinedButton.icon(
-              key: const Key('help_button'),
-              onPressed: _openHelpDialog,
-              icon: const Icon(Icons.help_outline, size: 18),
-              label: const Text('Yardım [F1]'),
-              style: OutlinedButton.styleFrom(
-                minimumSize: const Size(120, 48),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 12),
-        if (cartState.hasNegativeStockItems) ...[
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppTheme.posWarningBg,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: AppTheme.statusWarning),
-            ),
-            child: const Row(
-              children: [
-                Icon(
-                  Icons.warning_amber_rounded,
-                  color: AppTheme.posWarningText,
-                ),
-                SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Eksi stok uyarısı (allow): Satış engellenmez ancak stok eksiye düşecektir.',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: AppTheme.posWarningText,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
-        ],
-        if (showNumpad) ...[
-          VirtualNumpadPanel(
-            onDigitOrChar: _appendNumpadChar,
-            onBackspace: _backspaceNumpad,
-            onClear: () => _barcodeController.clear(),
-            onSubmit: _submitBarcode,
-          ),
-          const SizedBox(height: 12),
-        ],
-      ],
-    );
-
-    return Container(
-      color: AppTheme.surfaceLight,
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (embedScrollable)
-            topSection
-          else
-            Expanded(
-              child: SingleChildScrollView(
-                child: topSection,
-              ),
-            ),
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              color: AppTheme.cardBgLight,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: AppTheme.primaryDark, width: 2),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                const Text(
-                  'ÖDENECEK TOPLAM TUTAR',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.textMutedLight,
-                    letterSpacing: 0.6,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  Money.formatCents(cartState.totalCents),
-                  key: const Key('pos_grand_total'),
-                  style: const TextStyle(
-                    fontSize: 38,
-                    fontWeight: FontWeight.w900,
-                    color: AppTheme.textMainLight,
-                    fontFeatures: AppTheme.tabularFiguresFeature,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton(
-                  key: const Key('cash_pay_button'),
-                  onPressed: cartState.canCheckout
-                      ? () => _openPaymentDialog(PaymentMethod.cash)
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(120, 64),
-                    backgroundColor: AppTheme.posCashAction,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: const Color(0xFFCBD5E1),
-                    disabledForegroundColor: const Color(0xFF475569),
-                  ),
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'NAKİT',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        '[F10]',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: ElevatedButton(
-                  key: const Key('card_pay_button'),
-                  onPressed: cartState.canCheckout
-                      ? () => _openPaymentDialog(PaymentMethod.card)
-                      : null,
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(120, 64),
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: const Color(0xFFCBD5E1),
-                    disabledForegroundColor: const Color(0xFF475569),
-                  ),
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'KREDİ KARTI',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      Text(
-                        '[F9 • Elle Giriş]',
-                        style: TextStyle(fontSize: 12),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
+    return DesktopPosView(
+      barcodeController: _barcodeController,
+      barcodeFocusNode: _barcodeFocusNode,
+      enableBarcodeAutofocus: uiProfile.enableHardwareBarcodeAutofocus,
+      cartState: cartState,
+      showVirtualNumpad: prefsState.showVirtualNumpad,
+      systemStatus: systemStatus,
+      syncState: syncState,
+      onSubmitBarcode: _submitBarcode,
+      onAppendNumpadChar: _appendNumpadChar,
+      onBackspaceNumpad: _backspaceNumpad,
+      onClearBarcode: _barcodeController.clear,
+      onToggleVirtualNumpad: toggleNumpad,
+      onOpenProductSearch: _openProductSearchDialog,
+      onOpenHelpDialog: _openHelpDialog,
+      onOpenDefaultQuantityDialog: () => _openQuantityDialog(),
+      onEditItemQuantity: editItemQuantity,
+      onOpenClearCartDialog: _openClearCartDialog,
+      onOpenPaymentDialog: _openPaymentDialog,
+      onHandleEscape: _handleEscapeWhenIdle,
+      onRetrySync: retrySync,
+      onClearMessages: clearMessages,
+      onSelectProduct: selectProduct,
+      onIncrementProduct: incrementProduct,
+      onDecrementProduct: decrementProduct,
+      onRemoveProduct: removeProduct,
     );
   }
 }
-

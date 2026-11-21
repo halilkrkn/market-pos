@@ -1,290 +1,127 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/platform/mms_ui_profile.dart';
+import '../../../../core/theme/design_tokens.dart';
+import '../../../catalog/presentation/screens/catalog_screen.dart';
+import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../diagnostics/presentation/screens/diagnostics_view.dart';
 import '../../../pos/presentation/screens/pos_screen.dart';
-import '../widgets/cashier_header_bar.dart';
+import '../../../sales/presentation/screens/sales_history_screen.dart';
+import '../../../setup/presentation/widgets/first_setup_wizard_dialog.dart';
+import '../../../setup/setup_providers.dart';
+import '../../../stock/presentation/screens/stock_screen.dart';
+import '../../domain/app_destination.dart';
+import '../../shell_providers.dart';
+import '../widgets/desktop_shell_layout.dart';
+import '../widgets/mobile_shell_layout.dart';
 
-/// MARKET MMS - Windows Masaüstü Ana İskelet Ekranı (Main Shell)
-class MainShellScreen extends StatefulWidget {
+/// MARKET MMS — Platform ve Pencere Sınıfı Duyarlı Uygulama İskeleti.
+///
+/// Windows masaüstü ([DesktopShellLayout]) ile Android telefon/tablet
+/// ([MobileShellLayout]) navigasyon kabuklarını ayırır; aktif ekran durumu
+/// [activeDestinationProvider] üzerinden yönetilir ve tüm modüller ortak
+/// Riverpod state / domain katmanını tüketir.
+class MainShellScreen extends ConsumerWidget {
   const MainShellScreen({super.key});
 
   @override
-  State<MainShellScreen> createState() => _MainShellScreenState();
-}
+  Widget build(BuildContext context, WidgetRef ref) {
+    final uiProfile = ref.watch(mmsUiProfileProvider);
+    final selectedDestination = ref.watch(activeDestinationProvider);
+    final windowClass = context.windowClass;
+    final setupConfig = ref.watch(setupConfigProvider);
+    final showSetupBanner =
+        ref.watch(setupWizardBannerEnabledProvider) &&
+        !setupConfig.isSetupCompleted;
 
-class _MainShellScreenState extends State<MainShellScreen> {
-  int _selectedIndex = 0; // Faz 1.2 itibarıyla Kasa (Satış) varsayılan açılış ekranıdır
+    void selectDestination(AppDestination destination) {
+      if (ref.read(activeDestinationProvider) == destination) return;
+      ref.read(activeDestinationProvider.notifier).state = destination;
+    }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Column(
-        children: [
-          // 1. Üst Kasa Başlık Çubuğu
-          const CashierHeaderBar(),
+    final colors = context.mmsColors;
+    final innerContent = _buildContent(selectedDestination, selectDestination);
 
-          // 2. Ana Gövde (Sol Menü + İçerik)
-          Expanded(
-            child: Row(
-              children: [
-                // Sol Navigasyon Rayı
-                NavigationRail(
-                  selectedIndex: _selectedIndex,
-                  onDestinationSelected: (index) {
-                    setState(() {
-                      _selectedIndex = index;
-                    });
-                  },
-                  labelType: NavigationRailLabelType.all,
-                  minWidth: 84,
-                  backgroundColor: Colors.white,
-                  indicatorColor: AppTheme.primaryBlue.withValues(alpha: 0.12),
-                  selectedIconTheme: const IconThemeData(
-                    color: AppTheme.primaryBlue,
+    final content = showSetupBanner
+        ? Column(
+            children: [
+              Material(
+                color: colors.infoBg,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: MmsSpacing.md,
+                    vertical: MmsSpacing.xs,
                   ),
-                  unselectedIconTheme: const IconThemeData(
-                    color: AppTheme.textMutedLight,
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.storefront_rounded,
+                        size: 18,
+                        color: colors.infoText,
+                      ),
+                      const SizedBox(width: MmsSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          'İlk mağaza/cihaz kurulumu henüz tamamlanmadı.',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: colors.infoText,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        key: const Key('shell_setup_wizard_cta'),
+                        onPressed: () => FirstSetupWizardDialog.show(context),
+                        child: const Text('Kurulumu Tamamla'),
+                      ),
+                    ],
                   ),
-                  selectedLabelTextStyle: const TextStyle(
-                    color: AppTheme.primaryBlue,
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                  ),
-                  unselectedLabelTextStyle: const TextStyle(
-                    color: AppTheme.textMutedLight,
-                    fontSize: 11,
-                  ),
-                  destinations: const [
-                    NavigationRailDestination(
-                      icon: Icon(Icons.shopping_cart_outlined),
-                      selectedIcon: Icon(Icons.shopping_cart),
-                      label: Text('Kasa (Satış)'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.inventory_2_outlined),
-                      selectedIcon: Icon(Icons.inventory_2),
-                      label: Text('Ürünler'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.bar_chart_outlined),
-                      selectedIcon: Icon(Icons.bar_chart),
-                      label: Text('Raporlar'),
-                    ),
-                    NavigationRailDestination(
-                      icon: Icon(Icons.settings_suggest_outlined),
-                      selectedIcon: Icon(Icons.settings_suggest),
-                      label: Text('Sistem & Tanı'),
-                    ),
-                  ],
                 ),
-                const VerticalDivider(
-                  width: 1,
-                  thickness: 1,
-                  color: AppTheme.borderSubtle,
-                ),
+              ),
+              Expanded(child: innerContent),
+            ],
+          )
+        : innerContent;
 
-                // Sağ İçerik Alanı
-                Expanded(child: _buildContent(_selectedIndex)),
-              ],
-            ),
-          ),
+    if (uiProfile.useMobileLayout(windowClass)) {
+      return MobileShellLayout(
+        selectedDestination: selectedDestination,
+        onSelectDestination: selectDestination,
+        child: content,
+      );
+    }
 
-          // 3. Alt Durum ve Kısayol Bilgi Çubuğu (Cashier Ergonomics)
-          _buildShortcutFooter(context),
-        ],
-      ),
+    return DesktopShellLayout(
+      selectedDestination: selectedDestination,
+      onSelectDestination: selectDestination,
+      child: content,
     );
   }
 
-  Widget _buildContent(int index) {
-    switch (index) {
-      case 0:
+  Widget _buildContent(
+    AppDestination destination,
+    ValueChanged<AppDestination> onSelectDestination,
+  ) {
+    switch (destination) {
+      case AppDestination.pos:
         return const PosScreen();
-      case 1:
-        return _buildModulePlaceholder(
-          title: 'Ürün ve Stok Yönetimi',
-          phase: 'Sonraki Fazlar — Ürün CRUD & Stok Hareketleri',
-          description: 'Merkezi Master Hub API üzerinden ürün ekleme, fiyat güncelleme, stok hareketleri ve birim dönüşümü işlemleri sonraki fazlarda eklenecektir.',
-          icon: Icons.inventory_2_outlined,
+      case AppDestination.dashboard:
+        return DashboardScreen(
+          onNavigateToPos: () => onSelectDestination(AppDestination.pos),
+          onNavigateToStock: () => onSelectDestination(AppDestination.stock),
+          onNavigateToSales: () => onSelectDestination(AppDestination.sales),
         );
-      case 2:
-        return _buildModulePlaceholder(
-          title: 'Kasa ve Finansal Raporlar',
-          phase: 'Sonraki Fazlar — Satış Geçmişi & Dashboard',
-          description: 'Nakit/kart satış dağılımı, geçmiş fiş inceleme, iade ve özet kârlılık metrikleri sonraki fazlarda eklenecektir.',
-          icon: Icons.bar_chart_outlined,
-        );
-      case 3:
-      default:
+      case AppDestination.catalog:
+        return const CatalogScreen();
+      case AppDestination.stock:
+        return const StockScreen();
+      case AppDestination.sales:
+        return const SalesHistoryScreen();
+      case AppDestination.diagnostics:
         return const DiagnosticsView();
     }
-  }
-
-  Widget _buildModulePlaceholder({
-    required String title,
-    required String phase,
-    required String description,
-    required IconData icon,
-  }) {
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 520),
-        padding: const EdgeInsets.all(32),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderSubtle),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceLight,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 40, color: AppTheme.primaryBlue),
-            ),
-            const SizedBox(height: 18),
-            Text(
-              title,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textMainLight,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Text(
-                phase,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  color: AppTheme.primaryBlue,
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              description,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 13.5,
-                color: AppTheme.textMutedLight,
-                height: 1.4,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildShortcutFooter(BuildContext context) {
-    const brandText = Text(
-      'MARKET MMS v1.0.0 • On-Premises Local Master Hub Mimarisi',
-      overflow: TextOverflow.ellipsis,
-      style: TextStyle(fontSize: 11, color: AppTheme.textMutedLight),
-    );
-    const shortcutItems = [
-      _ShortcutItem(keyLabel: 'F1', text: 'Yardım'),
-      _ShortcutItem(keyLabel: 'F2', text: 'Miktar'),
-      _ShortcutItem(keyLabel: 'F9', text: 'Kart'),
-      _ShortcutItem(keyLabel: 'F10', text: 'Nakit'),
-      _ShortcutItem(keyLabel: 'Esc', text: 'İptal'),
-    ];
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (constraints.maxWidth >= 900) {
-          return Container(
-            height: 32,
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            decoration: const BoxDecoration(
-              color: AppTheme.surfaceLight,
-              border: Border(top: BorderSide(color: AppTheme.borderSubtle, width: 1)),
-            ),
-            child: const Row(
-              children: [
-                ...shortcutItems,
-                Spacer(),
-                brandText,
-              ],
-            ),
-          );
-        }
-
-        return Container(
-          constraints: const BoxConstraints(minHeight: 32),
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: const BoxDecoration(
-            color: AppTheme.surfaceLight,
-            border: Border(top: BorderSide(color: AppTheme.borderSubtle, width: 1)),
-          ),
-          child: Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: const [
-              ...shortcutItems,
-              brandText,
-            ],
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _ShortcutItem extends StatelessWidget {
-  final String keyLabel;
-  final String text;
-
-  const _ShortcutItem({required this.keyLabel, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 18),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE2E8F0),
-              borderRadius: BorderRadius.circular(3),
-              border: Border.all(color: const Color(0xFFCBD5E1), width: 1),
-            ),
-            child: Text(
-              keyLabel,
-              style: const TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.bold,
-                color: AppTheme.textMainLight,
-              ),
-            ),
-          ),
-          const SizedBox(width: 4),
-          Text(
-            text,
-            style: const TextStyle(
-              fontSize: 11,
-              color: AppTheme.textMutedLight,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }

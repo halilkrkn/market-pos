@@ -4,6 +4,8 @@ import 'package:drift/drift.dart';
 
 import '../database/client_database.dart';
 import '../database/client_storage_repository.dart';
+import '../models/downloaded_sale_payload.dart';
+import '../models/sync_response.dart';
 import 'sync_transport.dart';
 
 class SyncBatchResult {
@@ -13,12 +15,21 @@ class SyncBatchResult {
   final bool hasMore;
   final String? lastError;
 
+  /// Faz 7B: Hub sertifikası sabitlenen parmak iziyle uyuşmadığı için tur durdu.
+  final bool tlsPinMismatch;
+
+  /// ADR-017: Güvenilen kök CA altındaki sertifika doğrulaması (SAN/IP/hostname/tarih)
+  /// başarısız olduğu için tur durdu.
+  final bool tlsCertError;
+
   const SyncBatchResult({
     required this.syncedCount,
     required this.retriedCount,
     required this.permanentFailedCount,
     required this.hasMore,
     this.lastError,
+    this.tlsPinMismatch = false,
+    this.tlsCertError = false,
   });
 
   bool get isCleanSuccess => retriedCount == 0 && permanentFailedCount == 0;
@@ -29,6 +40,7 @@ class ClientSyncService {
   final SyncTransport transport;
   final String deviceId;
   final String deviceToken;
+  final String? Function()? readDeviceToken;
   final String hubUrl;
   final Duration baseBackoff;
   final Duration maxBackoff;
@@ -39,6 +51,7 @@ class ClientSyncService {
     required this.transport,
     required this.deviceId,
     required this.deviceToken,
+    this.readDeviceToken,
     required this.hubUrl,
     this.baseBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 60),
@@ -61,6 +74,8 @@ class ClientSyncService {
     var synced = 0;
     var retried = 0;
     var failed = 0;
+    var pinMismatch = false;
+    var certError = false;
     String? stopError;
 
     for (var i = 0; i < maxBatch; i++) {
@@ -96,19 +111,84 @@ class ClientSyncService {
 
       final op = oldestUnsynced;
 
+      // Token geçerliliği kontrolü: Her yeni HTTP isteğinden önce token güncelliği doğrulanır.
+      // Token kaybolmuş veya geçersizleşmişse işlem IN_PROGRESS yapılmaz, ağa istek atılmaz
+      // ve henüz gönderilmemiş kayıtlar PENDING/RETRY durumunda korunur.
+      final String? currentToken;
+      try {
+        currentToken =
+            readDeviceToken != null ? readDeviceToken!() : deviceToken;
+      } catch (e) {
+        stopError = 'Cihaz yetkilendirme anahtarı okunurken hata oluştu: $e';
+        break;
+      }
+
+      if (currentToken == null || currentToken.isEmpty) {
+        stopError =
+            'Cihaz yetkilendirme anahtarı (deviceToken) geçersiz veya silindi; batch durduruldu.';
+        break;
+      }
+
       // 3. İşlemi IN_PROGRESS yap
       await repository.markOutboxInProgress(op.operationId);
 
-      // 4. Hub API'ye gönder (HTTPS POST /api/v1/sales)
-      final resp = await transport.postSale(
-        hubUrl: hubUrl,
-        token: deviceToken,
-        payload: op.payload,
-        timeout: requestTimeout,
-      );
+      // 4. Hub API'ye gönder (İşlem tipine göre ilgili rotaya yönlendir)
+      final SyncResponse resp;
+      if (op.operationType == 'PRODUCT_UPSERT') {
+        resp = await transport.postProductUpsert(
+          hubUrl: hubUrl,
+          token: currentToken,
+          payload: op.payload,
+          timeout: requestTimeout,
+        );
+      } else if (op.operationType == 'STOCK_RECEIPT') {
+        resp = await transport.postStockReceipt(
+          hubUrl: hubUrl,
+          token: currentToken,
+          payload: op.payload,
+          timeout: requestTimeout,
+        );
+      } else {
+        resp = await transport.postSale(
+          hubUrl: hubUrl,
+          token: currentToken,
+          payload: op.payload,
+          timeout: requestTimeout,
+        );
+      }
 
       // 5. Yanıtı değerlendir
-      if (resp.isSuccess) {
+      if (resp.isTlsPinMismatch) {
+        // Faz 7B: Güvenlik hatası. Kayıt korunur (RETRY), uyuşmayan sunucuya hızlı
+        // tekrar denemeyle bağlanılmaz; en uzun bekleme uygulanır ve durum ayrıca raporlanır.
+        final errText = 'TLS_PIN_MISMATCH: ${resp.errorMessage}';
+        await repository.markOutboxRetry(
+          op.operationId,
+          attemptCount: op.attemptCount + 1,
+          backoff: maxBackoff,
+          error: errText,
+          now: effectiveNow,
+        );
+        retried++;
+        pinMismatch = true;
+        stopError = errText;
+        break;
+      } else if (resp.isTlsCertError) {
+        // ADR-017: SAN/IP/hostname/süre hatası; pin uyuşmazlığından ayrılır, ancak
+        // fail-closed kalır (HTTP fallback yok, Outbox RETRY korunur, maxBackoff).
+        final errText = 'TLS_CERT_ERROR: ${resp.errorMessage}';
+        await repository.markOutboxRetry(
+          op.operationId,
+          attemptCount: op.attemptCount + 1,
+          backoff: maxBackoff,
+          error: errText,
+          now: effectiveNow,
+        );
+        retried++;
+        certError = true;
+        stopError = errText;
+        break;
+      } else if (resp.isSuccess) {
         // Başarılı ACK veya İdempotent Replay (200 / 201)
         await repository.markOutboxSynced(
           op.operationId,
@@ -117,15 +197,20 @@ class ClientSyncService {
           acknowledgedAt: effectiveNow,
         );
         synced++;
-      } else if (resp.isTransientError) {
-        // Geçici hata (Ağ kesilmesi, zaman aşımı, HTTP 503 / 500)
+      } else if (resp.isTransientError || resp.isAuthOrTransportPolicyHold) {
+        // Geçici hata (Ağ kesilmesi, zaman aşımı, HTTP 503 / 500) veya
+        // kimlik/TLS politikası bekletmesi (401 / 403 / 426): kayıt asla FAILED_PERMANENT
+        // yapılmaz; token yenileme, yeniden eşleştirme veya TLS düzeltmesi sonrası aynı
+        // client_seq ile tekrar gönderilir.
         final nextAttempt = op.attemptCount + 1;
         final backoffMs = min(
           maxBackoff.inMilliseconds,
           baseBackoff.inMilliseconds * (1 << min(nextAttempt - 1, 10)),
         );
         final backoff = Duration(milliseconds: backoffMs);
-        final errText = resp.errorMessage ?? 'HTTP ${resp.statusCode}: ${resp.body}';
+        final errText = resp.isAuthOrTransportPolicyHold
+            ? 'Yetki/TLS bekletmesi [HTTP ${resp.statusCode}]: kayıt korunuyor, cihaz yetkilendirmesi düzeltilince yeniden gönderilecek. ${resp.body}'
+            : (resp.errorMessage ?? 'HTTP ${resp.statusCode}: ${resp.body}');
 
         await repository.markOutboxRetry(
           op.operationId,
@@ -162,6 +247,8 @@ class ClientSyncService {
       permanentFailedCount: failed,
       hasMore: remainingCount > 0,
       lastError: stopError,
+      tlsPinMismatch: pinMismatch,
+      tlsCertError: certError,
     );
   }
 
@@ -171,9 +258,18 @@ class ClientSyncService {
     final pendingId = syncState?.pendingSyncSessionId;
     if (pendingId == null || pendingId.isEmpty) return true;
 
+    final String? currentToken;
+    try {
+      currentToken =
+          readDeviceToken != null ? readDeviceToken!() : deviceToken;
+    } catch (_) {
+      return false;
+    }
+    if (currentToken == null || currentToken.isEmpty) return false;
+
     final resp = await transport.postSyncAck(
       hubUrl: hubUrl,
-      token: deviceToken,
+      token: currentToken,
       syncSessionId: pendingId,
       timeout: requestTimeout,
     );
@@ -211,13 +307,30 @@ class ClientSyncService {
     // Varsa önceki tamamlanmamış ACK'yı gönder
     await _tryAcknowledgePendingSyncSession();
 
+    final String? currentToken;
+    try {
+      currentToken =
+          readDeviceToken != null ? readDeviceToken!() : deviceToken;
+    } catch (_) {
+      throw StateError('Cihaz yetkilendirme anahtarı okunamadı.');
+    }
+    if (currentToken == null || currentToken.isEmpty) {
+      throw StateError('Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş.');
+    }
+
     final resp = await transport.getProducts(
       hubUrl: hubUrl,
-      token: deviceToken,
+      token: currentToken,
       timeout: requestTimeout,
     );
 
     if (!resp.isSuccess) {
+      if (resp.isTlsPinMismatch) {
+        throw StateError('Ürün senkronizasyonu TLS hatası [TLS_PIN_MISMATCH]: ${resp.errorMessage}');
+      }
+      if (resp.isTlsCertError) {
+        throw StateError('Ürün senkronizasyonu TLS hatası [TLS_CERT_ERROR]: ${resp.errorMessage}');
+      }
       throw StateError('Ürün senkronizasyonu başarısız oldu [${resp.statusCode}]: ${resp.errorMessage ?? resp.body}');
     }
 
@@ -246,7 +359,10 @@ class ClientSyncService {
         pricingUnit: Value(pMap['pricing_unit'] as String? ?? 'adet'),
         conversionFactorNumerator: Value(pMap['conversion_factor_numerator'] as int? ?? 1),
         conversionFactorDenominator: Value(pMap['conversion_factor_denominator'] as int? ?? 1),
-        vatRate: Value(pMap['vat_rate'] as int? ?? 20),
+        // Hub şeması KDV oranı taşımıyorsa yerel oran korunur (20'ye sıfırlanmaz).
+        vatRate: pMap['vat_rate'] is int
+            ? Value(pMap['vat_rate'] as int)
+            : const Value.absent(),
         isActive: Value(isActive),
         updatedAt: Value(effectiveNow),
       ));
@@ -302,7 +418,7 @@ class ClientSyncService {
     if (syncSessionId != null && syncSessionId.isNotEmpty) {
       final ackResp = await transport.postSyncAck(
         hubUrl: hubUrl,
-        token: deviceToken,
+        token: currentToken,
         syncSessionId: syncSessionId,
         timeout: requestTimeout,
       );
@@ -319,5 +435,95 @@ class ClientSyncService {
     }
 
     return productCompanions.length;
+  }
+
+  /// Hub'dan satışları cursor tabanlı olarak indirir ve yerel SQLite'a işler.
+  /// Echo prevention: İndirilen satışlar asla outbox'a eklenmez.
+  /// Monotonik server_seq cursor'ı sayesinde satış iptalleri ve iadeleri de eksiksiz yakalanır.
+  Future<int> syncSales({
+    DateTime? now,
+    int limit = 50,
+  }) async {
+    final effectiveNow = now ?? DateTime.now();
+
+    final String? currentToken;
+    try {
+      currentToken = readDeviceToken != null ? readDeviceToken!() : deviceToken;
+    } catch (e) {
+      return 0;
+    }
+
+    if (currentToken == null || currentToken.isEmpty) {
+      return 0;
+    }
+
+    var syncState = await repository.getSyncState(deviceId);
+    if (syncState == null) {
+      syncState = await repository.initializeDevice(deviceId);
+    }
+
+    var currentCursor = syncState.lastServerSaleSeq;
+    var totalDownloaded = 0;
+    var hasMore = true;
+
+    while (hasMore) {
+      final resp = await transport.getSales(
+        hubUrl: hubUrl,
+        token: currentToken,
+        cursor: currentCursor,
+        limit: limit,
+        timeout: requestTimeout,
+      );
+
+      if (!resp.isSuccess) {
+        if (resp.isTlsPinMismatch) {
+          throw StateError('Satış senkronizasyonu TLS hatası [TLS_PIN_MISMATCH]: ${resp.errorMessage}');
+        }
+        if (resp.isTlsCertError) {
+          throw StateError('Satış senkronizasyonu TLS hatası [TLS_CERT_ERROR]: ${resp.errorMessage}');
+        }
+        break;
+      }
+
+      final body = jsonDecode(resp.body) as Map<String, dynamic>;
+      final rawSales = body['sales'] as List<dynamic>? ?? [];
+      final nextCursor = body['next_cursor'] as int? ?? currentCursor;
+      hasMore = body['has_more'] as bool? ?? false;
+
+      if (rawSales.isNotEmpty) {
+        final salesPayloads = rawSales
+            .map((s) => DownloadedSalePayload.fromJson(s as Map<String, dynamic>))
+            .toList();
+
+        await repository.upsertSales(
+          sales: salesPayloads,
+          newCursor: nextCursor,
+          deviceId: deviceId,
+          syncedAt: effectiveNow,
+        );
+
+        totalDownloaded += salesPayloads.length;
+      } else {
+        if (nextCursor > currentCursor) {
+          await (repository.db.update(repository.db.clientSyncStates)
+                ..where((s) => s.deviceId.equals(deviceId)))
+              .write(
+            ClientSyncStatesCompanion(
+              lastServerSaleSeq: Value(nextCursor),
+              lastSalesSyncAt: Value(effectiveNow),
+              updatedAt: Value(effectiveNow),
+            ),
+          );
+        }
+      }
+
+      currentCursor = nextCursor;
+
+      if (rawSales.isEmpty) {
+        break;
+      }
+    }
+
+    return totalDownloaded;
   }
 }

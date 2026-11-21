@@ -61,7 +61,7 @@ Aşağıdaki veri bütünlüğü kuralları tüm katmanlarda bağlayıcıdır:
 4. **Geçmişin Korunması ve Fiziksel Satış Dokunulmazlığı:** Gerçekleşmiş fiziksel satış kayıtları stok çakışması veya ağ senkronizasyonu gerekçesiyle **ASLA SİLİNEMEZ**. Satış ve stok hareketleri append-only tutulur; iptal ve iadeler ters hareketlerle (`CANCELLED`, `REFUND`) izlenir.
 5. **Idempotency Koruması:** Her satış ve kuyruk işlemi cihazda üretilen benzersiz bir `idempotency_key` (UUID v4) taşır. Ağ tekrarında sunucu ikinci bir satış veya mükerrer stok düşüşü oluşturamaz.
 6. **Eksi Stok ve Uyuşmazlık Yönetimi:** Eksi stok politikası `allow` olup, raftan fiziksel satışın faturadan önce yapılabilmesine izin verilir. Oluşan stok uyuşmazlıkları `audit_logs` tablosuna yazılır ve dashboard'da düzeltme bildirimi olarak sunulur.
-7. **Alt Kuruş Yuvarlama Kararı (`OPEN DECISION`):** Kesirli miktar, gramaj veya birim maliyet çarpmalarında ortaya çıkabilecek alt kuruşların yuvarlama yöntemi (Half-Up vb.) proje sahibi tarafından henüz onaylanmamış olup **`OPEN DECISION`** statüsündedir; onaylanmamış bir yuvarlama yöntemi kesinleşmiş kural olarak uygulanamaz.
+7. **Alt Kuruş Yuvarlama Standardı (`CONFIRMED — OD-01`, 11 Kasım 2026):** Kesirli miktar (milli-unit ölçeğinde `quantity`), kısmi iade veya birim fiyat çarpmalarında ortaya çıkabilecek alt kuruşlar **Half-Up** yöntemiyle yuvarlanır (milli-unit ölçeğinde temel örnek: `((unitPrice * quantity) + 500) ~/ 1000`). Windows, Android ve Master Hub aynı integer kuruş + Half-Up standardına uyar; UI gösterim standardı iki ondalık basamaktır (ör. `12.50 TL`). Idempotency ve `payload_hash` mekanizmaları kendi mevcut kurallarıyla ayrıca korunur.
 
 ---
 
@@ -166,11 +166,13 @@ Projede, proje sahibi tarafından onaylanmış ve lisanslanmış **5 çekirdek b
 
 ## 12. Development Workflow (Faz Bazlı Geliştirme Protokolü)
 
+> **Talimat Öncelik Sırası:** (1) Kullanıcının açık yazılı kararları ve onayları → (2) `AGENTS.md` (genel ve bağlayıcı proje anayasası) → (3) `GEMINI.md` (Antigravity çalışma modeli ve uygulama talimatları; `AGENTS.md` ile çelişemez) → (4) `docs/MASTER_ROADMAP.md` ve `docs/LIVE_PROJECT_STATUS.md` (yol haritası ve canlı durum).
+
 Herhangi bir geliştirme görevinde sırasıyla şu adımlar izlenir:
-1. **Bağlam ve Gereksinim Analizi:** [`docs/PROJECT_STATUS.md`](./docs/PROJECT_STATUS.md) ve [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](./MARKET_POS_AI_STUDIO_BUILD_PLANI.md) okunarak aktif faz sınırları belirlenir.
+1. **Bağlam ve Gereksinim Analizi:** [`docs/LIVE_PROJECT_STATUS.md`](./docs/LIVE_PROJECT_STATUS.md), [`docs/MASTER_ROADMAP.md`](./docs/MASTER_ROADMAP.md) ve ilgili şartnameler okunarak aktif faz sınırları belirlenir.
 2. **Mimari Değerlendirme:** Etkilenecek bileşenler ve Clean Architecture katmanları tespit edilir.
 3. **Uygulama ve Test Planı:** Geliştirme adımları ve test senaryoları tasarlanır.
-4. **Kullanıcı Onayı:** Kullanıcı onayı alınmadan mimari değişiklik yapılamaz, uygulama kodlamasına başlanamaz.
+4. **Otonom Geliştirme ve Kritik Onay Sınırı:** Kullanıcı tarafından kapsamı onaylanmış aktif faz ve görevlerde normal geliştirme adımları (kapsam içi normal kodlama, birim ve entegrasyon testleri, statik analiz, build, kritik alanları etkilemeyen normal hata düzeltmeleri ve mevcut kabul kriteri doğrulamaları) her küçük değişiklikte tekrar onay istenmeden otonom yürütülebilir. Ancak mimari değişiklikler; DB şema değişiklikleri, migration ve veri kaybı riski; güvenlik, authentication, authorization ve cihaz eşleştirme değişiklikleri; FIFO Outbox, idempotency, `client_seq`, server cursor ve senkronizasyon protokolü değişiklikleri; tenant/store izolasyonu veya para hesaplama standardını etkileyen değişiklikler; onaylanmış kapsam dışına çıkılması/yeni özellik eklenmesi; geri dönüşü zor işlemler ve sonraki faza geçiş/faz kabulü için durulup açık kullanıcı onayı alınması zorunludur.
 5. **Kapsamlı Uygulama:** Yalnızca onaylanan kapsamda kod yazılır.
 6. **Otomatik Doğrulama:** `flutter test`, `flutter analyze` ve gerekirse build komutları çalıştırılır.
 7. **Raporlama:** Yapılan değişiklikler, etkilenen dosyalar ve test çıktıları kullanıcıya sunulur.
@@ -206,7 +208,7 @@ Kullanıcı bir fazı kabul ettikten ve commit talimatı verdikten sonra aşağ�
 ## 14. Forbidden Actions (Yasaklı Eylemler Listesi)
 
 Aşağıdaki eylemler tüm yapay zekâ asistanları için **kesinlikle yasaktır**:
-1. Kullanıcının açık onayı olmadan kaynak kodu değiştirmek veya yeni kod dosyası oluşturmak.
+1. Kullanıcı tarafından kapsamı onaylanmış aktif faz/görev kapsamı dışında veya §12.4'te tanımlanan kritik onay alanlarında (mimari, DB şema/migration, güvenlik/auth/pairing, FIFO Outbox/idempotency/`client_seq`/server cursor/sync, tenant/store izolasyonu, para hesaplama standardı, kapsam dışı özellik) açık kullanıcı onayı almadan kaynak kodu değiştirmek veya yeni kod dosyası oluşturmak.
 2. Kullanıcının açık onayı olmadan mimari kararları değiştirmek.
 3. Kullanıcı adına faz veya aşama kabulü ilan etmek.
 4. Fiilen komut çalıştırmadan testlerin geçtiğini veya derlemenin başarılı olduğunu iddia etmek.

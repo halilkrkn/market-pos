@@ -6,6 +6,11 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:market_pos/core/network/api_client.dart';
 import 'package:market_pos/core/network/api_exception.dart';
+import 'package:mms_client_storage/mms_client_storage.dart'
+    show
+        TlsCertificateFailureKind,
+        TlsCertificateValidationException,
+        TlsPinMismatchException;
 
 void main() {
   group('MmsApiClient - Sağlık Denetimi ve Ağ İletişimi Testleri', () {
@@ -37,6 +42,84 @@ void main() {
       expect(response.sqliteVersion, '3.45.1');
       expect(response.latencyMs, greaterThanOrEqualTo(0));
       expect(response.errorMessage, isNull);
+    });
+
+    test('1.1. Master Hub Gerçek Sağlık Yanıtı (UP): isHealthy=true doğrulanır', () async {
+      final mockClient = MockClient((request) async {
+        expect(request.url.path, '/health');
+        return http.Response(
+          jsonEncode({
+            'status': 'UP',
+            'timestamp': '2026-11-18T23:00:00.000Z',
+            'sqlite_version': 'masked',
+            'queue_metrics': {'total_enqueued': 0},
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiClient = MmsApiClient(
+        client: mockClient,
+        baseUrl: 'http://127.0.0.1:8945',
+        deviceId: 'POS-WIN-01',
+      );
+
+      final response = await apiClient.checkHealth();
+
+      expect(response.isHealthy, isTrue);
+      expect(response.status, 'UP');
+      expect(response.sqliteVersion, 'masked');
+      expect(response.latencyMs, greaterThanOrEqualTo(0));
+      expect(response.errorMessage, isNull);
+    });
+
+    test('1.2. Alternatif Başarılı Sağlık Durumu (OK): isHealthy=true doğrulanır', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'status': 'OK',
+            'service': 'MARKET_MMS_HUB',
+            'sqlite_version': '3.45.1',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiClient = MmsApiClient(
+        client: mockClient,
+        baseUrl: 'http://127.0.0.1:8945',
+      );
+
+      final response = await apiClient.checkHealth();
+
+      expect(response.isHealthy, isTrue);
+      expect(response.status, 'OK');
+      expect(response.errorMessage, isNull);
+    });
+
+    test('1.3. Bilinmeyen / Bozuk Sağlık Durumu: isHealthy=false doğrulanır', () async {
+      final mockClient = MockClient((request) async {
+        return http.Response(
+          jsonEncode({
+            'status': 'DEGRADED',
+            'service': 'MARKET_MMS_HUB',
+          }),
+          200,
+          headers: {'content-type': 'application/json'},
+        );
+      });
+
+      final apiClient = MmsApiClient(
+        client: mockClient,
+        baseUrl: 'http://127.0.0.1:8945',
+      );
+
+      final response = await apiClient.checkHealth();
+
+      expect(response.isHealthy, isFalse);
+      expect(response.status, 'DEGRADED');
     });
 
     test('2. Sunucu Bakım / Draining Modunda (503 Service Unavailable): draining durumu dönülür', () async {
@@ -75,6 +158,28 @@ void main() {
       expect(response.isHealthy, isFalse);
       expect(response.status, 'OFFLINE');
       expect(response.errorMessage, contains('Bağlantı kurulamadı'));
+    });
+
+    test('3b. Faz 7B: TLS pin uyuşmazlığı sıradan "bağlantı kurulamadı" hatası olarak gösterilmez', () async {
+      final mockClient = MockClient((request) async {
+        throw TlsPinMismatchException(
+          host: '192.168.1.20',
+          port: 8945,
+          presentedSha256: 'EF' * 32,
+        );
+      });
+      final apiClient = MmsApiClient(
+        client: mockClient,
+        baseUrl: 'https://192.168.1.20:8945',
+        deviceId: 'POS-AND-01',
+      );
+
+      final response = await apiClient.checkHealth();
+
+      expect(response.isHealthy, isFalse);
+      expect(response.status, 'TLS_PIN_MISMATCH');
+      expect(response.errorMessage, contains('sertifika'));
+      expect(response.errorMessage, isNot(contains('Bilinmeyen bağlantı hatası')));
     });
 
     test('4. Kimlik Doğrulama Başlıkları: DeviceToken ve X-Device-Id isteğe eklenir', () async {
@@ -264,6 +369,48 @@ void main() {
         expect(e.responseData!['message'], contains('Bearer [REDACTED]'));
         expect(e.responseData!['safe_info'], 'General error info');
       }
+    });
+
+    test('10. ADR-017: checkHealth SAN/IP sertifika hatasını TLS_CERT_ERROR olarak raporlar (TLS_PIN_MISMATCH değildir)', () async {
+      final mockClient = MockClient((request) async {
+        throw const TlsCertificateValidationException(
+          kind: TlsCertificateFailureKind.ipAddressMismatch,
+          host: '127.0.0.1',
+          port: 8443,
+          detail: 'IP address mismatch (secret_token_should_not_leak)',
+        );
+      });
+
+      final apiClient = MmsApiClient(
+        client: mockClient,
+        baseUrl: 'https://127.0.0.1:8443',
+      );
+
+      final health = await apiClient.checkHealth();
+      expect(health.isHealthy, isFalse);
+      expect(health.status, 'TLS_CERT_ERROR');
+      expect(health.status, isNot('TLS_PIN_MISMATCH'));
+      expect(health.errorMessage, isNotNull);
+      expect(health.errorMessage, contains('SAN'));
+      expect(health.errorMessage, isNot(contains('secret_token_should_not_leak')));
+    });
+
+    test('11. ADR-017 H-1: checkHealth ham HandshakeException durumunda OFFLINE yerine fail-closed TLS sınıflandırması döner', () async {
+      final ipHandshakeApi = MmsApiClient(
+        client: MockClient((_) async => throw const HandshakeException('CERTIFICATE_VERIFY_FAILED: IP address mismatch')),
+        baseUrl: 'https://127.0.0.1:8443',
+      );
+      final ipHealth = await ipHandshakeApi.checkHealth();
+      expect(ipHealth.status, 'TLS_CERT_ERROR');
+      expect(ipHealth.status, isNot('OFFLINE'));
+
+      final caHandshakeApi = MmsApiClient(
+        client: MockClient((_) async => throw const HandshakeException('CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate')),
+        baseUrl: 'https://127.0.0.1:8443',
+      );
+      final caHealth = await caHandshakeApi.checkHealth();
+      expect(caHealth.status, 'TLS_PIN_MISMATCH');
+      expect(caHealth.status, isNot('OFFLINE'));
     });
   });
 }

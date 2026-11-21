@@ -46,8 +46,8 @@ class DatabaseClosedException implements Exception {
 /// - DB close timeout sonrası veri bütünlüğü koruması (timeout durumunda yeni initialize engellenir).
 /// - Test amaçlı `resetForTesting()` metodunun tüm durum ve timeout değerlerini sıfırlaması.
 class LocalDatabaseService {
-  final ClientDatabase _db;
-  late final ClientStorageRepository _repository;
+  ClientDatabase _db;
+  late ClientStorageRepository _repository;
   final String _databasePath;
   bool _isClosed = false;
 
@@ -192,6 +192,9 @@ class LocalDatabaseService {
     return service;
   }
 
+  /// Platforma göre standart `client_local.db` dosya yolunu dışarıya açık çözer.
+  static String resolveDefaultDatabasePath() => _resolveDefaultDatabasePath();
+
   /// Platforma Göre Standart Veritabanı Yolunu Çözümler
   static String _resolveDefaultDatabasePath() {
     if (Platform.isWindows) {
@@ -203,6 +206,10 @@ class LocalDatabaseService {
           AppConstants.localDatabaseName,
         );
       }
+    }
+
+    if (Platform.isAndroid) {
+      return '/data/data/com.marketmms.market_pos/app_flutter/${AppConstants.localDatabaseName}';
     }
 
     final home = Platform.environment['HOME'] ?? Platform.environment['USERPROFILE'] ?? '.';
@@ -258,11 +265,88 @@ class LocalDatabaseService {
   /// Dosya konumu
   String get databasePath => _databasePath;
 
+  /// Veritabanı ve yardımcı yapılandırma dosyalarının bulunduğu kök klasör
+  String get dataDirectoryPath =>
+      _databasePath == ':memory:' ? Directory.systemTemp.path : p.dirname(_databasePath);
+
   /// Bağlantının kapatılıp kapatılmadığı
   bool get isClosed => _isClosed;
 
   /// Aktif yürütülmekte olan sorgu/operasyon sayısı (diagnostics ve drain izleme amaçlı)
   int get activeQueryCount => _activeQueryCount;
+
+  /// WAL modu açıkken tutarlı canlı anlık görüntü (`VACUUM INTO`) üretir.
+  Future<void> vacuumInto(String snapshotPath) {
+    return _runQuery(() async {
+      final outFile = File(snapshotPath);
+      if (outFile.existsSync()) {
+        outFile.deleteSync();
+      }
+      if (!outFile.parent.existsSync()) {
+        outFile.parent.createSync(recursive: true);
+      }
+      try {
+        await _db.customStatement('PRAGMA wal_checkpoint(PASSIVE);');
+      } catch (_) {
+        // Checkpoint bilgilendirme amaçlıdır; VACUUM INTO salt okunur tutarlıdır.
+      }
+      final escaped = snapshotPath.replaceAll("'", "''");
+      await _db.customStatement("VACUUM INTO '$escaped'");
+    });
+  }
+
+  /// Kontrollü geri yükleme (restore) öncesi canlı veritabanı bağlantılarını askıya alır.
+  Future<void> suspendForRestore() async {
+    if (_databasePath == ':memory:') {
+      throw StateError('Bellek içi veritabanı geri yükleme için askıya alınamaz.');
+    }
+    if (_isClosed) return;
+    if (_closeFuture != null) {
+      await _closeFuture!;
+      return;
+    }
+
+    _isClosed = true;
+
+    if (_activeQueryCount > 0) {
+      final drainCompleter = Completer<void>();
+      _activeQueriesDrainedCompleter = drainCompleter;
+      if (_activeQueryCount > 0) {
+        await drainCompleter.future.timeout(
+          drainTimeout,
+          onTimeout: () {
+            stderr.writeln(
+              '[LocalDatabaseService] UYARI: Restore öncesi $_activeQueryCount '
+              'aktif işlem tahliye süresi doldu.',
+            );
+          },
+        );
+      }
+    }
+
+    try {
+      await _db.customStatement('PRAGMA wal_checkpoint(TRUNCATE);');
+    } catch (_) {}
+
+    await _db.close().timeout(dbCloseTimeout);
+    _closeFuture = null;
+    _activeQueriesDrainedCompleter = null;
+  }
+
+  /// Kontrollü geri yükleme (restore) sonrasında yeni veritabanı dosyasını aynı servis örneğinde açar.
+  Future<void> resumeAfterRestore() async {
+    if (_databasePath == ':memory:') {
+      throw StateError('Bellek içi veritabanı geri yükleme sonrası yeniden açılamaz.');
+    }
+    if (!_isClosed) return;
+
+    final reopenedDb = ClientDatabase(File(_databasePath));
+    _db = reopenedDb;
+    (_repository as _TrackedClientStorageRepository).rebind(reopenedDb);
+    _isClosed = false;
+    _closeFuture = null;
+    _activeQueriesDrainedCompleter = null;
+  }
 
   /// Mevcut nesnenin yaşam döngüsü durumu
   LocalDatabaseLifecycleState get lifecycleState {
@@ -426,16 +510,32 @@ class LocalDatabaseService {
 /// ve graceful shutdown tahliye (drain) mekanizmasına dahil edilir.
 class _TrackedClientStorageRepository extends ClientStorageRepository {
   final LocalDatabaseService _service;
+  ClientStorageRepository _delegate;
 
-  _TrackedClientStorageRepository(this._service, ClientDatabase db) : super(db);
+  _TrackedClientStorageRepository(this._service, ClientDatabase db)
+      : _delegate = ClientStorageRepository(db),
+        super(db);
+
+  @override
+  ClientDatabase get db => _service._db;
+
+  void rebind(ClientDatabase newDb) {
+    _delegate = ClientStorageRepository(newDb);
+  }
 
   @override
   Future<ClientSyncState> initializeDevice(String deviceId) =>
-      _service.runOperation(() => super.initializeDevice(deviceId));
+      _service.runOperation(() => _delegate.initializeDevice(deviceId));
+
+  @override
+  Future<int> allocateNextClientSeq(String deviceId, {DateTime? occurredAt}) =>
+      _service.runOperation(
+        () => _delegate.allocateNextClientSeq(deviceId, occurredAt: occurredAt),
+      );
 
   @override
   Future<ClientSyncState?> getSyncState(String deviceId) =>
-      _service.runOperation(() => super.getSyncState(deviceId));
+      _service.runOperation(() => _delegate.getSyncState(deviceId));
 
   @override
   Future<SaleTransactionResult> createOfflineSale({
@@ -445,43 +545,51 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     String? customOperationId,
     DateTime? occurredAt,
   }) =>
-      _service.runOperation(() => super.createOfflineSale(
-            deviceId: deviceId,
-            paymentMethod: paymentMethod,
-            items: items,
-            customOperationId: customOperationId,
-            occurredAt: occurredAt,
-          ));
+      _service.runOperation(
+        () => _delegate.createOfflineSale(
+          deviceId: deviceId,
+          paymentMethod: paymentMethod,
+          items: items,
+          customOperationId: customOperationId,
+          occurredAt: occurredAt,
+        ),
+      );
 
   @override
   Future<void> upsertProducts(
     List<LocalProductsCompanion> products, {
     List<LocalProductBarcodesCompanion>? barcodes,
   }) =>
-      _service.runOperation(() => super.upsertProducts(products, barcodes: barcodes));
+      _service.runOperation(
+        () => _delegate.upsertProducts(products, barcodes: barcodes),
+      );
 
   @override
   Future<LocalProduct?> getProductByBarcode(String barcode) =>
-      _service.runOperation(() => super.getProductByBarcode(barcode));
+      _service.runOperation(() => _delegate.getProductByBarcode(barcode));
 
   @override
   Future<List<LocalProductBarcode>> getBarcodesForProduct(String productId) =>
-      _service.runOperation(() => super.getBarcodesForProduct(productId));
+      _service.runOperation(() => _delegate.getBarcodesForProduct(productId));
 
   @override
   Future<OutboxOperation?> getNextUnsyncedOutboxOperation(
     String deviceId, {
     DateTime? now,
   }) =>
-      _service.runOperation(() => super.getNextUnsyncedOutboxOperation(deviceId, now: now));
+      _service.runOperation(
+        () => _delegate.getNextUnsyncedOutboxOperation(deviceId, now: now),
+      );
 
   @override
   Future<List<OutboxOperation>> getUnsyncedOutboxOperations(String deviceId) =>
-      _service.runOperation(() => super.getUnsyncedOutboxOperations(deviceId));
+      _service.runOperation(
+        () => _delegate.getUnsyncedOutboxOperations(deviceId),
+      );
 
   @override
   Future<void> markOutboxInProgress(String operationId) =>
-      _service.runOperation(() => super.markOutboxInProgress(operationId));
+      _service.runOperation(() => _delegate.markOutboxInProgress(operationId));
 
   @override
   Future<void> markOutboxSynced(
@@ -490,12 +598,14 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     required String deviceId,
     DateTime? acknowledgedAt,
   }) =>
-      _service.runOperation(() => super.markOutboxSynced(
-            operationId,
-            clientSeq: clientSeq,
-            deviceId: deviceId,
-            acknowledgedAt: acknowledgedAt,
-          ));
+      _service.runOperation(
+        () => _delegate.markOutboxSynced(
+          operationId,
+          clientSeq: clientSeq,
+          deviceId: deviceId,
+          acknowledgedAt: acknowledgedAt,
+        ),
+      );
 
   @override
   Future<void> markOutboxRetry(
@@ -505,44 +615,385 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     required String error,
     DateTime? now,
   }) =>
-      _service.runOperation(() => super.markOutboxRetry(
-            operationId,
-            attemptCount: attemptCount,
-            backoff: backoff,
-            error: error,
-            now: now,
-          ));
+      _service.runOperation(
+        () => _delegate.markOutboxRetry(
+          operationId,
+          attemptCount: attemptCount,
+          backoff: backoff,
+          error: error,
+          now: now,
+        ),
+      );
 
   @override
   Future<void> markOutboxPermanentFail(
     String operationId, {
     required String error,
   }) =>
-      _service.runOperation(() => super.markOutboxPermanentFail(operationId, error: error));
+      _service.runOperation(
+        () => _delegate.markOutboxPermanentFail(operationId, error: error),
+      );
 
   @override
   Future<List<OutboxOperation>> getFailedPermanentOperations(String deviceId) =>
-      _service.runOperation(() => super.getFailedPermanentOperations(deviceId));
+      _service.runOperation(
+        () => _delegate.getFailedPermanentOperations(deviceId),
+      );
 
   @override
   Future<void> retryFailedPermanentOperation(String operationId) =>
-      _service.runOperation(() => super.retryFailedPermanentOperation(operationId));
+      _service.runOperation(
+        () => _delegate.retryFailedPermanentOperation(operationId),
+      );
 
   @override
   Future<void> updateAndRetryFailedOperation(
     String operationId, {
     required Map<String, dynamic> correctedPayload,
   }) =>
-      _service.runOperation(() => super.updateAndRetryFailedOperation(
-            operationId,
-            correctedPayload: correctedPayload,
-          ));
+      _service.runOperation(
+        () => _delegate.updateAndRetryFailedOperation(
+          operationId,
+          correctedPayload: correctedPayload,
+        ),
+      );
 
   @override
   Future<int> recoverStuckInProgressOperations(String deviceId) =>
-      _service.runOperation(() => super.recoverStuckInProgressOperations(deviceId));
+      _service.runOperation(
+        () => _delegate.recoverStuckInProgressOperations(deviceId),
+      );
+
+  @override
+  Future<void> reconcileSaleStatuses() =>
+      _service.runOperation(() => _delegate.reconcileSaleStatuses());
 
   @override
   Future<OutboxSummary> getOutboxSummary({String? deviceId}) =>
-      _service.runOperation(() => super.getOutboxSummary(deviceId: deviceId));
+      _service.runOperation(() => _delegate.getOutboxSummary(deviceId: deviceId));
+
+  @override
+  Future<List<LocalSale>> getSalesHistory({
+    DateTime? startDate,
+    DateTime? endDate,
+    String? paymentMethod,
+    String? status,
+    String? searchQuery,
+    int limit = 50,
+    int offset = 0,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getSalesHistory(
+          startDate: startDate,
+          endDate: endDate,
+          paymentMethod: paymentMethod,
+          status: status,
+          searchQuery: searchQuery,
+          limit: limit,
+          offset: offset,
+        ),
+      );
+
+  @override
+  Future<SaleWithDetails?> getSaleDetail(String saleId) =>
+      _service.runOperation(() => _delegate.getSaleDetail(saleId));
+
+  @override
+  Future<void> cancelSale({
+    required String saleId,
+    required String reason,
+    required String deviceId,
+    DateTime? cancelledAt,
+  }) =>
+      _service.runOperation(
+        () => _delegate.cancelSale(
+          saleId: saleId,
+          reason: reason,
+          deviceId: deviceId,
+          cancelledAt: cancelledAt,
+        ),
+      );
+
+  @override
+  Future<String> refundSale({
+    required String saleId,
+    required List<RefundItemInput> items,
+    required String reason,
+    required String deviceId,
+    DateTime? createdAt,
+  }) =>
+      _service.runOperation(
+        () => _delegate.refundSale(
+          saleId: saleId,
+          items: items,
+          reason: reason,
+          deviceId: deviceId,
+          createdAt: createdAt,
+        ),
+      );
+
+  @override
+  Future<List<LocalCategory>> getCategories({bool includeInactive = false}) =>
+      _service.runOperation(
+        () => _delegate.getCategories(includeInactive: includeInactive),
+      );
+
+  @override
+  Future<LocalCategory?> getCategoryById(String id) =>
+      _service.runOperation(() => _delegate.getCategoryById(id));
+
+  @override
+  Future<LocalCategory> createCategory({
+    required String name,
+    String? parentId,
+  }) =>
+      _service.runOperation(
+        () => _delegate.createCategory(name: name, parentId: parentId),
+      );
+
+  @override
+  Future<void> updateCategory({
+    required String id,
+    required String name,
+    String? parentId,
+    bool? isActive,
+  }) =>
+      _service.runOperation(
+        () => _delegate.updateCategory(
+          id: id,
+          name: name,
+          parentId: parentId,
+          isActive: isActive,
+        ),
+      );
+
+  @override
+  Future<void> deactivateCategory(String id) =>
+      _service.runOperation(() => _delegate.deactivateCategory(id));
+
+  @override
+  Future<List<LocalProduct>> getProducts({
+    String? searchQuery,
+    String? categoryId,
+    bool? isActive,
+    int limit = 100,
+    int offset = 0,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getProducts(
+          searchQuery: searchQuery,
+          categoryId: categoryId,
+          isActive: isActive,
+          limit: limit,
+          offset: offset,
+        ),
+      );
+
+  @override
+  Future<LocalProduct?> getProductById(String id) =>
+      _service.runOperation(() => _delegate.getProductById(id));
+
+  @override
+  Future<LocalProduct> createProduct({
+    required String name,
+    required int price,
+    String? barcode,
+    String? categoryId,
+    int initialStock = 0,
+    String stockUnit = 'adet',
+    String pricingUnit = 'adet',
+    int conversionFactorNumerator = 1,
+    int conversionFactorDenominator = 1,
+    int vatRate = 20,
+    int? initialPurchasePrice,
+    String? deviceId,
+  }) =>
+      _service.runOperation(
+        () => _delegate.createProduct(
+          name: name,
+          price: price,
+          barcode: barcode,
+          categoryId: categoryId,
+          initialStock: initialStock,
+          stockUnit: stockUnit,
+          pricingUnit: pricingUnit,
+          conversionFactorNumerator: conversionFactorNumerator,
+          conversionFactorDenominator: conversionFactorDenominator,
+          vatRate: vatRate,
+          initialPurchasePrice: initialPurchasePrice,
+          deviceId: deviceId,
+        ),
+      );
+
+  @override
+  Future<LocalProduct> updateProduct({
+    required String id,
+    String? name,
+    int? price,
+    String? categoryId,
+    String? barcode,
+    String? stockUnit,
+    String? pricingUnit,
+    int? conversionFactorNumerator,
+    int? conversionFactorDenominator,
+    int? vatRate,
+    bool? isActive,
+    String? priceChangeReason,
+    String? deviceId,
+  }) =>
+      _service.runOperation(
+        () => _delegate.updateProduct(
+          id: id,
+          name: name,
+          price: price,
+          categoryId: categoryId,
+          barcode: barcode,
+          stockUnit: stockUnit,
+          pricingUnit: pricingUnit,
+          conversionFactorNumerator: conversionFactorNumerator,
+          conversionFactorDenominator: conversionFactorDenominator,
+          vatRate: vatRate,
+          isActive: isActive,
+          priceChangeReason: priceChangeReason,
+          deviceId: deviceId,
+        ),
+      );
+
+  @override
+  Future<void> deactivateProduct(String id, {String? deviceId}) =>
+      _service.runOperation(
+        () => _delegate.deactivateProduct(id, deviceId: deviceId),
+      );
+
+  @override
+  Future<int> reconcileUnsyncedProducts(String deviceId) =>
+      _service.runOperation(() => _delegate.reconcileUnsyncedProducts(deviceId));
+
+  @override
+  Future<void> addProductBarcode({
+    required String productId,
+    required String barcode,
+    bool isPrimary = false,
+  }) =>
+      _service.runOperation(
+        () => _delegate.addProductBarcode(
+          productId: productId,
+          barcode: barcode,
+          isPrimary: isPrimary,
+        ),
+      );
+
+  @override
+  Future<void> removeProductBarcode(String barcodeId) =>
+      _service.runOperation(() => _delegate.removeProductBarcode(barcodeId));
+
+  @override
+  Future<List<LocalPriceHistoryData>> getPriceHistory(String productId) =>
+      _service.runOperation(() => _delegate.getPriceHistory(productId));
+
+  @override
+  Future<StockReceiptResult> receiveStock({
+    required String receiptId,
+    required String productId,
+    required int quantityMilli,
+    int? unitPurchasePrice,
+    String? note,
+    required String deviceId,
+    DateTime? occurredAt,
+  }) =>
+      _service.runOperation(
+        () => _delegate.receiveStock(
+          receiptId: receiptId,
+          productId: productId,
+          quantityMilli: quantityMilli,
+          unitPurchasePrice: unitPurchasePrice,
+          note: note,
+          deviceId: deviceId,
+          occurredAt: occurredAt,
+        ),
+      );
+
+  @override
+  Future<Set<String>> productIdsWithUnsyncedStockChanges() =>
+      _service.runOperation(() => _delegate.productIdsWithUnsyncedStockChanges());
+
+  @override
+  Future<List<LocalStockMovement>> getStockMovements({
+    String? productId,
+    int limit = 100,
+    int offset = 0,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getStockMovements(
+          productId: productId,
+          limit: limit,
+          offset: offset,
+        ),
+      );
+
+  @override
+  Future<void> upsertSales({
+    required List<DownloadedSalePayload> sales,
+    required int newCursor,
+    required String deviceId,
+    DateTime? syncedAt,
+  }) =>
+      _service.runOperation(
+        () => _delegate.upsertSales(
+          sales: sales,
+          newCursor: newCursor,
+          deviceId: deviceId,
+          syncedAt: syncedAt,
+        ),
+      );
+
+  @override
+  Future<StoredHubConnection?> getStoredHubConnection({
+    required bool allowLoopback,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getStoredHubConnection(allowLoopback: allowLoopback),
+      );
+
+  @override
+  Future<StoredHubConnection> saveStoredHubConnection({
+    required String hubUrl,
+    String? hubId,
+    required HubUrlSource source,
+    bool allowLoopback = false,
+    DateTime? verifiedAt,
+    DateTime? now,
+  }) =>
+      _service.runOperation(
+        () => _delegate.saveStoredHubConnection(
+          hubUrl: hubUrl,
+          hubId: hubId,
+          source: source,
+          allowLoopback: allowLoopback,
+          verifiedAt: verifiedAt,
+          now: now,
+        ),
+      );
+
+  @override
+  Future<StoredHubConnection> markHubConnectionVerified({
+    required String hubUrl,
+    String? hubId,
+    HubUrlSource? source,
+    bool allowLoopback = false,
+    DateTime? verifiedAt,
+  }) =>
+      _service.runOperation(
+        () => _delegate.markHubConnectionVerified(
+          hubUrl: hubUrl,
+          hubId: hubId,
+          source: source,
+          allowLoopback: allowLoopback,
+          verifiedAt: verifiedAt,
+        ),
+      );
+
+  @override
+  Future<void> clearStoredHubConnection() =>
+      _service.runOperation(() => _delegate.clearStoredHubConnection());
 }

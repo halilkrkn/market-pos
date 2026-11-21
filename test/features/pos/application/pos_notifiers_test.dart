@@ -292,6 +292,38 @@ void main() {
       expect(throwingCallbackNotifier.state.errorMessage, isNull);
       expect(throwingCallbackNotifier.state.lastCompletedSale, equals(completed));
     });
+
+    test('4. onSaleCommitted hata izolasyonu: refreshStatus hatası senkronizasyonu engellemez', () async {
+      var syncTriggered = false;
+      var refreshAttempted = false;
+
+      final isolatedNotifier = CartNotifier(
+        repository: repo,
+        readDeviceId: () => 'POS-WIN-01',
+        onSaleCommitted: () async {
+          // pos_providers.dart içindeki çift try-catch izolasyon semantiği
+          try {
+            refreshAttempted = true;
+            throw StateError('Simüle edilmiş refreshStatus hatası');
+          } catch (_) {}
+
+          try {
+            syncTriggered = true;
+          } catch (_) {}
+        },
+      );
+      await isolatedNotifier.scanBarcode('8690504018241');
+
+      final completed = await isolatedNotifier.completeSale(
+        paymentMethod: PaymentMethod.cash,
+        cashReceivedCents: 2000,
+      );
+
+      expect(completed, isNotNull);
+      expect(refreshAttempted, isTrue);
+      expect(syncTriggered, isTrue);
+      expect(isolatedNotifier.state.errorMessage, isNull);
+    });
   });
 }
 

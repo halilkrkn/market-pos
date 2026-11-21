@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/theme/design_tokens.dart';
 import '../../domain/cart_item.dart';
 import '../../domain/money.dart';
 
-/// POS sepet tablosundaki tekil ürün satırı (`>= 48x48 dp` dokunmatik kontroller).
+/// POS sepet tablosundaki tekil ürün satırı (`>= 48x48 dp` dokunmatik kontroller, Light/Dark uyumlu).
 class CartItemRow extends StatelessWidget {
   final int index;
   final CartItem item;
@@ -29,23 +30,27 @@ class CartItemRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.mmsColors;
     final hasNegativeStockWarning =
         item.isCurrentStockNonPositive || item.isNegativeStockAfterCart;
-    final rowBg = isSelected ? AppTheme.posInfoBg : AppTheme.cardBgLight;
+    final rowBg = isSelected ? colors.successBg : colors.surface;
 
     return InkWell(
       key: Key('cart_row_${item.productId}'),
       onTap: onSelect,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: MmsSpacing.md,
+          vertical: MmsSpacing.sm,
+        ),
         decoration: BoxDecoration(
           color: rowBg,
           border: Border(
             left: BorderSide(
-              color: isSelected ? AppTheme.primaryBlue : Colors.transparent,
+              color: isSelected ? colors.emerald : Colors.transparent,
               width: 4,
             ),
-            bottom: const BorderSide(color: AppTheme.borderSubtle),
+            bottom: BorderSide(color: colors.border),
           ),
         ),
         child: LayoutBuilder(
@@ -54,10 +59,10 @@ class CartItemRow extends StatelessWidget {
               width: 32,
               child: Text(
                 '${index + 1}',
-                style: const TextStyle(
+                style: TextStyle(
                   fontWeight: FontWeight.w700,
-                  color: AppTheme.textMutedLight,
-                  fontFeatures: AppTheme.tabularFiguresFeature,
+                  color: colors.textTertiary,
+                  fontFeatures: MmsTypography.tabularFigures,
                 ),
               ),
             );
@@ -68,58 +73,42 @@ class CartItemRow extends StatelessWidget {
               children: [
                 Text(
                   item.productName,
-                  style: const TextStyle(
-                    fontSize: 15,
+                  style: TextStyle(
+                    fontSize: 14.5,
                     fontWeight: FontWeight.w700,
-                    color: AppTheme.textMainLight,
+                    color: colors.textPrimary,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 2),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
+                  spacing: MmsSpacing.xs,
+                  runSpacing: MmsSpacing.xxs,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
                     if (item.barcode != null && item.barcode!.isNotEmpty)
                       Text(
                         item.barcode!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: AppTheme.textMutedLight,
-                          fontFeatures: AppTheme.tabularFiguresFeature,
+                          color: colors.textSecondary,
+                          fontFeatures: MmsTypography.tabularFigures,
                         ),
                       ),
                     Text(
                       '${Money.formatCents(item.unitPriceCents)} / ${item.pricingUnit}',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 12,
-                        color: AppTheme.textMutedLight,
-                        fontFeatures: AppTheme.tabularFiguresFeature,
+                        color: colors.textSecondary,
+                        fontFeatures: MmsTypography.tabularFigures,
                       ),
                     ),
                     if (hasNegativeStockWarning)
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.posWarningBg,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(
-                            color: AppTheme.statusWarning.withValues(alpha: 0.4),
-                          ),
-                        ),
-                        child: Text(
-                          'Eksi Stok (allow): kalan ${Money.formatMilliWithUnit(item.projectedRemainingStockMilli, item.stockUnit)}',
-                          style: const TextStyle(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.posWarningText,
-                            fontFeatures: AppTheme.tabularFiguresFeature,
-                          ),
-                        ),
+                      AppBadge(
+                        label:
+                            'Eksi Stok (allow): kalan ${Money.formatMilliWithUnit(item.projectedRemainingStockMilli, item.stockUnit)}',
+                        tone: AppBadgeTone.warning,
+                        compact: true,
                       ),
                   ],
                 ),
@@ -137,6 +126,7 @@ class CartItemRow extends StatelessWidget {
                     minimumSize: const Size(48, 48),
                     fixedSize: const Size(48, 48),
                     padding: EdgeInsets.zero,
+                    backgroundColor: colors.surface,
                   ),
                   child: const Text(
                     '-',
@@ -147,26 +137,29 @@ class CartItemRow extends StatelessWidget {
                 InkWell(
                   key: Key('qty_value_${item.productId}'),
                   onTap: onEditQuantity,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(MmsRadius.sm),
                   child: Container(
-                    constraints: const BoxConstraints(minWidth: 72, minHeight: 48),
+                    constraints: const BoxConstraints(
+                      minWidth: 72,
+                      minHeight: 48,
+                    ),
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: AppTheme.surfaceLight,
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppTheme.borderSubtle),
+                      color: colors.surfaceSubtle,
+                      borderRadius: BorderRadius.circular(MmsRadius.sm),
+                      border: Border.all(color: colors.borderStrong),
                     ),
                     child: Text(
                       Money.formatMilliWithUnit(
                         item.quantityMilli,
                         item.pricingUnit,
                       ),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w700,
-                        color: AppTheme.textMainLight,
-                        fontFeatures: AppTheme.tabularFiguresFeature,
+                        color: colors.textPrimary,
+                        fontFeatures: MmsTypography.tabularFigures,
                       ),
                     ),
                   ),
@@ -179,6 +172,7 @@ class CartItemRow extends StatelessWidget {
                     minimumSize: const Size(48, 48),
                     fixedSize: const Size(48, 48),
                     padding: EdgeInsets.zero,
+                    backgroundColor: colors.surface,
                   ),
                   child: const Text(
                     '+',
@@ -193,11 +187,11 @@ class CartItemRow extends StatelessWidget {
               child: Text(
                 Money.formatCents(item.lineTotalCents),
                 textAlign: TextAlign.right,
-                style: const TextStyle(
-                  fontSize: 15.5,
+                style: TextStyle(
+                  fontSize: 15,
                   fontWeight: FontWeight.w800,
-                  color: AppTheme.textMainLight,
-                  fontFeatures: AppTheme.tabularFiguresFeature,
+                  color: colors.textPrimary,
+                  fontFeatures: MmsTypography.tabularFigures,
                 ),
               ),
             );
@@ -209,25 +203,22 @@ class CartItemRow extends StatelessWidget {
               style: IconButton.styleFrom(
                 minimumSize: const Size(48, 48),
                 fixedSize: const Size(48, 48),
-                foregroundColor: AppTheme.posDangerText,
-                backgroundColor: AppTheme.posDangerBg,
+                foregroundColor: colors.dangerText,
+                backgroundColor: colors.dangerBg,
               ),
-              icon: const Icon(Icons.delete_outline, size: 22),
+              icon: const Icon(Icons.delete_outline_rounded, size: 22),
             );
 
             if (constraints.maxWidth >= 560) {
               return Row(
                 children: [
                   indexBadge,
-                  Expanded(
-                    flex: 4,
-                    child: productDetails,
-                  ),
-                  const SizedBox(width: 8),
+                  Expanded(flex: 4, child: productDetails),
+                  const SizedBox(width: MmsSpacing.xs),
                   quantityControls,
-                  const SizedBox(width: 12),
+                  const SizedBox(width: MmsSpacing.sm),
                   lineTotalText,
-                  const SizedBox(width: 8),
+                  const SizedBox(width: MmsSpacing.xs),
                   removeButton,
                 ],
               );
@@ -244,20 +235,17 @@ class CartItemRow extends StatelessWidget {
                       child: indexBadge,
                     ),
                     Expanded(child: productDetails),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: MmsSpacing.xs),
                     removeButton,
                   ],
                 ),
-                const SizedBox(height: 8),
+                const SizedBox(height: MmsSpacing.xs),
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                  spacing: MmsSpacing.xs,
+                  runSpacing: MmsSpacing.xs,
                   alignment: WrapAlignment.spaceBetween,
                   crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    quantityControls,
-                    lineTotalText,
-                  ],
+                  children: [quantityControls, lineTotalText],
                 ),
               ],
             );
@@ -267,4 +255,3 @@ class CartItemRow extends StatelessWidget {
     );
   }
 }
-

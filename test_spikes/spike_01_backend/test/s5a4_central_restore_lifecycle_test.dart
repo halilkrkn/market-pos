@@ -1,3 +1,6 @@
+@Timeout(Duration(minutes: 2))
+library;
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:drift/drift.dart' hide isNotNull, isNull;
@@ -161,6 +164,15 @@ void main() {
       expect(restoreResp.statusCode, equals(200));
       final restoreJson = jsonDecode(restoreResp.body) as Map<String, dynamic>;
       expect(restoreJson['status'], equals('RESTORED'));
+      // SEC-SAFETY: Merkezi DB'nin restore öncesi güvenlik kopyası (cihaz token hash/salt
+      // içerir) diskte şifresiz kalmaz; pepper ile şifreli .mmsbak olarak saklanır.
+      expect(restoreJson['safety_backup_encrypted'], isTrue);
+      final safetyPath = restoreJson['safety_backup_path'] as String;
+      expect(safetyPath, endsWith('.mmsbak'));
+      expect(File(safetyPath).existsSync(), isTrue);
+      final safetyDir = File(safetyPath).parent;
+      expect(safetyDir.listSync().whereType<File>().where((f) => f.path.endsWith('.db')), isEmpty);
+      expect(String.fromCharCodes(File(safetyPath).readAsBytesSync().take(15)), isNot('SQLite format 3'));
 
       // 4. Restore sonrası:
       // A. AdmissionGate ve WriteQueue yeniden açık olmalıdır

@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../../../core/theme/app_theme.dart';
+import '../../../../core/design_system/design_system.dart';
+import '../../../../core/theme/design_tokens.dart';
 
 /// `F1` Yardım ve Onaylı Klavye Kısayolları penceresi.
 class HelpShortcutsDialog extends StatelessWidget {
@@ -9,32 +10,33 @@ class HelpShortcutsDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.mmsColors;
+
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.escape): () =>
             Navigator.of(context).pop(),
       },
-      child: AlertDialog(
+      child: AppDialog(
         key: const Key('help_shortcuts_dialog'),
-        title: const Row(
-          children: [
-            Icon(Icons.help_outline, color: AppTheme.primaryBlue),
-            SizedBox(width: 8),
-            Text('Kasa Kısayolları ve İş Kuralları'),
-          ],
-        ),
-        content: const SizedBox(
-          width: 480,
+        title: 'Kasa Kısayolları ve İş Kuralları',
+        icon: Icons.help_outline_rounded,
+        iconColor: colors.emerald,
+        maxWidth: 500,
+        content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _HelpRow('F1', 'Bu yardım penceresini açar'),
-              _HelpRow('F2', 'Seçili sepet satırının miktarını düzenler'),
-              _HelpRow('F9', 'Kredi Kartı ile ödeme penceresini açar'),
-              _HelpRow('F10', 'Nakit ödeme penceresini açar'),
-              _HelpRow('Esc', 'Açık modalı kapatır / barkod girişini temizler'),
-              Divider(height: 24),
+              const _HelpRow('F1', 'Bu yardım penceresini açar'),
+              const _HelpRow('F2', 'Seçili sepet satırının miktarını düzenler'),
+              const _HelpRow('F9', 'Kredi Kartı ile ödeme penceresini açar'),
+              const _HelpRow('F10', 'Nakit ödeme penceresini açar'),
+              const _HelpRow(
+                'Esc',
+                'Açık modalı kapatır / barkod girişini temizler',
+              ),
+              Divider(height: MmsSpacing.xl, color: colors.border),
               Text(
                 '• USB HID barkod okuyucu ile okutulan aktif ürünler otomatik sepete eklenir ve aynı ürün tek satırda birleşir.\n'
                 '• Yerel veritabanında bulunmayan barkod çevrimdışı eklenemez veya oluşturulamaz (Master Hub bağlantısı gerekir).\n'
@@ -42,21 +44,18 @@ class HelpShortcutsDialog extends StatelessWidget {
                 '• Kredi kartında harici POS terminaline tutar elle girilir.',
                 style: TextStyle(
                   fontSize: 13,
-                  color: AppTheme.textMutedLight,
-                  height: 1.45,
+                  color: colors.textSecondary,
+                  height: 1.5,
                 ),
               ),
             ],
           ),
         ),
         actions: [
-          ElevatedButton(
+          AppButton(
+            label: 'Kapat [Esc]',
+            variant: AppButtonVariant.primary,
             onPressed: () => Navigator.of(context).pop(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryBlue,
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Kapat [Esc]'),
           ),
         ],
       ),
@@ -72,8 +71,9 @@ class _HelpRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = context.mmsColors;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: 5),
       child: Row(
         children: [
           Container(
@@ -81,26 +81,27 @@ class _HelpRow extends StatelessWidget {
             padding: const EdgeInsets.symmetric(vertical: 4),
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: const Color(0xFFE2E8F0),
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(color: AppTheme.borderSubtle),
+              color: colors.surfaceSubtle,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: colors.borderStrong),
             ),
             child: Text(
               keyBadge,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
-                color: AppTheme.textMainLight,
+                color: colors.textPrimary,
+                fontFeatures: MmsTypography.tabularFigures,
               ),
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: MmsSpacing.sm),
           Expanded(
             child: Text(
               description,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 13.5,
-                color: AppTheme.textMainLight,
+                color: colors.textPrimary,
               ),
             ),
           ),
@@ -109,4 +110,3 @@ class _HelpRow extends StatelessWidget {
     );
   }
 }
-

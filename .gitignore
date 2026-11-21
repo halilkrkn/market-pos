@@ -93,6 +93,7 @@ out/
 *.keystore
 *.jks
 *.p12
+**/android/key.properties
 *.pem
 google-services.json
 GoogleService-Info.plist
@@ -112,10 +113,34 @@ pepper.dpapi
 *.db-journal
 *.db-shm
 *.db-wal
+# Şifresiz DB yedek kopyaları ve restore ara dosyaları (token hash'leri içerir)
+*.db.bak*
+*.restore_journal
+*.restore_staging.tmp
+*.swap_bak
+# Şifreli yedek paketleri ve yedekleme durum/kayıt dosyaları depoya girmez
+*.mmsbak
+*.mmsbak.tmp
+backup_schedule_state.json
+backup_schedule_settings.json
+drive_upload_ledger.json
 
 # ------------------------------------------------------------------------------
 # 7. Servis İkili Dosyaları (Binaries)
 # ------------------------------------------------------------------------------
 # Bundled service executables
 test_spikes/**/service_wrapper/*.exe
+# Derleme çıktıları ve yerel test ikilileri
+test_spikes/spike_01_backend/build2/
+test_spikes/spike_01_backend/build_out/
+test_spikes/spike_01_backend/lib/sqlite3.dll
+manual_test_env/*.apk
+manual_test_env/windows_release/
+# Manuel test ortamı bilinen test cihaz token'ları ve admin secret içerir
+# (init_test_env.dart, write_scripts.py). Depoya girmez; temizlik prosedürü:
+# OWNER_ACTION_CHECKLIST.md → "Manuel test ortamı".
+manual_test_env/
+# İstemci yedek kilidi (BK-LOCK) çalışma zamanı dosyası
+.mms_backup_operation.lock
+dist/
 

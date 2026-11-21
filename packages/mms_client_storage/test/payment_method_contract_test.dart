@@ -603,6 +603,16 @@ class _ScriptedPaymentValidatingTransport implements SyncTransport {
       const SyncResponse(statusCode: 200, body: '{}');
 
   @override
+  Future<SyncResponse> getSales({
+    required String hubUrl,
+    required String token,
+    int cursor = 0,
+    int limit = 50,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"sales":[],"next_cursor":0,"has_more":false}');
+
+  @override
   Future<SyncResponse> postSyncAck({
     required String hubUrl,
     required String token,
@@ -610,6 +620,24 @@ class _ScriptedPaymentValidatingTransport implements SyncTransport {
     Duration timeout = const Duration(seconds: 10),
   }) async =>
       const SyncResponse(statusCode: 200, body: '{}');
+
+  @override
+  Future<SyncResponse> postProductUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"status":"COMMITTED"}');
+
+  @override
+  Future<SyncResponse> postStockReceipt({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"status":"COMMITTED"}');
 
   @override
   void close() {}
@@ -633,12 +661,33 @@ class _FakeSyncTransport implements SyncTransport {
   }
 
   @override
+  Future<SyncResponse> postProductUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async {
+    lastSentPayload = payload;
+    return nextResponse;
+  }
+
+  @override
   Future<SyncResponse> getProducts({
     required String hubUrl,
     required String token,
     Duration timeout = const Duration(seconds: 10),
   }) async =>
       const SyncResponse(statusCode: 200, body: '{}');
+
+  @override
+  Future<SyncResponse> getSales({
+    required String hubUrl,
+    required String token,
+    int cursor = 0,
+    int limit = 50,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"sales":[],"next_cursor":0,"has_more":false}');
 
   @override
   Future<SyncResponse> postSyncAck({
@@ -648,6 +697,15 @@ class _FakeSyncTransport implements SyncTransport {
     Duration timeout = const Duration(seconds: 10),
   }) async =>
       const SyncResponse(statusCode: 200, body: '{}');
+
+  @override
+  Future<SyncResponse> postStockReceipt({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) async =>
+      const SyncResponse(statusCode: 200, body: '{"status":"COMMITTED"}');
 
   @override
   void close() {}

@@ -10,7 +10,7 @@ Sabit ve yapay bir "yüzde X test kapsamı" kuralı yerine, projenin en kritik v
 
 Öncelikli test alanları:
 1. **Finansal Doğruluk (`CONFIRMED`):** Para hesaplamaları, sepet ara toplamı, miktar ve genel satış toplamı hesaplarının kuruş bazlı tamsayılarla (`int` / `BIGINT`) yapılması; `double` aritmetiği kesinlikle kullanılmaz. Satış anındaki birim fiyat ve ad snapshot olarak korunur.
-   - *Not 1:* Alt kuruş kesirli işlemler için uygulanacak yuvarlama yöntemi henüz onaylanmamış olup `OPEN DECISION` statüsündedir.
+   - *Not 1 (`CONFIRMED — OD-01`, 11 Kasım 2026):* Kesirli miktar (milli-unit ölçeği), kısmi iade, miktar çarpımı ve toplam hesaplama testlerinde kuruş tabanlı integer para saklama ve **Half-Up** yuvarlama standardı (milli-unit `quantity` ölçeğinde örnek: `((unitPrice * quantity) + 500) ~/ 1000`; UI gösterimi iki ondalık basamak, ör. `12.50 TL`) tüm platformlar için zorunlu olarak doğrulanır. Idempotency ve `payload_hash` mekanizmaları kendi mevcut kurallarıyla ayrıca test edilir.
    - *Not 2:* Vergi (KDV), indirim, kampanya ve benzeri finansal kurallar henüz onaylanmış MVP gereksinimi değildir; bu tür ek hesaplamalar onaylandığı takdirde test kapsamına alınacak açık/öneri (`OPEN`/`PROPOSED`) konularıdır. Henüz onaylanmamış özellikler için zorunlu test kuralı işletilemez.
 2. **Atomik Veri Yazımı (`CONFIRMED`):** Satış, sepet satırları, stok düşümü ve senkronizasyon kuyruğu yazımının aynı yerel transaction içinde tamamlanması.
 3. **Senkronizasyon ve Idempotency (`CONFIRMED`):** Tekrarlanan isteklerin mükerrer satış veya mükerrer stok düşümü oluşturmaması (`idempotency_key`), kalıcı cihaz kimliği (`device_id`) ve monotonik sayaç (`client_seq`), deterministik FIFO sırası ve sunucu ACK gelmeden `SYNCED` işaretlenmeme garantisi.

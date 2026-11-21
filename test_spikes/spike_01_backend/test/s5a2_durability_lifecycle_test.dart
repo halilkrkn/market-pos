@@ -376,7 +376,7 @@ void main() {
     test('9. Commit-before-ACK: Transaction SQLite\'a commit edilmeden istemciye ACK verilmemelidir', () async {
       final payload = {
         'operation_id': 'op_cba_1',
-        'client_seq': 10,
+        'client_seq': 1,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'items': [
@@ -418,7 +418,7 @@ void main() {
     test('10. ACK kaybı sonrası aynı payload ile tekrar gönderimde mükerrer satış/stok düşümü olmadan önceki yanıt dönmelidir (Idempotent Replay)', () async {
       final payload = {
         'operation_id': 'op_replay_1',
-        'client_seq': 11,
+        'client_seq': 1,
         'total_amount': 5000,
         'payment_method': 'CASH',
         'items': [
@@ -454,12 +454,12 @@ void main() {
 
       // Yanıt içerikleri aynı olmalı
       expect(body2['sale_id'], equals(body1['sale_id']));
-      expect(body2['client_seq'], equals(11));
+      expect(body2['client_seq'], equals(1));
 
       // Veritabanında mükerrer kayıt ve mükerrer stok düşümü olmamalı
       final rawDb = sqlite.sqlite3.open(dbFile.path);
       try {
-        final sales = rawDb.select("SELECT COUNT(*) as cnt FROM sales WHERE client_seq = 11;");
+        final sales = rawDb.select("SELECT COUNT(*) as cnt FROM sales WHERE client_seq = 1;");
         expect(sales.first['cnt'], equals(1), reason: 'Tek bir satış kaydı bulunmalıdır.');
 
         final colaStock = rawDb.select("SELECT stock FROM products WHERE id = 'prod_cola';");
@@ -472,7 +472,7 @@ void main() {
     test('11. Aynı idempotency key ile farklı payload geldiğinde 409 Conflict dönmelidir (ERR_IDEMPOTENCY_PAYLOAD_MISMATCH)', () async {
       final payloadOriginal = {
         'operation_id': 'op_conflict_1',
-        'client_seq': 12,
+        'client_seq': 1,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'items': [
@@ -491,10 +491,10 @@ void main() {
       );
       expect(res1.statusCode, equals(201));
 
-      // 2. Aynı idempotency key ($deviceId:12), ancak farklı sepet/tutar!
+      // 2. Aynı idempotency key ($deviceId:1), ancak farklı sepet/tutar!
       final payloadMismatched = {
         'operation_id': 'op_conflict_1',
-        'client_seq': 12, // AYNI SIRA NO
+        'client_seq': 1, // AYNI SIRA NO
         'total_amount': 5000, // FARKLI TUTAR!
         'payment_method': 'CARD',
         'items': [
@@ -515,12 +515,12 @@ void main() {
       final body2 = jsonDecode(res2.body) as Map<String, dynamic>;
       expect(body2['error'], equals('CONFLICT'));
       expect(body2['code'], equals('ERR_IDEMPOTENCY_PAYLOAD_MISMATCH'));
-      expect(body2['idempotency_key'], equals('$deviceId:12'));
+      expect(body2['idempotency_key'], equals('$deviceId:1'));
 
       // Veritabanındaki ilk işlem bozulmamış olmalıdır
       final rawDb = sqlite.sqlite3.open(dbFile.path);
       try {
-        final sales = rawDb.select("SELECT * FROM sales WHERE client_seq = 12;");
+        final sales = rawDb.select("SELECT * FROM sales WHERE client_seq = 1;");
         expect(sales.length, equals(1));
         expect(sales.first['total_amount'], equals(2500)); // Değiştirilmemiş olmalı
       } finally {
@@ -625,7 +625,7 @@ void main() {
       final spoofPayload = {
         'operation_id': 'op_spoof_test',
         'device_id': 'HACKED_SPOOFED_DEVICE_ID', // SAHTE GÖVDE PARAMETRESİ!
-        'client_seq': 77,
+        'client_seq': 1,
         'total_amount': 2500,
         'payment_method': 'CASH',
         'items': [
@@ -648,7 +648,7 @@ void main() {
 
       final rawDb = sqlite.sqlite3.open(dbFile.path);
       try {
-        final sale = rawDb.select("SELECT * FROM sales WHERE client_seq = 77;");
+        final sale = rawDb.select("SELECT * FROM sales WHERE client_seq = 1;");
         expect(sale.first['device_id'], equals(deviceId));
       } finally {
         rawDb.dispose();
@@ -659,7 +659,7 @@ void main() {
       // Olmayan ürün içeren satış
       final failingPayload = {
         'operation_id': 'op_rollback_test',
-        'client_seq': 13,
+        'client_seq': 1,
         'total_amount': 5000,
         'payment_method': 'CASH',
         'items': [
@@ -682,10 +682,10 @@ void main() {
       // Veritabanı temiz kalmalı (Rollback)
       final rawDb = sqlite.sqlite3.open(dbFile.path);
       try {
-        final sales = rawDb.select("SELECT * FROM sales WHERE client_seq = 13;");
+        final sales = rawDb.select("SELECT * FROM sales WHERE client_seq = 1;");
         expect(sales.isEmpty, isTrue, reason: 'Satış kaydı rollback edilmiş olmalıdır.');
 
-        final ops = rawDb.select("SELECT * FROM processed_operations WHERE idempotency_key = '$deviceId:13';");
+        final ops = rawDb.select("SELECT * FROM processed_operations WHERE idempotency_key = '$deviceId:1';");
         expect(ops.isEmpty, isTrue, reason: 'ProcessedOperations kaydı rollback edilmiş olmalıdır.');
 
         // Cola stoğu düşmemeli
@@ -701,7 +701,7 @@ void main() {
       // Müşteri kasada 12 adet su aldı (fiziksel satış engellenemez!)
       final payload = {
         'operation_id': 'op_neg_stock_1',
-        'client_seq': 14,
+        'client_seq': 1,
         'total_amount': 12000,
         'payment_method': 'CASH',
         'items': [
@@ -750,7 +750,10 @@ void main() {
         attempts++;
         if (attempts < 3) {
           // SQLite Error 5: SQLITE_BUSY
-          throw sqlite.SqliteException(5, 'database is locked');
+          throw sqlite.SqliteException(
+            extendedResultCode: 5,
+            message: 'database is locked',
+          );
         }
         return 'SUCCESS_AFTER_BUSY';
       });

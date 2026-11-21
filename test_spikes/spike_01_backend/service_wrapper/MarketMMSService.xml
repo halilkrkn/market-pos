@@ -5,7 +5,10 @@
   
   <!-- Çalıştırılacak Dart AOT binary yolu (ProgramData Dağıtım Standardı) -->
   <executable>%BASE%\mms_backend.exe</executable>
-  <arguments>--port=8085 --db-path="%BASE%\..\data\market_master.db" --cert="%BASE%\..\certs\server.crt" --key="%BASE%\..\certs\server.key" --pepper-file="%BASE%\..\security\pepper.dpapi" --backup-dir="%BASE%\..\backups" --tls</arguments>
+  <!-- REL-01: Port, TLS, sertifika, DB/yedek/pepper/admin-secret yolları ve tenant/store
+       ayarları TEK kaynaktan okunur: %ProgramData%\MarketMMS\config\hub_config.json
+       (şablon: config\hub_config.example.json). Burada başka bayrak verilmez. -->
+  <arguments>--config="%BASE%\..\config\hub_config.json"</arguments>
   <workingdirectory>%BASE%\..</workingdirectory>
   
   <!-- Servis Başlangıç Davranışı: Sistem açılışında otomatik başlama -->
@@ -33,7 +36,6 @@
   <!-- Graceful Shutdown: 15 saniye bekleme -->
   <stoptimeout>15 sec</stoptimeout>
   
-  <!-- Ortam Değişkenleri: Şifresiz HTTP kesinlikle yasaktır, TLS zorunludur -->
-  <env name="MMS_ENV" value="production"/>
-  <env name="ENABLE_TLS" value="true"/>
+  <!-- TLS zorunluluğu hub_config.json içinde "environment": "production" ile doğrulanır
+       (TLS kapalı üretim yapılandırması servis açılışında reddedilir). -->
 </service>

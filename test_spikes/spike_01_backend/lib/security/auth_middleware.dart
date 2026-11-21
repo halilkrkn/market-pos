@@ -7,13 +7,31 @@ import 'pepper_manager.dart';
 import 'token_manager.dart';
 
 Middleware createAuthMiddleware({
-  required SpikeDatabase db,
+  SpikeDatabase? db,
+  SpikeDatabase Function()? dbProvider,
   required bool Function() isDraining,
   required PepperManager pepperManager,
   WriteQueue? writeQueue,
   bool requireTls = false,
+  String expectedTenantId = 'default-tenant',
+  String expectedStoreId = 'default-store',
+  bool requireTenantStoreHeaders = false,
+  List<String> strictTenantStorePaths = const [
+    '/api/v1/sync/device-state',
+    '/api/v1/sync/receipts',
+  ],
+  List<String> storeDataPrefixes = const [
+    '/api/v1/sales',
+    '/api/v1/products',
+    '/api/v1/sync/',
+    '/api/v1/stock/',
+  ],
   List<String> publicPaths = const ['/health'],
 }) {
+  if (db == null && dbProvider == null) {
+    throw ArgumentError('createAuthMiddleware için db veya dbProvider zorunludur.');
+  }
+  final resolveDb = dbProvider ?? () => db!;
   return (Handler innerHandler) {
     return (Request request) async {
       // 1. Draining kontrolü (Servis kapanıyorsa istekleri reddet)
@@ -73,8 +91,9 @@ Middleware createAuthMiddleware({
       }
 
       // 4. Veritabanından cihazı ve yetkisini doğrula (S-2 SHA-256 Hash + Salt + Pepper)
+      final activeDb = resolveDb();
       final activePepper = pepperManager.pepper;
-      final allDevices = await db.select(db.devices).get();
+      final allDevices = await activeDb.select(activeDb.devices).get();
       Device? matchedDevice;
 
       for (final device in allDevices) {
@@ -144,16 +163,60 @@ Middleware createAuthMiddleware({
       // lastUsedAt güncellemesi
       if (writeQueue != null && !isDraining()) {
         writeQueue.enqueue(() async {
-          await (db.update(db.devices)..where((d) => d.deviceId.equals(matchedDevice!.deviceId)))
+          final targetDb = resolveDb();
+          await (targetDb.update(targetDb.devices)
+                ..where((d) => d.deviceId.equals(matchedDevice!.deviceId)))
               .write(DevicesCompanion(lastUsedAt: Value(DateTime.now())));
         }).catchError((_) {});
       }
 
-      // 5. Cihaz kimliğini istek bağlamına (context) ekle ve devam et
+      // 5. BK-02.1 Pilot Tenant / Store Kimlik Doğrulaması (Mağaza Verisi İzolasyonu)
+      final isStrictPath = strictTenantStorePaths.contains(normalizedPath);
+      final isStoreDataRoute =
+          isStrictPath || storeDataPrefixes.any((prefix) => normalizedPath.startsWith(prefix));
+      final rawTenantHeader = request.headers['x-mms-tenant-id'];
+      final rawStoreHeader = request.headers['x-mms-store-id'];
+      final hasAnyTenantStoreHeader =
+          rawTenantHeader != null || rawStoreHeader != null;
+
+      if (hasAnyTenantStoreHeader) {
+        final cleanTenant = rawTenantHeader?.trim();
+        final cleanStore = rawStoreHeader?.trim();
+        if (cleanTenant != expectedTenantId || cleanStore != expectedStoreId) {
+          return Response(
+            403,
+            body: jsonEncode({
+              'error': 'FORBIDDEN',
+              'code': 'ERR_TENANT_STORE_MISMATCH',
+              'message':
+                  'Tenant veya şube kimliği bu Master Hub ile eşleşmiyor.',
+              'expected_tenant_id': expectedTenantId,
+              'expected_store_id': expectedStoreId,
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      } else if (isStoreDataRoute &&
+          (isStrictPath || requireTenantStoreHeaders)) {
+        return Response(
+          403,
+          body: jsonEncode({
+            'error': 'FORBIDDEN',
+            'code': 'ERR_TENANT_STORE_REQUIRED',
+            'message':
+                'Mağaza verisine erişim için X-MMS-Tenant-Id ve X-MMS-Store-Id başlıkları zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      // 6. Cihaz kimliğini ve doğrulanmış mağaza bağlamını istek context'ine ekle ve devam et
       final updatedRequest = request.change(context: {
         'authenticated_device_id': matchedDevice.deviceId,
         'authenticated_device_name': matchedDevice.name,
         'authenticated_device_role': matchedDevice.role,
+        'authenticated_tenant_id': expectedTenantId,
+        'authenticated_store_id': expectedStoreId,
       });
 
       return innerHandler(updatedRequest);
