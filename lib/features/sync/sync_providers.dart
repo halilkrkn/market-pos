@@ -1,6 +1,11 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mms_client_storage/mms_client_storage.dart';
+import 'dart:io';
 
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
+import 'package:mms_client_storage/mms_client_storage.dart';
+import 'package:path/path.dart' as p;
+
+import '../../core/security/security_providers.dart';
 import '../../core/security/tls_pinned_client_factory.dart';
 import '../diagnostics/application/system_status_notifier.dart';
 import '../diagnostics/domain/system_status.dart';
@@ -9,6 +14,69 @@ import 'application/background_sync_coordinator.dart';
 import 'application/hub_connection_notifier.dart';
 import 'domain/hub_connection_state.dart';
 import 'domain/sync_coordinator_state.dart';
+
+/// ADR-021: Google Drive canlı senkronizasyon gizlisi anahtarı (yedek parolasından ayrı).
+const String kDriveLiveSyncSecretKey = 'drive_live_sync_secret_v1';
+
+/// ADR-021: Yetkili ve iptal edilmiş cihaz kayıt defteri.
+final driveAuthorizedRegistryProvider = Provider<DriveAuthorizedDeviceRegistry>((ref) {
+  final setup = ref.watch(setupConfigProvider);
+  final registry = DriveAuthorizedDeviceRegistry();
+  if (setup.deviceId.trim().isNotEmpty) {
+    registry.authorizeDevice(
+      deviceId: setup.deviceId,
+      tenantId: setup.tenantId,
+      storeId: setup.storeId,
+    );
+  }
+  return registry;
+});
+
+/// ADR-021: Hub-öncelikli Google Drive canlı senkronizasyon motoru sağlayıcısı.
+///
+/// Bellek içi test veritabanlarında veya Drive OAuth kimliği tanımlanmamışsa
+/// otomatik olarak `null` döner (Hub-yalnız mod korunur).
+final driveLiveSyncEngineProvider = Provider<MmsDriveLiveSyncEngine?>((ref) {
+  const clientId = String.fromEnvironment('MMS_GDRIVE_CLIENT_ID');
+  const clientSecret = String.fromEnvironment('MMS_GDRIVE_CLIENT_SECRET');
+  if (clientId.trim().isEmpty) return null;
+
+  final localDb = ref.watch(localDatabaseServiceProvider);
+  if (localDb.databasePath == ':memory:') return null;
+
+  final setup = ref.watch(setupConfigProvider);
+  final secureStore = ref.watch(secureTokenStoreProvider);
+  final registry = ref.watch(driveAuthorizedRegistryProvider);
+
+  final httpClient = http.Client();
+  ref.onDispose(httpClient.close);
+
+  final tokenProvider = GoogleOAuthRefreshTokenProvider(
+    clientId: clientId,
+    clientSecret: clientSecret.isEmpty ? null : clientSecret,
+    readRefreshToken: () => secureStore.readSecret('gdrive_refresh_token_v1'),
+    httpClient: httpClient,
+  );
+
+  return MmsDriveLiveSyncEngine(
+    repository: localDb.repository,
+    transport: GoogleDriveLiveEnvelopeTransport(
+      tokenProvider: tokenProvider,
+      httpClient: httpClient,
+    ),
+    ledger: DriveLiveSyncLedger(
+      File(p.join(localDb.dataDirectoryPath, 'drive_live_sync_ledger.json')),
+    ),
+    deviceRegistry: registry,
+    tenantId: setup.tenantId,
+    storeId: setup.storeId,
+    localDeviceId: setup.deviceId,
+    readLiveSyncSecret: () => secureStore.readSecret(kDriveLiveSyncSecretKey),
+    operationLockFile: File(
+      p.join(localDb.dataDirectoryPath, 'backups', BackupOperationLock.defaultFileName),
+    ),
+  );
+});
 
 /// HTTP Senkronizasyon Taşıma Katmanı Sağlayıcısı (SyncTransport)
 final syncTransportProvider = Provider<SyncTransport>((ref) {
@@ -37,6 +105,7 @@ final backgroundSyncCoordinatorProvider =
       final apiClient = ref.watch(apiClientProvider);
       final transport = ref.watch(syncTransportProvider);
       final allowLoopback = ref.watch(hubAllowLoopbackPolicyProvider);
+      final driveEngine = ref.watch(driveLiveSyncEngineProvider);
       final autoDiscoveryEnabled = ref.watch(
         hubAutoDiscoveryLifecycleEnabledProvider,
       );
@@ -65,6 +134,8 @@ final backgroundSyncCoordinatorProvider =
         isHubUrlReady: () =>
             isStateReadyForSync(ref.read(hubConnectionProvider)),
         allowLoopbackHubUrl: allowLoopback,
+        driveLiveSyncEngine: driveEngine,
+        isDriveFallbackStandby: driveEngine != null,
         onSyncCompleted: (result) async {
           // Senkronizasyon tamamlandığında yalnızca yerel sayaçları/outbox durumunu reaktif yenile
           // Kesinlikle yeni bir HTTP /health isteği oluşturmaz (sonsuz döngüyü önler).

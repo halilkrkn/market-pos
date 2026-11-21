@@ -58,6 +58,23 @@ enum SyncTriggerReason {
 
 const Object _unset = Object();
 
+/// ADR-021 §6.6: Hibrit Hub + Google Drive Canlı Senkronizasyon 10 UI Durumu.
+enum HybridDriveSyncUiStatus {
+  hubPrimary('Hub Birincil (Aktif)'),
+  hubOfflineConfirmed('Hub Erişilemiyor (Doğrulandı)'),
+  driveStandby('Google Drive Yedek Hat (Hazırda Bekliyor)'),
+  driveFallbackActive('Google Drive Canlı Senkron Aktif (Fallback)'),
+  driveSyncing('Google Drive Senkronize Ediliyor...'),
+  driveSynced('Google Drive Güncel (Hub Bekleniyor)'),
+  driveOfflineError('Google Drive Bağlantı Hatası'),
+  driveConflictDetected('Google Drive Çakışma Tespit Edildi (Hub Bekleniyor)'),
+  hubReconciling('Master Hub Döndü — Uzlaştırılıyor...'),
+  hubReconciled('Master Hub ile Uzlaştırıldı (Güncel)');
+
+  final String label;
+  const HybridDriveSyncUiStatus(this.label);
+}
+
 /// MARKET MMS - Arka Plan Senkronizasyon Koordinatörü Durumu (Immutable State)
 class SyncCoordinatorState {
   final SyncCoordinatorStatus status;
@@ -72,6 +89,12 @@ class SyncCoordinatorState {
   /// olsa bile kullanıcıya gösterilir; bir sonraki başarılı indirmede temizlenir.
   final String? downlinkError;
 
+  /// ADR-021: Hibrit Hub / Google Drive canlı senkronizasyon durumu.
+  final HybridDriveSyncUiStatus driveSyncUiStatus;
+  final int driveConflictCount;
+  final DateTime? lastDriveSyncTime;
+  final DateTime? lastHubReconciledTime;
+
   const SyncCoordinatorState({
     required this.status,
     required this.isSyncing,
@@ -81,6 +104,10 @@ class SyncCoordinatorState {
     this.errorMessage,
     this.hasPendingTrailingSync = false,
     this.downlinkError,
+    this.driveSyncUiStatus = HybridDriveSyncUiStatus.hubPrimary,
+    this.driveConflictCount = 0,
+    this.lastDriveSyncTime,
+    this.lastHubReconciledTime,
   });
 
   /// Başlangıç durumu
@@ -93,6 +120,8 @@ class SyncCoordinatorState {
       lastResult: null,
       errorMessage: null,
       hasPendingTrailingSync: false,
+      driveSyncUiStatus: HybridDriveSyncUiStatus.hubPrimary,
+      driveConflictCount: 0,
     );
   }
 
@@ -105,6 +134,10 @@ class SyncCoordinatorState {
     Object? errorMessage = _unset,
     bool? hasPendingTrailingSync,
     Object? downlinkError = _unset,
+    HybridDriveSyncUiStatus? driveSyncUiStatus,
+    int? driveConflictCount,
+    Object? lastDriveSyncTime = _unset,
+    Object? lastHubReconciledTime = _unset,
   }) {
     return SyncCoordinatorState(
       status: status ?? this.status,
@@ -126,6 +159,14 @@ class SyncCoordinatorState {
       downlinkError: identical(downlinkError, _unset)
           ? this.downlinkError
           : downlinkError as String?,
+      driveSyncUiStatus: driveSyncUiStatus ?? this.driveSyncUiStatus,
+      driveConflictCount: driveConflictCount ?? this.driveConflictCount,
+      lastDriveSyncTime: identical(lastDriveSyncTime, _unset)
+          ? this.lastDriveSyncTime
+          : lastDriveSyncTime as DateTime?,
+      lastHubReconciledTime: identical(lastHubReconciledTime, _unset)
+          ? this.lastHubReconciledTime
+          : lastHubReconciledTime as DateTime?,
     );
   }
 
@@ -141,7 +182,11 @@ class SyncCoordinatorState {
           lastResult == other.lastResult &&
           errorMessage == other.errorMessage &&
           hasPendingTrailingSync == other.hasPendingTrailingSync &&
-          downlinkError == other.downlinkError;
+          downlinkError == other.downlinkError &&
+          driveSyncUiStatus == other.driveSyncUiStatus &&
+          driveConflictCount == other.driveConflictCount &&
+          lastDriveSyncTime == other.lastDriveSyncTime &&
+          lastHubReconciledTime == other.lastHubReconciledTime;
 
   @override
   int get hashCode => Object.hash(
@@ -153,6 +198,10 @@ class SyncCoordinatorState {
         errorMessage,
         hasPendingTrailingSync,
         downlinkError,
+        driveSyncUiStatus,
+        driveConflictCount,
+        lastDriveSyncTime,
+        lastHubReconciledTime,
       );
 
   @override
@@ -160,6 +209,8 @@ class SyncCoordinatorState {
     return 'SyncCoordinatorState(status: $status, isSyncing: $isSyncing, '
         'lastTriggerReason: $lastTriggerReason, lastSyncTime: $lastSyncTime, '
         'lastResult: $lastResult, errorMessage: $errorMessage, '
-        'hasPendingTrailingSync: $hasPendingTrailingSync, downlinkError: $downlinkError)';
+        'hasPendingTrailingSync: $hasPendingTrailingSync, downlinkError: $downlinkError, '
+        'driveSyncUiStatus: $driveSyncUiStatus, driveConflictCount: $driveConflictCount, '
+        'lastDriveSyncTime: $lastDriveSyncTime, lastHubReconciledTime: $lastHubReconciledTime)';
   }
 }

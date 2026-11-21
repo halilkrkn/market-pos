@@ -9,6 +9,7 @@ import '../../../../core/platform/mms_ui_profile.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart';
+import '../../application/client_backup_service.dart';
 import '../../backup_providers.dart';
 
 /// Faz 7D — USB / ağ klasörü aktarımı ve Google Drive bağlantısı.
@@ -143,13 +144,15 @@ class _ExternalBackupSectionState extends ConsumerState<ExternalBackupSection> {
             future: drive.isConnected(),
             builder: (context, snap) {
               final connected = snap.data ?? false;
+              final uploader = ref.watch(googleDriveUploaderProvider);
+              final backupService = ref.watch(clientBackupServiceProvider);
               return Wrap(spacing: MmsSpacing.sm, runSpacing: MmsSpacing.sm, children: [
                 AppBadge(
                   label: connected ? 'Google Drive bağlı' : 'Google Drive bağlı değil',
                   tone: connected ? AppBadgeTone.success : AppBadgeTone.warning,
                   compact: true,
                 ),
-                if (isDesktop)
+                if (isDesktop || connected)
                   SizedBox(
                     height: 48,
                     child: OutlinedButton(
@@ -158,13 +161,34 @@ class _ExternalBackupSectionState extends ConsumerState<ExternalBackupSection> {
                           ? null
                           : () => _guard(() async {
                                 if (connected) {
-                                  await drive.disconnect();
+                                  final tokenProv = uploader?.tokenProvider;
+                                  await drive.disconnect(
+                                    tokenProvider: tokenProv is GoogleOAuthRefreshTokenProvider
+                                        ? tokenProv
+                                        : null,
+                                  );
                                   return 'Google Drive bağlantısı kaldırıldı.';
                                 }
                                 await drive.connect();
                                 return 'Google Drive bağlandı. Otomatik yedekler şifreli olarak yüklenecek.';
                               }).then((_) => setState(() {})),
                       child: Text(connected ? 'Bağlantıyı Kaldır' : 'Google Drive\'ı Bağla'),
+                    ),
+                  ),
+                if (connected && uploader != null)
+                  SizedBox(
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      key: const Key('gdrive_list_backups_button'),
+                      onPressed: _busy
+                          ? null
+                          : () => _openDriveRestoreDialog(
+                                context: context,
+                                uploader: uploader,
+                                backupService: backupService,
+                              ),
+                      icon: const Icon(Icons.cloud_download_outlined),
+                      label: const Text('Drive Yedeklerinden Geri Yükle'),
                     ),
                   ),
               ]);
@@ -176,5 +200,141 @@ class _ExternalBackupSectionState extends ConsumerState<ExternalBackupSection> {
         ],
       ],
     );
+  }
+
+  Future<void> _openDriveRestoreDialog({
+    required BuildContext context,
+    required GoogleDriveBackupUploader uploader,
+    required ClientBackupService backupService,
+  }) async {
+    await _guard(() async {
+      final remoteBackups = await backupService.listGoogleDriveBackups(uploader: uploader);
+      if (!context.mounted) return 'İşlem iptal edildi.';
+      if (remoteBackups.isEmpty) {
+        return 'Google Drive üzerinde geri yüklenebilecek şifreli yedek bulunamadı.';
+      }
+
+      DriveRemoteBackupInfo selected = remoteBackups.first;
+      final passwordController = TextEditingController();
+      String? dialogError;
+      bool restoring = false;
+
+      final restored = await showDialog<RestoreResult>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogCtx) => StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: const Text('Google Drive Yedeklerinden Geri Yükle'),
+            content: SizedBox(
+              width: 480,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Geri yükleme öncesinde indirilen .mmsbak paketinin bütünlüğü, '
+                    'cihaz/şube kimliği ve parolası doğrulanır; canlı veritabanı '
+                    'koruyucu kopya alınmadan değiştirilmez ve bekleyen Outbox korunur.',
+                  ),
+                  const SizedBox(height: MmsSpacing.sm),
+                  SizedBox(
+                    height: 180,
+                    child: ListView.builder(
+                      itemCount: remoteBackups.length,
+                      itemBuilder: (_, index) {
+                        final item = remoteBackups[index];
+                        final isSelected = item.fileId == selected.fileId;
+                        final ts = item.createdTimeUtc?.toLocal().toString().substring(0, 16) ?? '-';
+                        final kb = (item.sizeBytes / 1024).toStringAsFixed(1);
+                        return ListTile(
+                          dense: true,
+                          selected: isSelected,
+                          leading: Icon(
+                            isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                          ),
+                          title: Text(item.fileName, maxLines: 1, overflow: TextOverflow.ellipsis),
+                          subtitle: Text('$ts · $kb KB'),
+                          onTap: restoring ? null : () => setDialogState(() => selected = item),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: MmsSpacing.sm),
+                  TextField(
+                    key: const Key('gdrive_restore_password_field'),
+                    controller: passwordController,
+                    obscureText: true,
+                    enabled: !restoring,
+                    decoration: const InputDecoration(
+                      labelText: 'Yedekleme parolası',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  if (dialogError != null) ...[
+                    const SizedBox(height: MmsSpacing.xs),
+                    Text(
+                      dialogError!,
+                      style: TextStyle(color: Theme.of(ctx).colorScheme.error, fontSize: 12.5),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            actions: [
+              SizedBox(
+                height: 48,
+                child: TextButton(
+                  onPressed: restoring ? null : () => Navigator.of(dialogCtx).pop(null),
+                  child: const Text('İptal'),
+                ),
+              ),
+              SizedBox(
+                height: 48,
+                child: FilledButton(
+                  key: const Key('gdrive_restore_confirm_button'),
+                  onPressed: restoring
+                      ? null
+                      : () async {
+                          final pw = passwordController.text;
+                          if (pw.trim().isEmpty) {
+                            setDialogState(() => dialogError = 'Yedek parolasını girin.');
+                            return;
+                          }
+                          setDialogState(() {
+                            restoring = true;
+                            dialogError = null;
+                          });
+                          try {
+                            final result = await backupService.downloadAndRestoreFromGoogleDrive(
+                              uploader: uploader,
+                              remote: selected,
+                              password: pw,
+                            );
+                            if (dialogCtx.mounted) Navigator.of(dialogCtx).pop(result);
+                          } catch (e) {
+                            setDialogState(() {
+                              restoring = false;
+                              dialogError = switch (e) {
+                                BackupException(:final message) => message,
+                                DriveBackupException(:final message) => message,
+                                _ => UserFriendlyErrorMapper.map(e),
+                              };
+                            });
+                          }
+                        },
+                  child: Text(restoring ? 'Doğrulanıyor...' : 'Geri Yüklemeyi Başlat'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+      passwordController.dispose();
+      if (restored == null) {
+        return 'Google Drive geri yüklemesi iptal edildi.';
+      }
+      ref.invalidate(backupListProvider);
+      return 'Google Drive yedeği (${restored.backupId.substring(0, 8)}...) başarıyla geri yüklendi.';
+    });
   }
 }

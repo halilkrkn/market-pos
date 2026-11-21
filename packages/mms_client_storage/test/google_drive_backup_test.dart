@@ -313,5 +313,232 @@ void main() {
         throwsA(isA<DriveBackupException>().having((e) => e.code, 'code', 'ERR_DRIVE_REAUTH_REQUIRED')),
       );
     });
+
+    test('12. listRemoteBackups sayfalama (nextPageToken), filtreleme ve tarih azalan sıralama yapar', () async {
+      final tmp = Directory.systemTemp.createTempSync('mms_drive_list_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+
+      final uploader = GoogleDriveBackupUploader(
+        tokenProvider: _FakeTokens(),
+        ledger: DriveUploadLedger(File(p.join(tmp.path, 'ledger.json'))),
+        baseDelay: Duration.zero,
+        httpClient: MockClient((req) async {
+          if (req.url.path == '/drive/v3/files' &&
+              (req.url.queryParameters['q'] ?? '').contains('application/vnd.google-apps.folder')) {
+            return http.Response(
+              jsonEncode({
+                'files': [
+                  {'id': 'folder-1'},
+                ],
+              }),
+              200,
+            );
+          }
+          final page = req.url.queryParameters['pageToken'];
+          if (page == null) {
+            return http.Response(
+              jsonEncode({
+                'nextPageToken': 'page-2',
+                'files': [
+                  {
+                    'id': 'f-old',
+                    'name': 'backup_CLIENT_LOCAL_dev1_old.mmsbak',
+                    'size': '1024',
+                    'createdTime': '2026-11-20T08:00:00Z',
+                    'appProperties': {
+                      'mms_backup_id': 'b-old',
+                      'mms_device_id': 'dev-1',
+                      'mms_tenant_id': 't-1',
+                      'mms_store_id': 's-1',
+                      'mms_database_type': 'CLIENT_LOCAL',
+                    },
+                  },
+                  {
+                    'id': 'f-ignored',
+                    'name': 'notes.txt',
+                    'size': '12',
+                  },
+                ],
+              }),
+              200,
+            );
+          }
+          return http.Response(
+            jsonEncode({
+              'files': [
+                {
+                  'id': 'f-new',
+                  'name': 'backup_CLIENT_LOCAL_dev1_new.mmsbak',
+                  'size': '2048',
+                  'createdTime': '2026-11-21T09:00:00Z',
+                  'appProperties': {
+                    'mms_backup_id': 'b-new',
+                    'mms_device_id': 'dev-1',
+                    'mms_tenant_id': 't-1',
+                    'mms_store_id': 's-1',
+                    'mms_database_type': 'CLIENT_LOCAL',
+                  },
+                },
+                {
+                  'id': 'f-other-tenant',
+                  'name': 'backup_CLIENT_LOCAL_dev9_other.mmsbak',
+                  'size': '512',
+                  'createdTime': '2026-11-21T10:00:00Z',
+                  'appProperties': {
+                    'mms_backup_id': 'b-other',
+                    'mms_device_id': 'dev-9',
+                    'mms_tenant_id': 't-2',
+                    'mms_store_id': 's-1',
+                    'mms_database_type': 'CLIENT_LOCAL',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+
+      final listed = await uploader.listRemoteBackups(
+        tenantId: 't-1',
+        storeId: 's-1',
+        deviceId: 'dev-1',
+      );
+      expect(listed.map((e) => e.backupId).toList(), ['b-new', 'b-old']);
+      expect(listed.first.sizeBytes, 2048);
+    });
+
+    test('13. downloadEncryptedBackup yarım .part dosyasını Range ile sürdürür ve SHA-256 + yapıyı doğrular', () async {
+      final tmp = Directory.systemTemp.createTempSync('mms_drive_dl_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+
+      final pkgBytes = BackupCryptoService.encryptPackage(
+        databaseBytes: Uint8List.fromList(utf8.encode('SQLite format 3\x00test_db_payload')),
+        password: 'StrongPassword123!',
+        manifest: BackupManifest(
+          backupId: 'bkp-range-1',
+          deviceId: 'dev-1',
+          tenantId: 't-1',
+          storeId: 's-1',
+          databaseType: DatabaseType.clientLocal,
+          schemaVersion: 4,
+          appVersion: '1.0.0',
+          timestamp: DateTime.utc(2026, 11, 21, 10, 0),
+          checksum: sha256.convert(utf8.encode('SQLite format 3\x00test_db_payload')).toString(),
+          unencryptedSizeBytes: 31,
+          encryptedSizeBytes: 0,
+          kdfIterations: 1000,
+        ),
+      );
+      final expectedSha = sha256.convert(pkgBytes).toString();
+      const splitOffset = 24;
+      final outDir = Directory(p.join(tmp.path, 'dl'))..createSync();
+      const fileName = 'backup_CLIENT_LOCAL_dev1_bkp-range-1.mmsbak';
+      await File(p.join(outDir.path, '$fileName.part'))
+          .writeAsBytes(pkgBytes.sublist(0, splitOffset), flush: true);
+
+      String? capturedRange;
+      final uploader = GoogleDriveBackupUploader(
+        tokenProvider: _FakeTokens(),
+        ledger: DriveUploadLedger(File(p.join(tmp.path, 'ledger.json'))),
+        baseDelay: Duration.zero,
+        httpClient: MockClient((req) async {
+          capturedRange = req.headers['Range'];
+          expect(capturedRange, 'bytes=$splitOffset-');
+          return http.Response.bytes(pkgBytes.sublist(splitOffset), 206);
+        }),
+      );
+
+      final downloaded = await uploader.downloadEncryptedBackup(
+        remote: DriveRemoteBackupInfo(
+          fileId: 'drive-id-1',
+          fileName: fileName,
+          sizeBytes: pkgBytes.length,
+          backupId: 'bkp-range-1',
+          sha256Checksum: expectedSha,
+        ),
+        targetDir: outDir,
+      );
+
+      expect(await downloaded.exists(), isTrue);
+      expect(await File('${downloaded.path}.part').exists(), isFalse);
+      expect(await downloaded.readAsBytes(), pkgBytes);
+    });
+
+    test('14. downloadEncryptedBackup bozuk/checksum uyuşmayan indirmede .part dosyasını siler', () async {
+      final tmp = Directory.systemTemp.createTempSync('mms_drive_bad_');
+      addTearDown(() => tmp.deleteSync(recursive: true));
+
+      final pkgBytes = BackupCryptoService.encryptPackage(
+        databaseBytes: Uint8List.fromList(utf8.encode('SQLite format 3\x00payload')),
+        password: 'StrongPassword123!',
+        manifest: BackupManifest(
+          backupId: 'bkp-bad-1',
+          deviceId: 'dev-1',
+          tenantId: 't-1',
+          storeId: 's-1',
+          databaseType: DatabaseType.clientLocal,
+          schemaVersion: 4,
+          appVersion: '1.0.0',
+          timestamp: DateTime.utc(2026, 11, 21, 10, 0),
+          checksum: sha256.convert(utf8.encode('SQLite format 3\x00payload')).toString(),
+          unencryptedSizeBytes: 23,
+          encryptedSizeBytes: 0,
+          kdfIterations: 1000,
+        ),
+      );
+      final tampered = Uint8List.fromList(pkgBytes);
+      tampered[tampered.length - 5] ^= 0xff;
+      final expectedSha = sha256.convert(pkgBytes).toString();
+      final outDir = Directory(p.join(tmp.path, 'dl'))..createSync();
+      const fileName = 'backup_CLIENT_LOCAL_dev1_bkp-bad-1.mmsbak';
+
+      final uploader = GoogleDriveBackupUploader(
+        tokenProvider: _FakeTokens(),
+        ledger: DriveUploadLedger(File(p.join(tmp.path, 'ledger.json'))),
+        baseDelay: Duration.zero,
+        httpClient: MockClient((_) async => http.Response.bytes(tampered, 200)),
+      );
+
+      await expectLater(
+        () => uploader.downloadEncryptedBackup(
+          remote: DriveRemoteBackupInfo(
+            fileId: 'drive-bad-1',
+            fileName: fileName,
+            sizeBytes: pkgBytes.length,
+            backupId: 'bkp-bad-1',
+            sha256Checksum: expectedSha,
+          ),
+          targetDir: outDir,
+        ),
+        throwsA(isA<DriveBackupException>()
+            .having((e) => e.code, 'code', 'ERR_DRIVE_CHECKSUM_MISMATCH')),
+      );
+      expect(outDir.listSync(), isEmpty);
+    });
+
+    test('15. revokeToken önbelleği sıfırlar ve Google revoke endpoint çağrısı yapar', () async {
+      Uri? revokedUri;
+      String? revokedBody;
+      final client = MockClient((req) async {
+        if (req.url.path == '/revoke') {
+          revokedUri = req.url;
+          revokedBody = req.body;
+          return http.Response('', 200);
+        }
+        return http.Response(jsonEncode({'access_token': 'ya29.live', 'expires_in': 3600}), 200);
+      });
+      final provider = GoogleOAuthRefreshTokenProvider(
+        clientId: 'cid',
+        readRefreshToken: () async => '1//refresh-secret',
+        httpClient: client,
+      );
+
+      expect(await provider.accessToken(), 'ya29.live');
+      final ok = await provider.revokeToken();
+      expect(ok, isTrue);
+      expect(revokedUri.toString(), 'https://oauth2.googleapis.com/revoke');
+      expect(revokedBody, contains('token='));
+    });
   });
 }

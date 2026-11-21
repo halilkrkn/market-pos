@@ -17,6 +17,7 @@ import '../../../sync/sync_providers.dart';
 import '../../../updates/presentation/widgets/app_update_card.dart';
 import '../../application/system_status_notifier.dart';
 import '../../domain/system_status.dart';
+import '../widgets/diagnostics_card_helpers.dart';
 import '../widgets/diagnostics_export_card.dart';
 import '../widgets/hub_connection_controls.dart';
 import '../widgets/outbox_status_badge.dart';
@@ -416,6 +417,15 @@ class DiagnosticsView extends ConsumerWidget {
     );
   }
 
+  @visibleForTesting
+  Widget buildSyncCoordinatorCardForTest(
+    BuildContext context,
+    WidgetRef ref,
+    SyncCoordinatorState syncState,
+    SystemStatus status,
+  ) =>
+      _buildSyncCoordinatorCard(context, ref, syncState, status);
+
   Widget _buildSyncCoordinatorCard(
     BuildContext context,
     WidgetRef ref,
@@ -574,6 +584,21 @@ class DiagnosticsView extends ConsumerWidget {
             AppErrorState(
               key: const Key('diagnostics_downlink_error'),
               message: syncState.downlinkError!,
+              inline: true,
+            ),
+          ],
+          const SizedBox(height: MmsSpacing.xs),
+          DiagnosticsKeyValueRow(
+            key: const Key('diagnostics_drive_live_sync_row'),
+            label: 'Hibrit / Drive Canlı Senkron',
+            value: syncState.driveSyncUiStatus.label,
+          ),
+          if (syncState.driveConflictCount > 0) ...[
+            const SizedBox(height: MmsSpacing.xs),
+            AppErrorState(
+              key: const Key('diagnostics_drive_conflict_banner'),
+              message:
+                  '${syncState.driveConflictCount} adet Drive ürün/fiyat çakışması tespit edildi; Master Hub bağlantısı bekleniyor.',
               inline: true,
             ),
           ],

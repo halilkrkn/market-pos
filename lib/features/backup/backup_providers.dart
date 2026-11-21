@@ -14,6 +14,7 @@ import '../sales/sales_providers.dart';
 import '../setup/setup_providers.dart';
 import '../stock/stock_providers.dart';
 import '../sync/sync_providers.dart';
+import 'application/background_backup_scheduler.dart';
 import 'application/backup_schedule_controller.dart';
 import 'application/client_backup_service.dart';
 import 'application/google_drive_connect_service.dart';
@@ -102,9 +103,12 @@ final googleDriveUploaderProvider = Provider<GoogleDriveBackupUploader?>((ref) {
   );
 });
 
-/// Faz 3: Zamanlanmış yerel yedek denetleyicisi. Başarılı yerel yedekten sonra (Drive
-/// bağlıysa) henüz yüklenmemiş son 3 yedek Drive'a gönderilir; Drive hatası yerel
-/// yedeği başarısız yapmaz.
+final backgroundBackupSchedulerProvider =
+    Provider<BackgroundBackupScheduler>((ref) {
+  return const MethodChannelBackgroundBackupScheduler();
+});
+
+/// Faz 3 / ADR-020: Zamanlanmış yerel ve Android arka plan yedek denetleyicisi.
 final backupScheduleControllerProvider =
     StateNotifierProvider<BackupScheduleController, BackupScheduleViewState>((ref) {
   final dbService = ref.watch(localDatabaseServiceProvider);
@@ -118,6 +122,7 @@ final backupScheduleControllerProvider =
     stateStore: BackupScheduleStateStore(
       File(p.join(dbService.dataDirectoryPath, 'backup_schedule_state.json')),
     ),
+    backgroundScheduler: ref.watch(backgroundBackupSchedulerProvider),
     afterSuccess: (_) async {
       final uploader = ref.read(googleDriveUploaderProvider);
       if (uploader == null) return;

@@ -201,4 +201,129 @@ class ClientBackupService {
       await storageProvider.deleteBackup(backupId);
     });
   }
+
+  /// Faz C: Google Drive üzerindeki şifreli `.mmsbak` yedeklerini listeler.
+  Future<List<DriveRemoteBackupInfo>> listGoogleDriveBackups({
+    required GoogleDriveBackupUploader uploader,
+    bool currentDeviceOnly = true,
+  }) {
+    final setup = readSetupConfig();
+    return uploader.listRemoteBackups(
+      tenantId: setup.tenantId,
+      storeId: setup.storeId,
+      deviceId: currentDeviceOnly ? setup.deviceId : null,
+      databaseType: effectiveDatabaseType,
+    );
+  }
+
+  /// Faz C: Owner kontrollü Google Drive geri yükleme.
+  ///
+  /// Yedeği önce geçici hazırlık dizinine indirir; kilit almadan veya canlı
+  /// veritabanını duraklatmadan ÖNCE SHA-256 + `verifyPackageStructure` + parola +
+  /// HMAC-SHA256 + tenant/store/device/şema + SQLite `integrity_check` doğrular.
+  /// Bozuk/yanlış parolalı dosya silinir ve canlı DB'ye hiç dokunulmaz.
+  /// Doğrulama geçerse [BackupOperationLock], `pauseSync`/`resumeSync`, koruyucu
+  /// kopya ve Outbox korumasıyla güvenli geri yükler.
+  Future<RestoreResult> downloadAndRestoreFromGoogleDrive({
+    required GoogleDriveBackupUploader uploader,
+    required DriveRemoteBackupInfo remote,
+    required String password,
+  }) async {
+    _ensureFileBackedDatabase();
+    if (password.trim().isEmpty) {
+      throw const BackupException(
+        'ERR_EMPTY_PASSWORD',
+        'Geri yükleme için yedek parolası girilmelidir.',
+      );
+    }
+
+    final setup = readSetupConfig();
+    final stagingDir = Directory.systemTemp.createTempSync('mms_drive_restore_');
+    try {
+      final downloaded = await uploader.downloadEncryptedBackup(
+        remote: remote,
+        targetDir: stagingDir,
+      );
+      final packageBytes = await downloaded.readAsBytes();
+
+      final DecryptedBackupResult decrypted;
+      try {
+        decrypted = await DatabaseBackupEngine.preVerifyEncryptedPackage(
+          packageBytes: packageBytes,
+          password: password,
+        );
+      } on BackupCryptoException catch (e) {
+        throw BackupException('ERR_DECRYPTION_FAILED', e.message);
+      }
+
+      final manifest = decrypted.manifest;
+      if (manifest.databaseType != effectiveDatabaseType) {
+        throw BackupException(
+          'ERR_DATABASE_TYPE_MISMATCH',
+          'Veritabanı türü uyuşmazlığı: Hedef [${effectiveDatabaseType.value}], '
+              'Yedek [${manifest.databaseType.value}].',
+        );
+      }
+      if (manifest.deviceId != setup.deviceId) {
+        throw BackupException(
+          'ERR_DEVICE_ID_MISMATCH',
+          'Cihaz kimliği uyuşmazlığı: Hedef [${setup.deviceId}], Yedek [${manifest.deviceId}].',
+        );
+      }
+      if (manifest.tenantId != setup.tenantId) {
+        throw BackupException(
+          'ERR_TENANT_ID_MISMATCH',
+          'Kiracı (Tenant) uyuşmazlığı: Hedef [${setup.tenantId}], Yedek [${manifest.tenantId}].',
+        );
+      }
+      if (manifest.storeId != setup.storeId) {
+        throw BackupException(
+          'ERR_STORE_ID_MISMATCH',
+          'Şube (Store) uyuşmazlığı: Hedef [${setup.storeId}], Yedek [${manifest.storeId}].',
+        );
+      }
+      if (manifest.schemaVersion > dbService.database.schemaVersion) {
+        throw BackupException(
+          'ERR_INCOMPATIBLE_SCHEMA_VERSION',
+          'Yedek şema sürümü (${manifest.schemaVersion}) desteklenenden yeni.',
+        );
+      }
+
+      DatabaseBackupEngine.verifyDecryptedBytesIntegrity(
+        decrypted.databaseBytes,
+        stagingDir,
+      );
+
+      return await _operationLock.synchronized(BackupOperationKind.restore, () async {
+        final storageProvider = LocalStorageProvider(backupRootDir);
+        if (!await storageProvider.backupExists(manifest.backupId)) {
+          final targetName = storageProvider.generateFileName(manifest);
+          final targetFile = File(p.join(backupRootDir.path, targetName));
+          final tmpFile = File('${targetFile.path}.tmp');
+          await tmpFile.writeAsBytes(packageBytes, flush: true);
+          await tmpFile.rename(targetFile.path);
+        }
+
+        if (pauseSync != null) {
+          await pauseSync!();
+        }
+        try {
+          return await _restoreWithEngine(
+            manifest.backupId,
+            password,
+            setup,
+            storageProvider,
+          );
+        } finally {
+          resumeSync?.call();
+        }
+      });
+    } finally {
+      if (stagingDir.existsSync()) {
+        try {
+          stagingDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+    }
+  }
 }

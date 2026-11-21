@@ -403,6 +403,61 @@ void main() {
           },
         );
 
+        var opensslBin = 'openssl';
+        for (final candidate in const <String>[
+          r'C:\Program Files\Git\usr\bin\openssl.exe',
+          r'C:\Program Files\Git\mingw64\bin\openssl.exe',
+        ]) {
+          if (File(candidate).existsSync()) {
+            opensslBin = candidate;
+            break;
+          }
+        }
+        final caKeyPath = p.join(tempDir.path, 's4_test_ca.key');
+        final caCrtPath = p.join(tempDir.path, 's4_test_ca.crt');
+        final caGenResult = Process.runSync(opensslBin, <String>[
+          'req',
+          '-x509',
+          '-newkey',
+          'rsa:2048',
+          '-nodes',
+          '-keyout',
+          caKeyPath,
+          '-out',
+          caCrtPath,
+          '-days',
+          '5',
+          '-subj',
+          '/CN=MMS Production Readiness Test Root CA',
+          '-addext',
+          'basicConstraints=critical,CA:TRUE',
+          '-addext',
+          'keyUsage=critical,keyCertSign,cRLSign',
+        ]);
+        expect(
+          caGenResult.exitCode,
+          0,
+          reason: 'OpenSSL test CA error: ${caGenResult.stderr}',
+        );
+        final canonicalTestCa = extractCanonicalSingleCertDer(
+          Uint8List.fromList(utf8.encode(File(caCrtPath).readAsStringSync())),
+        );
+
+        await expectLater(
+          () => pairingClient.pairDevice(
+            hubBaseUrl: 'https://192.168.1.50:8945',
+            sessionId: 'sess_01',
+            pairingSecret: 'sec_xyz',
+            deviceId: 'POS-AND-99',
+            deviceName: 'Kasa Mobil',
+            platformName: 'android',
+          ),
+          throwsA(
+            isA<DevicePairingException>()
+                .having((e) => e.code, 'code', 'CA_PIN_REQUIRED'),
+          ),
+        );
+
         final result = await pairingClient.pairDevice(
           hubBaseUrl: 'https://192.168.1.50:8945',
           sessionId: 'sess_01',
@@ -410,6 +465,8 @@ void main() {
           deviceId: 'POS-AND-99',
           deviceName: 'Kasa Mobil',
           platformName: 'android',
+          expectedCaSha256: canonicalTestCa.sha256Hex,
+          initialCaPem: canonicalTestCa.toPem(),
         );
 
         expect(result.confirmed, isTrue);

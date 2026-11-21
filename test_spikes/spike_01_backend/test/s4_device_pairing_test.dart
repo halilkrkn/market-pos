@@ -954,8 +954,8 @@ void main() {
       expect(pollRes2.body, contains('CHALLENGE_ALREADY_CONSUMED'));
     });
 
-    // TC-25: ACK challenge nonce tekrar kullanılamaz (ACK Replay)
-    test('TC-25: Kullanılmış bir ACK challenge ile tekrar teyit gönderilemez (409 Conflict)', () async {
+    // TC-25: DEC-REV-3 İdempotent ACK Replay & Geçersiz İmza Replay Koruması
+    test('TC-25: Aynı geçerli ACK isteği idempotent 200 OK döner; bozuk imzalı replay 403 reddedilir', () async {
       final sRes = await http.post(Uri.parse('$baseUrl/api/v1/pairing/session'), headers: adminHeaders);
       final sJson = jsonDecode(sRes.body) as Map<String, dynamic>;
       final sessionId = sJson['session_id'] as String;
@@ -1038,7 +1038,11 @@ void main() {
       );
       expect(ackRes1.statusCode, equals(200));
 
-      // İkinci ACK (Replay): 409 Conflict
+      final auditBefore = await (db.select(db.deviceAuditLogs)
+            ..where((a) => a.deviceId.equals('DEV_REPLAY_ACK')))
+          .get();
+
+      // DEC-REV-3 İdempotent ACK Replay (aynı geçerli imza): 200 OK + mükerrer DB/audit yok
       final ackRes2 = await http.post(
         Uri.parse('$baseUrl/api/v1/pairing/ack'),
         headers: {'content-type': 'application/json'},
@@ -1048,7 +1052,25 @@ void main() {
           'signature': base64Encode(ackSig),
         }),
       );
-      expect(ackRes2.statusCode, equals(409));
+      expect(ackRes2.statusCode, equals(200));
+      expect((jsonDecode(ackRes2.body) as Map)['idempotent_replay'], isTrue);
+
+      final auditAfter = await (db.select(db.deviceAuditLogs)
+            ..where((a) => a.deviceId.equals('DEV_REPLAY_ACK')))
+          .get();
+      expect(auditAfter.length, auditBefore.length);
+
+      // Bozuk imzalı replay reddedilir: 403 INVALID_ACK_TOKEN_HASH_SIGNATURE
+      final ackResFake = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/ack'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'session_id': sessionId,
+          'ack_challenge_id': ackChallengeId,
+          'signature': base64Encode(List<int>.filled(70, 0x42)),
+        }),
+      );
+      expect(ackResFake.statusCode, equals(403));
     });
 
     // TC-26: Üç Hatalı İmzayla Challenge Kilitlenmesi ve Hub Onaysız Taze Challenge ile Kurtarma

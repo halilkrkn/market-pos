@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart';
@@ -225,6 +226,21 @@ class DatabaseBackupEngine {
     }
   }
 
+  /// Çözülmüş SQLite veritabanı baytlarının `PRAGMA integrity_check` doğrulamasını
+  /// canlı veritabanına dokunmadan geçici bir hazırlık dosyasında çalıştırır.
+  static void verifyDecryptedBytesIntegrity(
+    List<int> decryptedDbBytes,
+    Directory stagingDir,
+  ) {
+    final checkFile = File(p.join(stagingDir.path, 'precheck_${generateBackupId()}.db'));
+    checkFile.writeAsBytesSync(decryptedDbBytes, flush: true);
+    try {
+      _verifyIntegrityOrThrow(checkFile, 'ERR_INTEGRITY_CHECK_FAILED');
+    } finally {
+      _deleteQuietlySync(checkFile);
+    }
+  }
+
   /// Bekleyen veya yarıda kalmış restore işlemini (.restore_journal) senkron olarak kurtarır.
   /// Süreç çökmesi veya elektrik kesintisi sonrasında veritabanı açılırken çağrılır.
   static bool recoverPendingRestoreSync(File liveDbFile) {
@@ -331,6 +347,22 @@ class DatabaseBackupEngine {
   /// Asenkron kurtarma metodu
   static Future<bool> recoverPendingRestore(File liveDbFile) async {
     return recoverPendingRestoreSync(liveDbFile);
+  }
+
+  /// Canlı DB veya kilit dokunulmadan şifreli `.mmsbak` paketini ayrı isolate'te
+  /// HMAC-SHA256 + parola + SHA-256 doğrulamasından geçirir.
+  /// Static metod olduğu için çağıran servis (`this`) isolate kapanına yakalanmaz.
+  static Future<DecryptedBackupResult> preVerifyEncryptedPackage({
+    required Uint8List packageBytes,
+    required String password,
+  }) {
+    return Isolate.run(
+      () => BackupCryptoService.verifyAndDecryptPackage(
+        packageBytes: packageBytes,
+        password: password,
+      ),
+      debugName: 'mms_backup_preverify',
+    );
   }
 
   /// Şifrelenmiş yedek paketini doğrular, koruyucu yedek alır ve canlı veritabanına kontrollü geri yükler

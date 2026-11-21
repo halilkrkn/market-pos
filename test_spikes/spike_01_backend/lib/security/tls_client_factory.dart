@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:typed_data';
+import 'package:mms_client_storage/mms_client_storage.dart';
 import 'certificate_manager.dart';
 
 /// İstemci (Kasa Terminali / Mobil Cihaz) tarafında Kök CA'yı sabitleyen (pin),
@@ -15,16 +17,25 @@ class TlsClientFactory {
       throw TlsSecurityException('Root CA sertifikası boş olamaz.');
     }
 
+    final CanonicalCertDerResult canonical;
+    try {
+      canonical = extractCanonicalSingleCertDer(
+        Uint8List.fromList(trustedRootCaBytes),
+      );
+      MmsX509PreValidator.validateRootCaDer(canonical.derBytes);
+    } on X509ValidationException catch (e) {
+      throw TlsSecurityException('Geçersiz Root CA sertifikası (${e.code}): ${e.message}');
+    }
+
     // 1. Bant-dışı / QR Güven Çapası (Fingerprint) Doğrulaması
     if (expectedFingerprint != null) {
-      final actualFingerprint = CertificateManager.computeSha256Fingerprint(trustedRootCaBytes);
-      final normalizedActual = actualFingerprint.replaceAll(':', '').toLowerCase();
-      final normalizedExpected = expectedFingerprint.replaceAll(':', '').toLowerCase();
+      final normalizedActual = canonical.sha256Hex;
+      final normalizedExpected = expectedFingerprint.replaceAll(':', '').replaceAll(' ', '').trim().toUpperCase();
 
-      if (normalizedActual != normalizedExpected) {
+      if (!constantTimeEqualsAscii(normalizedActual, normalizedExpected)) {
         throw TlsSecurityException(
           'Root CA parmak izi uyuşmazlığı tespit edildi! '
-          'Beklenen: $expectedFingerprint, Gerçekleşen: $actualFingerprint. '
+          'Beklenen: $expectedFingerprint, Gerçekleşen: ${CertificateManager.formatSha256Colon(normalizedActual)}. '
           'Olası MITM saldırısı nedeniyle bağlantı reddedildi.',
         );
       }
@@ -32,14 +43,13 @@ class TlsClientFactory {
 
     // 2. Kök sertifikayı sabitle (Pin) ve OS deposunu körü körüne güvenmekten kaçın
     final secContext = SecurityContext(withTrustedRoots: false);
-    secContext.setTrustedCertificatesBytes(trustedRootCaBytes);
+    secContext.setTrustedCertificatesBytes(canonical.toPemBytes());
 
     final client = HttpClient(context: secContext);
     client.connectionTimeout = connectionTimeout;
 
     // 3. Katı Red Kuralı: badCertificateCallback ASLA koşulsuz true dönmez!
     client.badCertificateCallback = (X509Certificate cert, String host, int port) {
-      // Geçersiz, süresi dolmuş veya bilinmeyen bir CA tarafından imzalanmış sertifikaları reddet
       return false;
     };
 

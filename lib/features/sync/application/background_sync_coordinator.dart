@@ -44,6 +44,8 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
   final bool Function()? isHubUrlReady;
   final bool allowLoopbackHubUrl;
   final ClientSyncServiceFactory? syncServiceFactory;
+  final MmsDriveLiveSyncEngine? driveLiveSyncEngine;
+  final bool isDriveFallbackStandby;
   final FutureOr<void> Function(SyncBatchResult? result)? onSyncCompleted;
   final Duration periodicInterval;
   final bool autoStartTimer;
@@ -78,12 +80,18 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
     this.isHubUrlReady,
     this.allowLoopbackHubUrl = true,
     this.syncServiceFactory,
+    this.driveLiveSyncEngine,
+    this.isDriveFallbackStandby = false,
     this.onSyncCompleted,
     this.periodicInterval = const Duration(seconds: 30),
     this.autoStartTimer = true,
     this.enableLifecycleListener = true,
     @visibleForTesting this.onCycleStart,
-  }) : super(SyncCoordinatorState.initial()) {
+  }) : super(SyncCoordinatorState.initial().copyWith(
+          driveSyncUiStatus: isDriveFallbackStandby
+              ? HybridDriveSyncUiStatus.driveStandby
+              : HybridDriveSyncUiStatus.hubPrimary,
+        )) {
     _initPeriodicTimer();
     _initLifecycleListener();
   }
@@ -321,6 +329,8 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
       String? executionError;
       String? downlinkError;
       var downlinkAttempted = false;
+      var pulledProductsCount = 0;
+      var pulledSalesCount = 0;
 
       try {
         final cycleHubCheck = _safeResolveHubUrl();
@@ -360,7 +370,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         downlinkAttempted = true;
         // Merkezi ürün kataloğu snapshot'ını çek ve güncelle
         try {
-          await service.syncProducts();
+          pulledProductsCount = await service.syncProducts();
         } catch (prodSyncErr) {
           debugPrint('[BackgroundSyncCoordinator] Ürün kataloğu senkronizasyonu uyarısı: $prodSyncErr');
           downlinkErrors.add('Ürün kataloğu indirilemedi: $prodSyncErr');
@@ -368,7 +378,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
 
         // Satışların çoklu cihaz senkronizasyonu (downlink) çek ve güncelle
         try {
-          await service.syncSales();
+          pulledSalesCount = await service.syncSales();
         } catch (salesSyncErr) {
           debugPrint('[BackgroundSyncCoordinator] Satış senkronizasyonu uyarısı: $salesSyncErr');
           downlinkErrors.add('Satış geçmişi indirilemedi: $salesSyncErr');
@@ -429,6 +439,114 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
       }
 
       final now = DateTime.now();
+      var nextDriveUiStatus = state.driveSyncUiStatus;
+      var nextDriveConflictCount = state.driveConflictCount;
+      var nextLastDriveSyncTime = state.lastDriveSyncTime;
+      var nextLastHubReconciledTime = state.lastHubReconciledTime;
+
+      final engine = driveLiveSyncEngine;
+      if (engine != null) {
+        final bool isSecurityHold =
+            downlinkPinMismatch ||
+            downlinkCertError ||
+            (result?.tlsPinMismatch == true) ||
+            (result?.tlsCertError == true);
+        final bool isAuthHold =
+            hasTokenReadError ||
+            isTokenMissing ||
+            (result?.lastError?.contains('Yetki/TLS bekletmesi') == true &&
+                !isSecurityHold);
+        final bool hubReachable =
+            executionError == null &&
+            !isSecurityHold &&
+            !isAuthHold &&
+            result != null &&
+            result.retriedCount == 0 &&
+            downlinkError == null;
+
+        if (isSecurityHold || isAuthHold) {
+          await engine.recordHubFailure(
+            isSecurityHold: isSecurityHold,
+            isAuthFailure: isAuthHold,
+            isPaused: _maintenancePaused,
+          );
+          nextDriveUiStatus = HybridDriveSyncUiStatus.hubPrimary;
+        } else if (hubReachable) {
+          final preLedger = await engine.getLedgerState();
+          if (preLedger.driveFallbackActive ||
+              preLedger.pendingHubReconciliation) {
+            if (!_isDisposed) {
+              state = state.copyWith(
+                driveSyncUiStatus: HybridDriveSyncUiStatus.hubReconciling,
+              );
+            }
+            final rec = await engine.reconcileWithMasterHub(
+              pushOutboxToHub: () async => result!.syncedCount,
+              pullProductsFromHub: () async => pulledProductsCount,
+              pullSalesFromHub: () async => pulledSalesCount,
+              isOutboxEmptyOrAllSynced: () =>
+                  result!.retriedCount == 0 && !result.hasMore,
+            );
+            if (rec.reconciled) {
+              nextDriveUiStatus = HybridDriveSyncUiStatus.hubReconciled;
+              nextDriveConflictCount = 0;
+              nextLastHubReconciledTime = now;
+            } else {
+              nextDriveUiStatus = HybridDriveSyncUiStatus.hubReconciling;
+            }
+          } else {
+            await engine.recordHubHealthy();
+            nextDriveUiStatus = isDriveFallbackStandby
+                ? HybridDriveSyncUiStatus.driveStandby
+                : HybridDriveSyncUiStatus.hubPrimary;
+          }
+        } else {
+          final afterFail = await engine.recordHubFailure(
+            isSecurityHold: false,
+            isAuthFailure: false,
+            isPaused: _maintenancePaused,
+          );
+          if (!afterFail.driveFallbackActive) {
+            nextDriveUiStatus = HybridDriveSyncUiStatus.hubOfflineConfirmed;
+          } else {
+            if (!_isDisposed) {
+              state = state.copyWith(
+                driveSyncUiStatus: HybridDriveSyncUiStatus.driveFallbackActive,
+              );
+            }
+            if (!_isDisposed) {
+              state = state.copyWith(
+                driveSyncUiStatus: HybridDriveSyncUiStatus.driveSyncing,
+              );
+            }
+            try {
+              final driveRes = await engine.runDriveFallbackCycle();
+              final postLedger = await engine.getLedgerState();
+              nextDriveConflictCount = postLedger.unresolvedConflicts.length;
+              if (driveRes.hasErrors) {
+                nextDriveUiStatus = HybridDriveSyncUiStatus.driveOfflineError;
+              } else if (nextDriveConflictCount > 0 || driveRes.hasConflicts) {
+                nextDriveUiStatus =
+                    HybridDriveSyncUiStatus.driveConflictDetected;
+              } else {
+                nextDriveUiStatus = HybridDriveSyncUiStatus.driveSynced;
+                nextLastDriveSyncTime = now;
+              }
+            } catch (e) {
+              debugPrint('[BackgroundSyncCoordinator] Drive fallback hatası: $e');
+              nextDriveUiStatus = HybridDriveSyncUiStatus.driveOfflineError;
+            }
+          }
+        }
+      }
+
+      if (_isDisposed) {
+        if (!currentCompleter.isCompleted) {
+          currentCompleter.complete(result);
+        }
+        return;
+      }
+
       state = state.copyWith(
         status: newStatus,
         isSyncing: false,
@@ -443,6 +561,10 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         hasPendingTrailingSync:
             _trailingSyncRequested && !isTokenMissing && !hasTokenReadError,
         downlinkError: downlinkAttempted ? downlinkError : state.downlinkError,
+        driveSyncUiStatus: nextDriveUiStatus,
+        driveConflictCount: nextDriveConflictCount,
+        lastDriveSyncTime: nextLastDriveSyncTime,
+        lastHubReconciledTime: nextLastHubReconciledTime,
       );
 
       // 2. Callback izolasyonu: onSyncCompleted hatası veya gecikmesi coordinator'ı kilitlememelidir

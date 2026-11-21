@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'package:crypto/crypto.dart';
+import 'dart:typed_data';
+import 'package:mms_client_storage/mms_client_storage.dart';
 
 class TlsConfigurationException implements Exception {
   final String message;
@@ -57,6 +58,8 @@ class CertificateManager {
   }
 
   /// 10 yıllık, self-signed yerel Kök Sertifika Otoritesi (Root CA) üretir.
+  /// P-BLOCK-1 (`DEC-REV-1`): Zorunlu X.509v3 `basicConstraints=critical,CA:TRUE`
+  /// ve `keyUsage=critical,keyCertSign,cRLSign` eklentileri ile üretilir.
   static void generateRootCa({
     required String caKeyPath,
     required String caCertPath,
@@ -78,6 +81,10 @@ class CertificateManager {
       validityDays.toString(),
       '-subj',
       '/CN=$commonName',
+      '-addext',
+      'basicConstraints=critical,CA:TRUE',
+      '-addext',
+      'keyUsage=critical,keyCertSign,cRLSign',
     ]);
 
     if (res.exitCode != 0 || !File(caCertPath).existsSync()) {
@@ -217,16 +224,51 @@ class CertificateManager {
     }
   }
 
-  /// Sertifikanın SHA-256 özetini (fingerprint) formatlı biçimde hesaplar (örn: 4F:A2:8B:...).
-  static String computeSha256Fingerprint(List<int> certBytes) {
-    final digest = sha256.convert(certBytes);
-    final hex = digest.toString().toUpperCase();
+  /// İki nokta ayraçlı SHA-256 hex gösterimi üretir (örn: 4F:A2:8B:...).
+  static String formatSha256Colon(String normalizedHex) {
+    final clean = normalizedHex.replaceAll(':', '').replaceAll(' ', '').trim().toUpperCase();
     final buffer = StringBuffer();
-    for (var i = 0; i < hex.length; i += 2) {
+    for (var i = 0; i < clean.length; i += 2) {
       if (i > 0) buffer.write(':');
-      buffer.write(hex.substring(i, i + 2));
+      buffer.write(clean.substring(i, i + 2 <= clean.length ? i + 2 : clean.length));
     }
     return buffer.toString();
+  }
+
+  /// Sertifikanın kanonik tekil DER SHA-256 özetini (fingerprint) hesaplar (örn: 4F:A2:8B:...).
+  ///
+  /// P-BLOCK-1 (`DEC-REV-1`): PEM veya ham DER girdisinden tekil kanonik DER
+  /// gövdesi çıkarılır ve yalnızca DER baytları üzerinden özet alınır.
+  static String computeSha256Fingerprint(List<int> certBytes) {
+    final canonical = extractCanonicalSingleCertDer(
+      Uint8List.fromList(certBytes),
+    );
+    return formatSha256Colon(canonical.sha256Hex);
+  }
+
+  /// Root CA dosyasını Katman 1 + Katman 2 (`MmsX509PreValidator`) kurallarıyla doğrular
+  /// ve kanonik tekil DER + iki nokta ayraçlı parmak izi bilgisini döner.
+  static ({CanonicalCertDerResult canonical, String colonFingerprint}) validateRootCaBytes(
+    List<int> certBytes, {
+    DateTime? nowUtc,
+  }) {
+    final canonical = extractCanonicalSingleCertDer(
+      Uint8List.fromList(certBytes),
+    );
+    MmsX509PreValidator.validateRootCaDer(canonical.derBytes, nowUtc: nowUtc);
+    return (
+      canonical: canonical,
+      colonFingerprint: formatSha256Colon(canonical.sha256Hex),
+    );
+  }
+
+  /// Sunucu sertifikası (`server.crt`) içindeki IPv4 SAN (`iPAddress [7]`) kümesini çıkarır.
+  static Set<String> extractServerCertSanIpv4s(List<int> serverCertBytes) {
+    final canonical = extractCanonicalSingleCertDer(
+      Uint8List.fromList(serverCertBytes),
+      invalidCode: 'INVALID_SERVER_CERT',
+    );
+    return MmsX509PreValidator.extractServerSanIpv4s(canonical.derBytes);
   }
 
   /// Sunucu için doğrulanmış, güvenli SecurityContext oluşturur.

@@ -113,10 +113,20 @@ class HubPairingAdminClient {
         .toList();
   }
 
-  Future<void> approve({required String sessionId, required String adminSecret}) async {
+  Future<void> approve({
+    required String sessionId,
+    required String adminSecret,
+    bool allowRePair = false,
+  }) async {
     final headers = _headers(adminSecret);
-    await _send(() => httpClient.post(_uri('/api/v1/pairing/approve'),
-        headers: headers, body: jsonEncode({'session_id': sessionId})));
+    await _send(() => httpClient.post(
+          _uri('/api/v1/pairing/approve'),
+          headers: headers,
+          body: jsonEncode({
+            'session_id': sessionId,
+            if (allowRePair) 'allow_re_pair': true,
+          }),
+        ));
   }
 
   Future<void> reject({required String sessionId, required String adminSecret}) async {

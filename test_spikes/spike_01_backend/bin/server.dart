@@ -22,6 +22,7 @@ import '../lib/service/admission_gate.dart';
 import '../lib/service/lifecycle_manager.dart';
 import '../lib/discovery/discovery_responder.dart';
 import '../lib/config/hub_config.dart';
+import '../lib/network/hub_lan_address_resolver.dart';
 import '../lib/sync/canonical_payload_hasher.dart';
 import '../lib/sync/device_sequence_inspector.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
@@ -90,6 +91,9 @@ class SpikeServer {
   final bool requireTls;
   final PairingManager pairingManager;
   final String? caCertPath;
+  final String? serverCertPath;
+  final String? advertiseHost;
+  final HubLanAddressResolver? lanAddressResolver;
   final String tenantId;
   final String storeId;
   final String hubId;
@@ -148,6 +152,9 @@ class SpikeServer {
     this.requireTls = false,
     PairingManager? pairingManager,
     this.caCertPath,
+    this.serverCertPath,
+    this.advertiseHost,
+    this.lanAddressResolver,
     LifecycleManager? lifecycle,
     String? tenantId,
     String? storeId,
@@ -757,19 +764,18 @@ class SpikeServer {
       if (authError != null) return authError;
 
       final scheme = requireTls ? 'https' : (req.requestedUri.scheme);
-      final host = req.requestedUri.host;
-      final port = req.requestedUri.port;
-      final hubUrl = '$scheme://$host:$port';
+      final effectivePort = _httpServer?.port ?? req.requestedUri.port;
 
       String? resolvedCaFingerprint;
       if (caCertPath != null) {
         try {
           final caFile = File(caCertPath!);
           if (caFile.existsSync()) {
-            resolvedCaFingerprint = CertificateManager.computeSha256Fingerprint(
-              caFile.readAsBytesSync(),
-            );
+            resolvedCaFingerprint =
+                CertificateManager.validateRootCaBytes(caFile.readAsBytesSync()).colonFingerprint;
           }
+        } on X509ValidationException {
+          resolvedCaFingerprint = null;
         } on FileSystemException {
           resolvedCaFingerprint = null;
         }
@@ -784,12 +790,73 @@ class SpikeServer {
           body: jsonEncode({
             'error': 'CA_CERT_UNAVAILABLE',
             'code': 'ERR_CA_CERT_UNAVAILABLE',
-            'message': 'TLS etkin ancak eşleştirme kök CA sertifikası bulunamadı; eşleştirme oturumu başlatılamaz.',
+            'message': 'TLS etkin ancak geçerli X.509v3 eşleştirme kök CA sertifikası doğrulanamadı; eşleştirme oturumu başlatılamaz.',
           }),
           headers: {'content-type': 'application/json'},
         );
       } else {
         caFingerprint = 'UNKNOWN';
+      }
+
+      final String hubUrl;
+      if (requireTls) {
+        final Set<String> sanIpv4s;
+        if (serverCertPath != null) {
+          final srvFile = File(serverCertPath!);
+          if (!srvFile.existsSync()) {
+            return Response(
+              503,
+              body: jsonEncode({
+                'error': 'HUB_LAN_IP_UNAVAILABLE',
+                'code': 'ERR_HUB_LAN_IP_UNAVAILABLE',
+                'message': 'Sunucu TLS sertifika dosyası bulunamadı.',
+              }),
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          try {
+            sanIpv4s = CertificateManager.extractServerCertSanIpv4s(srvFile.readAsBytesSync());
+          } on X509ValidationException catch (e) {
+            return Response(
+              503,
+              body: jsonEncode({
+                'error': e.code,
+                'code': e.code,
+                'message': e.message,
+              }),
+              headers: {'content-type': 'application/json'},
+            );
+          }
+        } else {
+          // Eski birim testleriyle geriye dönük uyumluluk: yalnız serverCertPath + resolver veya non-loopback host varsa çözümlenir.
+          final reqHost = req.requestedUri.host;
+          sanIpv4s = HubLanAddressResolver.isDisqualifiedIpv4(reqHost)
+              ? const <String>{}
+              : <String>{reqHost};
+        }
+
+        final resolver = lanAddressResolver ??
+            HubLanAddressResolver(inspector: WindowsNetworkAdapterInspector());
+        try {
+          final resolved = await resolver.resolve(
+            serverCertSanIpv4s: sanIpv4s,
+            advertiseHost: advertiseHost,
+          );
+          hubUrl = '$scheme://${resolved.ipAddress}:$effectivePort';
+        } on HubLanResolutionException catch (e) {
+          return Response(
+            503,
+            body: jsonEncode({
+              'error': e.code,
+              'code': e.code,
+              'message': e.message,
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      } else {
+        final host = req.requestedUri.host;
+        hubUrl = '$scheme://$host:$effectivePort';
       }
 
       final sessionData = pairingManager.createSession(
@@ -807,19 +874,35 @@ class SpikeServer {
 
     // 2. Kök CA Sertifikasını İndir (Public)
     _router.get('/api/v1/pairing/ca-cert', (Request req) async {
-      String? certContent;
+      String? canonicalPem;
+      X509ValidationException? invalidCaError;
       if (caCertPath != null) {
         try {
           final caFile = File(caCertPath!);
           if (caFile.existsSync()) {
-            certContent = caFile.readAsStringSync();
+            final validated = CertificateManager.validateRootCaBytes(caFile.readAsBytesSync());
+            canonicalPem = validated.canonical.toPem();
           }
+        } on X509ValidationException catch (e) {
+          invalidCaError = e;
         } on FileSystemException {
-          certContent = null;
+          canonicalPem = null;
         }
       }
 
-      if (certContent == null) {
+      if (invalidCaError != null) {
+        return Response(
+          500,
+          body: jsonEncode({
+            'error': 'ERR_HUB_CA_CERT_INVALID',
+            'code': 'ERR_HUB_CA_CERT_INVALID',
+            'message': 'Hub kök CA sertifikası geçersiz (${invalidCaError.code}): ${invalidCaError.message}',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      if (canonicalPem == null) {
         return Response.notFound(
           jsonEncode({
             'error': 'NOT_FOUND',
@@ -831,7 +914,7 @@ class SpikeServer {
       }
 
       return Response.ok(
-        certContent,
+        canonicalPem,
         headers: {'content-type': 'application/x-x509-ca-cert'},
       );
     });
@@ -908,12 +991,14 @@ class SpikeServer {
       try {
         final body = jsonDecode(await req.readAsString()) as Map<String, dynamic>;
         final sessionId = body['session_id'] as String;
+        final allowRePair = body['allow_re_pair'] == true;
 
         await pairingManager.approveSession(
           sessionId: sessionId,
           db: db,
           writeQueue: writeQueue,
           pepper: pepperManager.pepper,
+          allowRePair: allowRePair,
         );
 
         return Response.ok(
@@ -1137,7 +1222,7 @@ class SpikeServer {
           return Response(400, body: jsonEncode({'error': 'INVALID_SIGNATURE', 'message': 'İmza belirtilmedi'}), headers: {'content-type': 'application/json'});
         }
 
-        await pairingManager.verifyAndAcknowledge(
+        final ackResult = await pairingManager.verifyAndAcknowledge(
           sessionId: sessionId,
           ackChallengeId: ackChallengeId,
           signatureBytes: sigBytes,
@@ -1149,6 +1234,8 @@ class SpikeServer {
           jsonEncode({
             'status': 'CONFIRMED',
             'session_id': sessionId,
+            'device_id': ackResult.deviceId,
+            if (ackResult.idempotentReplay) 'idempotent_replay': true,
             'message': 'Teslimat teyidi tamamlandı. Cihaz başarıyla aktifleştirildi.',
           }),
           headers: {'content-type': 'application/json'},
@@ -3957,6 +4044,36 @@ class SpikeServer {
     bool enableDiscovery = true,
     int discoveryPort = HubDiscoveryResponder.defaultDiscoveryPort,
   }) async {
+    // P-BLOCK-2 / DEC-REV-3: TLS aktifken Loopback (`IP:127.0.0.1`) SAN zorunluluğu (Startup Fail-Fast Exit 78)
+    // vs LAN SAN / advertise_host uyuşmazlığı (Hub açık kalır, tanı uyarısı loglanır).
+    if (requireTls && serverCertPath != null) {
+      final certFile = File(serverCertPath!);
+      if (!certFile.existsSync()) {
+        throw HubStartupArgException(
+          78,
+          'ERR_SERVER_CERT_NOT_FOUND: TLS sertifikası bulunamadı: $serverCertPath',
+        );
+      }
+      final Set<String> sanIps;
+      try {
+        sanIps = CertificateManager.extractServerCertSanIpv4s(certFile.readAsBytesSync());
+      } on X509ValidationException catch (e) {
+        throw HubStartupArgException(78, 'ERR_SERVER_CERT_INVALID (${e.code}): ${e.message}');
+      }
+      if (!sanIps.contains('127.0.0.1')) {
+        throw const HubStartupArgException(
+          78,
+          'ERR_SERVER_CERT_MISSING_LOOPBACK_SAN: Windows yerel istemci ve yönetim paneli için server.crt SAN listesi IP:127.0.0.1 içermelidir.',
+        );
+      }
+      if (advertiseHost != null && !sanIps.contains(advertiseHost)) {
+        stderr.writeln(
+          '[WARN] ERR_ADVERTISE_HOST_SAN_MISMATCH: advertise_host ($advertiseHost) server.crt SAN listesinde yok. '
+          'Hub yerel POS için açık kalacak ancak /api/v1/pairing/session 503 dönecektir.',
+        );
+      }
+    }
+
     // BK-02.1: Pilot tek-tenant / tek-store kimlik doğrulaması ve başlangıç mührü
     await _verifyOrInitializeHubIdentity();
 
@@ -4040,6 +4157,7 @@ class ResolvedHubStartupConfig {
   final String? certPath;
   final String? keyPath;
   final String? caCertPath;
+  final String? advertiseHost;
   final bool enableTls;
   final String tenantId;
   final String storeId;
@@ -4060,6 +4178,7 @@ class ResolvedHubStartupConfig {
     this.certPath,
     this.keyPath,
     this.caCertPath,
+    this.advertiseHost,
     required this.enableTls,
     required this.tenantId,
     required this.storeId,
@@ -4113,6 +4232,7 @@ ResolvedHubStartupConfig resolveHubStartupConfig(
       certPath: cfg.certPath,
       keyPath: cfg.keyPath,
       caCertPath: cfg.caCertPath,
+      advertiseHost: cfg.advertiseHost,
       enableTls: cfg.enableTls,
       tenantId: cfg.tenantId,
       storeId: cfg.storeId,
@@ -4134,6 +4254,7 @@ ResolvedHubStartupConfig resolveHubStartupConfig(
   String? keyPath = env['TLS_KEY'];
   // Geliştirme / bayraklı mod için geriye dönük kök CA ortam değişkeni desteği.
   String? caCertPath = env['ROOT_CA_CERT_FILE'];
+  String? advertiseHost = env['ADVERTISE_HOST'];
   bool enableTls = env['ENABLE_TLS'] == 'true';
   String tenantId = env['HUB_TENANT_ID'] ?? SpikeServer.defaultTenantId;
   String storeId = env['HUB_STORE_ID'] ?? SpikeServer.defaultStoreId;
@@ -4168,6 +4289,8 @@ ResolvedHubStartupConfig resolveHubStartupConfig(
       enableTls = true;
     } else if (arg.startsWith('--ca-cert=')) {
       caCertPath = arg.substring(10);
+    } else if (arg.startsWith('--advertise-host=')) {
+      advertiseHost = arg.substring('--advertise-host='.length);
     } else if (arg == '--tls') {
       enableTls = true;
     } else if (arg.startsWith('--tenant-id=')) {
@@ -4199,6 +4322,7 @@ ResolvedHubStartupConfig resolveHubStartupConfig(
     certPath: certPath,
     keyPath: keyPath,
     caCertPath: caCertPath,
+    advertiseHost: advertiseHost,
     enableTls: enableTls,
     tenantId: tenantId,
     storeId: storeId,
@@ -4256,6 +4380,8 @@ Future<SpikeServer> startHubFromArgs(
     securityContext: securityContext,
     requireTls: startup.enableTls,
     caCertPath: startup.caCertPath,
+    serverCertPath: startup.certPath,
+    advertiseHost: startup.advertiseHost,
     tenantId: startup.tenantId,
     storeId: startup.storeId,
     hubId: startup.hubId,

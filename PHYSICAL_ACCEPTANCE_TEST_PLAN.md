@@ -280,12 +280,42 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 - **Adımlar:**
   1. Uygulama açıkken 6 saat bekleyin (veya cihaz saatini ileri alın). Yedek alınmalı ve geçmişte görünmeli.
   2. Restore başlatıp hemen ardından zamanlanmış yedeği tetikleyin. Yedek hata **kaydetmeden** atlanmalı (`BackupOperationLock`, 10 sn heartbeat / 60 sn crash kurtarma).
-  3. Uygulamayı kapatıp 12 saat bekleyin. **Beklenen (ADR-020 `DEFERRED_POST_PILOT`):** Android'de uygulama kapalıyken yedek alınmaz; uygulama açılınca gecikmiş yedek hemen alınır.
-  4. Uygulama kapalıyken otomatik yedek testi yalnızca pilot sonrası ADR-020 (WorkManager) uygulanırsa açılır (`BLOCKED`).
-- **Beklenen sonuç:** 1–3. adımlar yukarıdaki gibi; 4. adım pilot kapsamı dışında ertelenmiştir (`BLOCKED`).
-- **Başarı kriteri:** Yedek geçmişinde beklenen kayıtlar olmalı ve yanıltıcı "başarısız" kaydı olmamalı.
-- **Kanıt:** Yedek geçmişi ekranı; yedek klasörü dosya listesi.
-- **Başarısızlıkta:** `backup_schedule_state.json` dosyasının kopyasını alın.
+  3. Uygulamayı kapatıp 12 saat bekleyin (veya `PAT-16` altında `adb cmd jobscheduler run` ile Android OS periyodik işini tetikleyin). **Güncel ADR-020 (Release 1.0):** `MmsBackgroundBackupJobService` (`JobScheduler` + headless `FlutterEngine`) uygulama kapalıyken dahi Keystore parolası ve ortak `BackupOperationLock` ile `.mmsbak` yedeğini üretir; `PAT-16` ile fiziksel doğrulama yapılır.
+
+---
+
+## PAT-16 — Android Uygulama Kapalıyken Arka Plan Şifreli Yedekleme ve Yeniden Başlatma Kalıcılığı
+- **Ön koşullar:** Android Release APK (`minSdk 24`) kurulu; Otomatik Yedekleme açık (en az 8 karakter parola Keystore'da kayıtlı); cihaz şarjda / kısıtlar uygun.
+- **Donanım:** Fiziksel Android cihaz ve USB hata ayıklama (yalnızca `jobscheduler` durumu / log kontrolü için).
+- **Adımlar:**
+  1. Tanılama → Otomatik Yedekleme ekranında `Arka Plan Zamanlayıcı (Uygulama Kapalıyken)` satırının **ZAMANLANDI** olduğunu doğrulayın.
+  2. Uygulamayı **Zorla Durdur** (Recents'tan tamamen kaydırıp kapatın).
+  3. Bekleme süresini bekleyin veya geliştirici testinde `adb shell cmd jobscheduler run -f com.marketmms.market_pos 202611` komutunu çalıştırın.
+  4. Uygulama kapalıyken yeni `.mmsbak` dosyasının oluştuğunu ve boyutunun > 0 olduğunu doğrulayın; cihazı yeniden başlatıp açılışta zamanlamanın (`setPersisted(true)`) korunduğunu teyit edin.
+- **Beklenen sonuç:** Uygulama kapalıyken alınan yedek yalnızca şifreli `.mmsbak` üretir (`PRAGMA integrity_check = ok` çözülünce); kilit çakışması varsa atlanır; Keystore kilitliyse fail-closed olur (asla şifresiz `.db` bırakılmaz).
+- **Kanıt:** Zamanlama UI ekran görüntüsü, dosya listesi/tarih damgası, Keystore hata varsa maskeli tanı raporu.
+
+## PAT-17 — Google Drive Gerçek Hesap ile Yedek Listeleme, Kesintili İndirme ve Kontrollü Geri Yükleme
+- **Ön koşullar:** `PAT-13` tamamlanmış ve Drive'da en az 1 şifreli `.mmsbak` yedeği mevcut; cihazda yerel veritabanında henüz Hub'a gitmemiş 1 test satışı var.
+- **Donanım:** Windows kasa (veya OAuth bağlantılı istemci) ve internet bağlantısı.
+- **Adımlar:**
+  1. Tanılama → Harici Yedek → **Drive Yedeklerinden Geri Yükle** butonuna tıklayın; uzak yedek listesinin geldiğini doğrulayın.
+  2. İlk denemede bilerek **yanlış parola** girin; sistemin canlı veritabanını duraklatmadan (`ERR_DECRYPTION_FAILED`) hatayı gösterdiğini ve verinin değişmediğini doğrulayın.
+  3. Ardından **doğru parolayla** geri yüklemeyi başlatın (`downloadAndRestoreFromGoogleDrive`); süreç sonunda koruyucu `.mmsbak` güvenlik kopyasının üretildiğini, eski durumun geri geldiğini ve bekleyen Outbox satışının korunduğunu teyit edin.
+  4. Bağlantıyı Kaldır (`disconnect`) seçildiğinde token iptalinin çalıştığını doğrulayın.
+- **Beklenen sonuç:** Yanlış parola veya bozuk indirmede canlı veritabanına dokunulmaz; doğru geri yüklemede Outbox korunur.
+- **Kanıt:** Geri yükleme öncesi/sonrası satış listesi, Outbox satırları ve `safety` klasörü dosya listesi.
+
+## PAT-18 — Hub Öncelikli Hibrit + Google Drive Canlı Senkronizasyon ve Hub Geri Dönüş Uzlaştırması
+- **Ön koşullar:** Aynı mağaza (`tenant_id`, `store_id`) ve Drive hesabına + aynı `drive_live_sync_secret_v1` sırrına bağlı 2 fiziksel cihaz (ör. Cihaz A Android ve Cihaz B Android/Windows); Cihaz A ve B normalde Hub'a bağlı.
+- **Donanım:** Windows Master Hub PC + en az 2 istemci cihaz + internet erişimi.
+- **Adımlar:**
+  1. Hub açıkken Cihaz A'da 1 satış yapın; Tanılama'da durumun **Hub Birincil** veya **Google Drive Yedek Hat (Hazırda Bekliyor)** olduğunu ve Drive'a canlı zarf yazılmadığını doğrulayın.
+  2. Windows Hub servisini durdurun. Her iki cihazda senkronizasyon döngüsünü çalıştırın ve eşik aşıldığında Tanılama'nın **Google Drive Canlı Senkron Aktif (Fallback)** durumuna geçtiğini gözlemleyin.
+  3. Hub kapalıyken Cihaz A'da 1 satış ve Cihaz B'de aynı ürün üzerinde farklı fiyat değişikliği yapın; Cihaz A ve B'nin Drive üzerinden şifreli `.mmsenv` zarfını alıp `outbox_operations` satırlarını `PENDING` tuttuğunu ve çakışma uyarısı ürettiğini doğrulayın.
+  4. Windows Hub servisini yeniden başlatın; her iki cihazın **Master Hub Döndü — Uzlaştırılıyor...** → **Master Hub ile Uzlaştırıldı (Güncel)** geçişini yaptığını, bekleyen satışların Hub'da birleştiğini ve ürün fiyatının Hub otoritesiyle tekilleştiğini doğrulayın.
+- **Beklenen sonuç:** Hub varken 0 Drive sync trafiği; Hub kapalıyken veri kayıpsız/echo-loop'suz aktarım ve non-LWW çakışma bildirimi; Hub dönüşünde temiz reconciliation ve mükerrer satış yok.
+- **Kanıt:** Tanılama UI ekran görüntüleri (her geçişte), Hub satış listesi ve her iki cihazın Outbox sayacı (`0 PENDING`).
 
 ---
 
@@ -293,4 +323,4 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 
 | Test | Durum | Bağımlılık |
 |---|---|---|
-| PAT-01 … PAT-15 | **BLOCKED** (çalıştırılmadı) | Owner B1, B2, D1, E1; `P-BLOCK-1..3` (PAT-03 ve PAT-12 adım 2–5 için); PAT-13 için C1/C2 (başlangıç pilotunda isteğe bağlı); PAT-15 adım 4 pilot sonrası ADR-020 (`DEFERRED_POST_PILOT`) |
+| PAT-01 … PAT-18 | **BLOCKED** (çalıştırılmadı) | Owner B1, B2, C1, C2, D1, E1; `P-BLOCK-1..3` canlı `PAT-03` & `PAT-12`; Android arka plan iş planlayıcı (`PAT-16`); Google Drive OAuth & Hibrit Sync (`PAT-13`, `PAT-17`, `PAT-18`) |

@@ -76,6 +76,29 @@ class _BackupScheduleSectionState extends ConsumerState<BackupScheduleSection> {
           value: view.settings.enabled ? 'AÇIK · her ${view.settings.intervalHours} saatte bir' : 'KAPALI',
         ),
         DiagnosticsKeyValueRow(label: 'Son başarılı yedek', value: _fmt(s.lastSuccessAt)),
+        if (view.backgroundStatus.supportedOnPlatform) ...[
+          DiagnosticsKeyValueRow(
+            key: const Key('backup_bg_schedule_status_row'),
+            label: 'Arka Plan Zamanlayıcı (Uygulama Kapalıyken)',
+            value: view.backgroundStatus.isScheduled
+                ? 'ZAMANLANDI · ${view.backgroundStatus.intervalMinutes} dk'
+                : 'ZAMANLANMADI',
+          ),
+          if (view.backgroundStatus.nextRunAtUtc != null)
+            DiagnosticsKeyValueRow(
+              key: const Key('backup_bg_next_run_row'),
+              label: 'Sonraki arka plan turu',
+              value: _fmt(view.backgroundStatus.nextRunAtUtc),
+            ),
+          if (view.backgroundStatus.lastStatus != null)
+            DiagnosticsKeyValueRow(
+              key: const Key('backup_bg_last_status_row'),
+              label: 'Son arka plan sonucu',
+              value: view.backgroundStatus.lastErrorCode == null
+                  ? '${view.backgroundStatus.lastStatus} (${_fmt(view.backgroundStatus.lastRunAtUtc)})'
+                  : '${view.backgroundStatus.lastStatus} [${view.backgroundStatus.lastErrorCode}]',
+            ),
+        ],
         if (s.lastErrorCode != null)
           DiagnosticsInlineBanner(
             key: const Key('backup_schedule_error_banner'),

@@ -16,10 +16,13 @@ import '../../data/hub_pairing_admin_client.dart';
 final hubPairingAdminClientProvider = Provider<HubPairingAdminClient>((ref) {
   final active = ref.watch(hubConnectionProvider.select((s) => s.activeHubUrl));
   final parsed = Uri.tryParse(active ?? '');
+  final pinned = ref.watch(pinnedTlsConfigProvider);
+  final effectiveScheme = pinned != null
+      ? 'https'
+      : ((parsed?.scheme.isNotEmpty ?? false) ? parsed!.scheme : 'https');
   final base = parsed == null || parsed.host.isEmpty
       ? 'https://127.0.0.1:8945'
-      : parsed.replace(host: '127.0.0.1', path: '').toString();
-  final pinned = ref.watch(pinnedTlsConfigProvider);
+      : parsed.replace(scheme: effectiveScheme, host: '127.0.0.1', path: '').toString();
   final client = pinned != null ? MmsPinnedTlsClientFactory.createClient(pinned) : http.Client();
   ref.onDispose(client.close);
   return HubPairingAdminClient(hubBaseUrl: base, httpClient: client);

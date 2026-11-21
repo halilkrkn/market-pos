@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/platform/mms_ui_profile.dart';
 import '../../../../core/security/security_providers.dart';
+import '../../../../core/security/tls_pinned_client_factory.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../barcode_scanner/barcode_scanner_providers.dart';
@@ -41,9 +42,11 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
 
   Future<void> _saveTlsPin() async {
     try {
+      final currentSetup = ref.read(setupConfigProvider);
       await ref.read(setupConfigProvider.notifier).updateTlsPinning(
             enabled: true,
             sha256Hex: _pinController.text,
+            caCertPem: currentSetup.pinnedCaPem,
           );
       if (!mounted) return;
       setState(() {
@@ -105,6 +108,16 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
         logger: ref.read(redactingLoggerProvider),
       );
 
+      final manualPin = PinnedTlsConfig.normalizeHex(_pinController.text);
+      final expectedCaPin = qr.normalizedCaSha256 ??
+          (manualPin.isNotEmpty ? manualPin : setup.normalizedPinSha256);
+
+      // F-5 / F-7: CA değiştiyse eski setup.pinnedCaPem yeni CA yerine enjekte edilmez.
+      final isSamePinAsSetup = expectedCaPin != null &&
+          setup.normalizedPinSha256 != null &&
+          expectedCaPin == setup.normalizedPinSha256;
+      final initialCaPem = qr.caPem ?? (isSamePinAsSetup ? setup.pinnedCaPem : null);
+
       final result = await pairingClient.pairDevice(
         hubBaseUrl: hubUrl,
         sessionId: qr.sessionId,
@@ -112,20 +125,52 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
         deviceId: setup.deviceId,
         deviceName: setup.deviceName,
         platformName: Platform.operatingSystem,
-        expectedCaSha256: qr.normalizedCaSha256 ?? setup.normalizedPinSha256,
-        initialCaPem: qr.caPem ?? setup.pinnedCaPem,
+        expectedCaSha256: expectedCaPin,
+        payloadCaSha256: qr.normalizedCaSha256,
+        initialCaPem: initialCaPem,
+        existingPinnedCaSha256: setup.normalizedPinSha256,
+        onConfirmCaChange: (oldSha, newSha) async {
+          if (!mounted) return false;
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Kök CA Değişikliği Onayı'),
+              content: Text(
+                'Bu cihaz daha önce farklı bir Hub Kök CA sertifikasına ($oldSha) sabitlenmiş. '
+                'Yeni Kök CA ($newSha) ile yeniden eşleştirmeye devam edilsin mi?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(false),
+                  child: const Text('Vazgeç'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(true),
+                  child: const Text('Onayla ve Devam Et'),
+                ),
+              ],
+            ),
+          );
+          return confirmed ?? false;
+        },
+        onPromoteTlsPinning: (sha, pem) async {
+          await ref.read(setupConfigProvider.notifier).updateTlsPinning(
+                enabled: true,
+                sha256Hex: sha,
+                caCertPem: pem,
+              );
+        },
+        onPromoteHubUrl: (url) async {
+          await ref.read(hubConnectionProvider.notifier).connectToManualAddress(url);
+        },
       );
 
       await ref.read(deviceAuthProvider.notifier).loadForDevice(setup.deviceId);
+      // Not: P1..P4 başarılıysa pin + Hub URL zaten terfi edilmiştir; backward compatibility için güvenli sync:
       if (result.caSha256 != null && result.caSha256!.isNotEmpty) {
-        await ref.read(setupConfigProvider.notifier).updateTlsPinning(
-              enabled: true,
-              sha256Hex: result.caSha256,
-              caCertPem: result.caCertPem,
-            );
+        _pinController.text = result.caSha256!;
+        _syncedPinValue = result.caSha256!;
       }
-
-      await ref.read(hubConnectionProvider.notifier).connectToManualAddress(hubUrl);
 
       if (!mounted) return;
       setState(() {

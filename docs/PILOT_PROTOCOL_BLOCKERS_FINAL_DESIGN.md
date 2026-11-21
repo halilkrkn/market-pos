@@ -1,6 +1,6 @@
 # MARKET MMS — `P-BLOCK-1..3` Son Teknik Revizyon ve Güvenlik Tutarlılığı Tasarımı
 
-**Belge Durumu:** `APPROVAL REQUIRED` (Uygulama Öncesi Nihai Tasarım Spesifikasyonu — Salt Okunur Revizyon; Owner Onayı Bekliyor)  
+**Belge Durumu:** `IMPLEMENTED (AUTOMATIC TESTS PASSED) — PHYSICAL VALIDATION REQUIRED` (`DEC-REV-1..5` Onaylandı & Uygulandı; `DEC-REV-6` / `PAT-03`, `PAT-12` Fiziksel Saha Testleri Bekleniyor)
 **Tarih:** 21 Kasım 2026  
 **Kapsam:** `P-BLOCK-1` (UTF-8 Bağımsız DER/PEM Ayrıştırma, Dar Kapsamlı `MmsX509PreValidator` ve OOB CA vs TLS Doğrulama Ayrımı), `P-BLOCK-2` (`ALT-BOOT-2` İlk HTTPS Bootstrap, Proxy/Sıkıştırma/Gövde Sınırları, Mutlak Timeout/Slowloris, Crash-Safe `ACK_PENDING` Re-pairing & İdempotent `/ack`, Localhost SAN) ve `P-BLOCK-3` (`GetAdaptersAddresses` + `GetIfEntry2` `MIB_IF_ROW2.HardwareInterface` Fiziksel/Hyper-V Host Ayrımı, `advertise_host` Çift Doğrulama & `ADR-018` UDP Korunumu)  
 **Bağlayıcı Referanslar:** [`AGENTS.md`](../AGENTS.md) | [`GEMINI.md`](../GEMINI.md) | [`PILOT_PROTOCOL_BLOCKERS_ANALYSIS.md`](./PILOT_PROTOCOL_BLOCKERS_ANALYSIS.md) | [`PILOT_TECHNICAL_REMEDIATION_REPORT.md`](./PILOT_TECHNICAL_REMEDIATION_REPORT.md) | [`PILOT_PROTOCOL_BLOCKERS_FINAL_REVIEW_REPORT.md`](./PILOT_PROTOCOL_BLOCKERS_FINAL_REVIEW_REPORT.md) | [`ADR-015`](./decisions/015-rel01-single-hub-config.md) | [`ADR-017`](./decisions/017-snapshot-endpoint-and-tls-pin-classification.md) | [`ADR-018`](./decisions/018-discovery-tls-scheme.md)

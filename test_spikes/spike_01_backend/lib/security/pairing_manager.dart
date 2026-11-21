@@ -62,6 +62,14 @@ class PairingSession {
   PairingChallenge? activePollChallenge;
   PairingChallenge? activeAckChallenge;
 
+  /// P-BLOCK-2 (`DEC-REV-3`): İlk başarılı ACK sonrasında ham token RAM'den
+  /// silinmeye devam eder; yalnızca idempotent ACK tekrarı için 32 baytlık
+  /// doğrulanmış SHA-256 özeti ve son challenge bilgisi TTL boyunca korunur.
+  Uint8List? confirmedTokenSha256;
+  String? confirmedAckChallengeId;
+  Uint8List? confirmedAckChallengeNonce;
+  bool isRePair = false;
+
   PairingSession({
     required this.sessionId,
     required this.pairingSecret,
@@ -238,11 +246,13 @@ class PairingManager {
   }
 
   /// İşletme sahibi eşleştirmeyi onaylar: Raw token üretilir, RAM tamponuna alınır ve DB'ye unconfirmed yazılır.
+  /// `allowRePair == true` iken mevcut aktif cihazın tokenHash/salt kaydı `/ack` gelene kadar korunur.
   Future<void> approveSession({
     required String sessionId,
     required SpikeDatabase db,
     required WriteQueue writeQueue,
     required String pepper,
+    bool allowRePair = false,
   }) async {
     final session = getSession(sessionId);
 
@@ -267,6 +277,8 @@ class PairingManager {
       pepper: pepper,
     );
 
+    var isRePairFlow = false;
+
     // SQLite tekil yazıcı kuyruğunda atomik cihaz kaydı
     await writeQueue.enqueue(() async {
       await db.transaction(() async {
@@ -275,7 +287,19 @@ class PairingManager {
           if (!existing.isActive) {
             throw StateError('DEVICE_ALREADY_REVOKED');
           }
-          throw StateError('DEVICE_ALREADY_EXISTS');
+          if (!allowRePair) {
+            throw StateError('DEVICE_ALREADY_EXISTS');
+          }
+          // P-BLOCK-2: Re-pairing sırasında mevcut aktif tokenHash/salt /ack'a kadar DOKUNULMAZ!
+          isRePairFlow = true;
+          await db.into(db.deviceAuditLogs).insert(
+            DeviceAuditLogsCompanion(
+              deviceId: Value(deviceId),
+              action: const Value('PAIRING_REPAIR_APPROVED'),
+              details: Value('Platform: $platform, PubKeyFingerprint: $keyFingerprint'),
+            ),
+          );
+          return;
         }
 
         await db.into(db.devices).insert(
@@ -299,11 +323,16 @@ class PairingManager {
       });
     });
 
+    session.isRePair = isRePairFlow;
+
     // Ham token'ı 120 sn RAM tamponuna al (Asla diske yazılmaz)
     deliveryBuffer.store(
       sessionId: sessionId,
       deviceId: deviceId,
       rawToken: rawToken,
+      pendingTokenHash: isRePairFlow ? tokenHash : null,
+      pendingSalt: isRePairFlow ? salt : null,
+      isRePair: isRePairFlow,
     );
 
     session.status = PairingSessionStatus.approved;
@@ -481,7 +510,7 @@ class PairingManager {
     return rawToken;
   }
 
-  /// ACK için tek kullanımlık challenge üretir.
+  /// ACK için tek kullanımlık challenge üretir (`completed` oturumda TTL & kota dahilinde kurtarma destekler).
   PairingChallenge issueAckChallenge({
     required String sessionId,
     required String pairingSecret,
@@ -501,7 +530,8 @@ class PairingManager {
       );
     }
 
-    if (session.status != PairingSessionStatus.approved) {
+    if (session.status != PairingSessionStatus.approved &&
+        session.status != PairingSessionStatus.completed) {
       throw PairingException(
         code: 'SESSION_NOT_APPROVED',
         message: 'Oturum onaylanmamış',
@@ -527,8 +557,9 @@ class PairingManager {
     return challenge;
   }
 
-  /// Token-Bound ACK imzasını doğrular, cihazı onaylar ve RAM'i temizler.
-  Future<void> verifyAndAcknowledge({
+  /// Token-Bound ACK imzasını doğrular, cihazı onaylar, RAM'i temizler ve
+  /// `completed` oturumda aynı `ackChallengeId` veya yeni challenge için idempotent tekrar destekler.
+  Future<({bool confirmed, bool idempotentReplay, String deviceId})> verifyAndAcknowledge({
     required String sessionId,
     required String ackChallengeId,
     required List<int> signatureBytes,
@@ -536,6 +567,95 @@ class PairingManager {
     required WriteQueue writeQueue,
   }) async {
     final session = getSession(sessionId);
+
+    // P-BLOCK-2 (`DEC-REV-3`): Sunucu ACK'yı daha önce işlemiş ancak istemci
+    // yanıtı alamadan çökmüşse, imza verifiedTokenSha256 ile yeniden doğrulanır.
+    if (session.status == PairingSessionStatus.completed &&
+        session.confirmedTokenSha256 != null) {
+      final matchesConfirmedChallenge =
+          ackChallengeId == session.confirmedAckChallengeId &&
+          session.confirmedAckChallengeNonce != null;
+      final activeChallenge = session.activeAckChallenge;
+      final matchesFreshChallenge = activeChallenge != null &&
+          activeChallenge.challengeId == ackChallengeId;
+
+      if (!matchesConfirmedChallenge && !matchesFreshChallenge) {
+        throw PairingException(
+          code: 'CHALLENGE_NOT_FOUND',
+          message: 'ACK meydan okuması bulunamadı veya süresi doldu',
+          statusCode: 404,
+        );
+      }
+
+      if (matchesFreshChallenge && !matchesConfirmedChallenge) {
+        if (activeChallenge.isConsumed) {
+          throw PairingException(
+            code: 'CHALLENGE_ALREADY_CONSUMED',
+            message: 'Bu ACK challenge zaten tüketildi',
+            statusCode: 409,
+          );
+        }
+        if (activeChallenge.isLocked || activeChallenge.failedAttempts >= 3) {
+          throw PairingException(
+            code: 'CHALLENGE_LOCKED',
+            message: 'ACK meydan okuması kilitlendi',
+            statusCode: 403,
+          );
+        }
+        if (activeChallenge.isExpired) {
+          throw PairingException(
+            code: 'CHALLENGE_EXPIRED',
+            message: 'ACK meydan okumasının 60 saniyelik süresi doldu',
+            statusCode: 410,
+          );
+        }
+      }
+
+      final replayNonce = matchesConfirmedChallenge
+          ? session.confirmedAckChallengeNonce!
+          : activeChallenge!.challengeNonce;
+
+      final canonicalReplayPayload = EcdsaSignatureValidator.buildCanonicalAckPayload(
+        protocolVersion: '1',
+        pairingSessionId: sessionId,
+        publicKeyFingerprintBytes: sha256.convert(session.clientPublicKeyBytes!).bytes,
+        challengeId: ackChallengeId,
+        challengeNonce: replayNonce,
+        tokenHashBytes: session.confirmedTokenSha256!,
+      );
+
+      final isValidReplay = EcdsaSignatureValidator.verifySignature(
+        publicKeyBytes: session.clientPublicKeyBytes!,
+        canonicalPayload: canonicalReplayPayload,
+        signatureBytes: signatureBytes,
+      );
+
+      if (!isValidReplay) {
+        if (activeChallenge != null && activeChallenge.challengeId == ackChallengeId) {
+          activeChallenge.failedAttempts++;
+          if (activeChallenge.failedAttempts >= 3) {
+            activeChallenge.isLocked = true;
+          }
+        }
+        throw PairingException(
+          code: 'INVALID_ACK_TOKEN_HASH_SIGNATURE',
+          message: 'ACK imzası veya token hash doğrulaması başarısız',
+          statusCode: 403,
+        );
+      }
+
+      if (activeChallenge != null && activeChallenge.challengeId == ackChallengeId) {
+        activeChallenge.isConsumed = true;
+        session.confirmedAckChallengeId = ackChallengeId;
+        session.confirmedAckChallengeNonce = Uint8List.fromList(replayNonce);
+      }
+
+      return (
+        confirmed: true,
+        idempotentReplay: true,
+        deviceId: session.deviceId!,
+      );
+    }
 
     final challenge = session.activeAckChallenge;
     if (challenge == null || challenge.challengeId != ackChallengeId) {
@@ -610,6 +730,8 @@ class PairingManager {
     }
 
     challenge.isConsumed = true;
+    final tokenHashCopy = Uint8List.fromList(expectedTokenHash);
+    final challengeNonceCopy = Uint8List.fromList(challenge.challengeNonce);
 
     // Tamponu teyit et ve DB'de confirmed yap
     final ok = await deliveryBuffer.acknowledge(
@@ -626,7 +748,15 @@ class PairingManager {
       );
     }
 
+    session.confirmedTokenSha256 = tokenHashCopy;
+    session.confirmedAckChallengeId = ackChallengeId;
+    session.confirmedAckChallengeNonce = challengeNonceCopy;
     session.status = PairingSessionStatus.completed;
+    return (
+      confirmed: true,
+      idempotentReplay: false,
+      deviceId: session.deviceId!,
+    );
   }
 
   // --- Rate Limiting ve Kota Kontrolü ---

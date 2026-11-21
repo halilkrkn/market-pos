@@ -1,15 +1,22 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
-import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 import 'package:mms_client_storage/mms_client_storage.dart'
     show
+        CanonicalCertDerResult,
+        MmsX509PreValidator,
         TlsCertificateFailureKind,
         TlsCertificateValidationException,
         TlsPinMismatchException,
-        TlsPinMismatchReason;
+        TlsPinMismatchReason,
+        X509ValidationException,
+        computeCanonicalSha256Hex,
+        constantTimeEqualsAscii,
+        encodeDerCertificateAsPem,
+        extractCanonicalSingleCertDer;
 
 /// B-2 Certificate Pinning yapılandırma modeli.
 class PinnedTlsConfig {
@@ -38,14 +45,22 @@ class PinnedTlsConfig {
 ///    özetini sabit zamanlı karşılaştırmayla doğrular ve eşleşmeyen her bağlantıyı
 ///    HTTP başlıkları/token gönderilmeden reddeder.
 class MmsPinnedTlsClientFactory {
-  static String computeSha256Hex(List<int> derBytes) {
-    return sha256
-        .convert(derBytes)
-        .bytes
-        .map((b) => b.toRadixString(16).padLeft(2, '0').toUpperCase())
-        .join();
+  static String computeSha256Hex(List<int> derBytes) =>
+      computeCanonicalSha256Hex(derBytes);
+
+  /// Katman 1 + Katman 2 (`P-BLOCK-1`): PEM veya ham DER Root CA girdisini doğrular,
+  /// kanonik tekil DER çıktısını ve 64-hex büyük harf SHA-256 parmak izini döner.
+  static CanonicalCertDerResult validateAndComputeCaPin(
+    Uint8List rawBytes, {
+    DateTime? nowUtc,
+  }) {
+    final canonical = extractCanonicalSingleCertDer(rawBytes);
+    MmsX509PreValidator.validateRootCaDer(canonical.derBytes, nowUtc: nowUtc);
+    return canonical;
   }
 
+  /// Çoklu CA bundle ayıklaması (eski uyumlu API) — yalnızca sıkı `extractCanonicalSingleCertDer`
+  /// veya tekli PEM bloklarıyla geçerli DER döndürür; tek sertifika varsa Katman 1 ile ayrıştırır.
   static List<List<int>> extractPemCertificatesDer(String pem) {
     final certs = <List<int>>[];
     const beginMarker = '-----BEGIN CERTIFICATE-----';
@@ -57,29 +72,22 @@ class MmsPinnedTlsClientFactory {
       if (begin == -1) break;
       final end = pem.indexOf(endMarker, begin);
       if (end == -1) break;
-      final body = pem
-          .substring(begin + beginMarker.length, end)
-          .replaceAll(RegExp(r'\s+'), '');
-      if (body.isNotEmpty) {
-        try {
-          certs.add(base64Decode(body));
-        } catch (_) {
-          // Geçersiz PEM bloğu atlanır; güvenlik gereği boş güvene düşer
-        }
+      final singleBlock = pem.substring(begin, end + endMarker.length);
+      try {
+        final canonical = extractCanonicalSingleCertDer(
+          Uint8List.fromList(utf8.encode(singleBlock)),
+        );
+        certs.add(canonical.derBytes);
+      } on X509ValidationException {
+        // Geçersiz blok atlanır; güvenlik gereği boş güvene düşer.
       }
       startIndex = end + endMarker.length;
     }
     return certs;
   }
 
-  static bool _constantTimeEquals(String a, String b) {
-    if (a.length != b.length) return false;
-    var diff = 0;
-    for (var i = 0; i < a.length; i++) {
-      diff |= a.codeUnitAt(i) ^ b.codeUnitAt(i);
-    }
-    return diff == 0;
-  }
+  static bool _constantTimeEquals(String a, String b) =>
+      constantTimeEqualsAscii(a, b);
 
   static String _encodeMatchedCertificatesAsPem(
     List<List<int>> derCerts,
@@ -90,13 +98,7 @@ class MmsPinnedTlsClientFactory {
       if (!_constantTimeEquals(computeSha256Hex(der), normalizedPin)) {
         continue;
       }
-      final b64 = base64Encode(der);
-      buffer.writeln('-----BEGIN CERTIFICATE-----');
-      for (var i = 0; i < b64.length; i += 64) {
-        final end = i + 64 < b64.length ? i + 64 : b64.length;
-        buffer.writeln(b64.substring(i, end));
-      }
-      buffer.writeln('-----END CERTIFICATE-----');
+      buffer.write(encodeDerCertificateAsPem(Uint8List.fromList(der)));
     }
     return buffer.toString();
   }
@@ -214,6 +216,50 @@ class MmsPinnedTlsClientFactory {
       IOClient(_createHttpClient(config, rejections)),
       rejections,
       caPinnedMode,
+    );
+  }
+
+  /// P-BLOCK-1 / P-BLOCK-2: Yalnzca Katman 1 + Katman 2 (`MmsX509PreValidator`)
+  /// doğrulamasından geçmiş Root CA ile salt-CA sabitli TLS istemcisi kurar.
+  /// `badCertificateCallback` ASLA `true` dönmez; yaprak-pin fallback yapılmaz.
+  static http.Client createStrictCaPinnedClient({
+    required Uint8List caCertBytes,
+    required String expectedCaSha256Hex,
+    DateTime? nowUtc,
+  }) {
+    final normalizedPin = PinnedTlsConfig.normalizeHex(expectedCaSha256Hex);
+    if (normalizedPin.length != 64 ||
+        !RegExp(r'^[0-9A-F]{64}$').hasMatch(normalizedPin)) {
+      throw const FormatException(
+        'Geçersiz Root CA SHA-256 parmak izi (64 hex karakter beklenir).',
+      );
+    }
+    final canonical = validateAndComputeCaPin(caCertBytes, nowUtc: nowUtc);
+    if (!constantTimeEqualsAscii(canonical.sha256Hex, normalizedPin)) {
+      throw TlsPinMismatchException(
+        host: 'ca-pin',
+        port: 0,
+        presentedSha256: canonical.sha256Hex,
+        reason: TlsPinMismatchReason.untrustedCaChain,
+      );
+    }
+    final context = SecurityContext(withTrustedRoots: false);
+    context.setTrustedCertificatesBytes(canonical.toPemBytes());
+    final rejections = _PinRejectionLog();
+    final client = HttpClient(context: context);
+    client.badCertificateCallback = (cert, host, port) {
+      rejections.record(
+        host,
+        port,
+        computeSha256Hex(cert.der),
+        isCaPinnedMode: true,
+      );
+      return false;
+    };
+    return _PinAwareClient(
+      IOClient(client),
+      rejections,
+      true,
     );
   }
 }

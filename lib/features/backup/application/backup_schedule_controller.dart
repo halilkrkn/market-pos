@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
 import '../../../core/security/secure_token_store.dart';
+import 'background_backup_scheduler.dart';
 import 'client_backup_service.dart';
 
 /// Faz 3 — İstemci (Windows kasa / Android) zamanlanmış yerel yedek ayarları.
@@ -19,22 +20,44 @@ class ClientBackupScheduleSettings {
 
   final bool enabled;
   final int intervalHours;
+  final bool backgroundWhenClosedEnabled;
+  final BackgroundBackupConstraints backgroundConstraints;
 
-  const ClientBackupScheduleSettings({required this.enabled, required this.intervalHours});
+  const ClientBackupScheduleSettings({
+    required this.enabled,
+    required this.intervalHours,
+    this.backgroundWhenClosedEnabled = true,
+    this.backgroundConstraints = const BackgroundBackupConstraints(),
+  });
 
-  static const disabled = ClientBackupScheduleSettings(enabled: false, intervalHours: 24);
+  static const disabled = ClientBackupScheduleSettings(
+    enabled: false,
+    intervalHours: 24,
+    backgroundWhenClosedEnabled: false,
+  );
 
   BackupSchedulePolicy toPolicy() => enabled
       ? BackupSchedulePolicy(interval: Duration(hours: intervalHours))
       : BackupSchedulePolicy.disabled;
 
-  Map<String, dynamic> toJson() => {'version': 1, 'enabled': enabled, 'interval_hours': intervalHours};
+  Map<String, dynamic> toJson() => {
+        'version': 2,
+        'enabled': enabled,
+        'interval_hours': intervalHours,
+        'background_when_closed': backgroundWhenClosedEnabled,
+        'background_constraints': backgroundConstraints.toJson(),
+      };
 
   factory ClientBackupScheduleSettings.fromJson(Map<String, dynamic> json) {
     final hours = json['interval_hours'];
+    final rawConstraints = json['background_constraints'];
     return ClientBackupScheduleSettings(
       enabled: json['enabled'] == true,
       intervalHours: hours is int && supportedIntervalHours.contains(hours) ? hours : 24,
+      backgroundWhenClosedEnabled: json['background_when_closed'] != false,
+      backgroundConstraints: rawConstraints is Map
+          ? BackgroundBackupConstraints.fromJson(Map<String, dynamic>.from(rawConstraints))
+          : const BackgroundBackupConstraints(),
     );
   }
 }
@@ -68,12 +91,14 @@ class ClientBackupScheduleSettingsStore {
 class BackupScheduleViewState {
   final ClientBackupScheduleSettings settings;
   final BackupScheduleState scheduleState;
+  final BackgroundBackupScheduleStatus backgroundStatus;
   final bool isRunning;
   final bool isSchedulerActive;
 
   const BackupScheduleViewState({
     required this.settings,
     required this.scheduleState,
+    this.backgroundStatus = BackgroundBackupScheduleStatus.unsupported,
     this.isRunning = false,
     this.isSchedulerActive = false,
   });
@@ -81,6 +106,7 @@ class BackupScheduleViewState {
   static const initial = BackupScheduleViewState(
     settings: ClientBackupScheduleSettings.disabled,
     scheduleState: BackupScheduleState.empty,
+    backgroundStatus: BackgroundBackupScheduleStatus.unsupported,
   );
 
   bool get isOverdue => settings.toPolicy().isOverdue(state: scheduleState, now: DateTime.now().toUtc());
@@ -88,12 +114,14 @@ class BackupScheduleViewState {
   BackupScheduleViewState copyWith({
     ClientBackupScheduleSettings? settings,
     BackupScheduleState? scheduleState,
+    BackgroundBackupScheduleStatus? backgroundStatus,
     bool? isRunning,
     bool? isSchedulerActive,
   }) =>
       BackupScheduleViewState(
         settings: settings ?? this.settings,
         scheduleState: scheduleState ?? this.scheduleState,
+        backgroundStatus: backgroundStatus ?? this.backgroundStatus,
         isRunning: isRunning ?? this.isRunning,
         isSchedulerActive: isSchedulerActive ?? this.isSchedulerActive,
       );
@@ -108,6 +136,7 @@ class BackupScheduleController extends StateNotifier<BackupScheduleViewState> {
   final SecureTokenStore secureStore;
   final ClientBackupScheduleSettingsStore settingsStore;
   final BackupScheduleStateStore stateStore;
+  final BackgroundBackupScheduler? backgroundScheduler;
   final Duration checkInterval;
   final Future<void> Function(BackupResult result)? afterSuccess;
 
@@ -126,6 +155,7 @@ class BackupScheduleController extends StateNotifier<BackupScheduleViewState> {
     required this.secureStore,
     required this.settingsStore,
     required this.stateStore,
+    this.backgroundScheduler,
     this.checkInterval = const Duration(minutes: 15),
     this.afterSuccess,
   }) : super(BackupScheduleViewState.initial);
@@ -133,12 +163,35 @@ class BackupScheduleController extends StateNotifier<BackupScheduleViewState> {
   Future<void> initialize() async {
     final settings = await settingsStore.load();
     final schedule = await stateStore.load();
+    BackgroundBackupScheduleStatus bgStatus =
+        BackgroundBackupScheduleStatus.unsupported;
+    final bg = backgroundScheduler;
+    if (bg != null && bg.isPlatformSupported) {
+      if (settings.enabled && settings.backgroundWhenClosedEnabled) {
+        bgStatus = await bg.schedulePeriodic(
+          interval: Duration(hours: settings.intervalHours),
+          constraints: settings.backgroundConstraints,
+        );
+      } else {
+        bgStatus = await bg.getStatus();
+      }
+    }
     if (!mounted) return;
-    state = state.copyWith(settings: settings, scheduleState: schedule);
+    state = state.copyWith(
+      settings: settings,
+      scheduleState: schedule,
+      backgroundStatus: bgStatus,
+    );
     if (settings.enabled) _startScheduler();
   }
 
-  Future<void> enable({required int intervalHours, required String password}) async {
+  Future<void> enable({
+    required int intervalHours,
+    required String password,
+    bool backgroundWhenClosedEnabled = true,
+    BackgroundBackupConstraints backgroundConstraints =
+        const BackgroundBackupConstraints(),
+  }) async {
     if (!ClientBackupScheduleSettings.supportedIntervalHours.contains(intervalHours)) {
       throw BackupException(
         'ERR_UNSUPPORTED_INTERVAL',
@@ -149,20 +202,53 @@ class BackupScheduleController extends StateNotifier<BackupScheduleViewState> {
       throw const BackupException('ERR_WEAK_PASSWORD', 'Yedekleme parolası en az 8 karakter olmalıdır.');
     }
     await secureStore.saveSecret(passwordSecretKey, password);
-    final settings = ClientBackupScheduleSettings(enabled: true, intervalHours: intervalHours);
+    final settings = ClientBackupScheduleSettings(
+      enabled: true,
+      intervalHours: intervalHours,
+      backgroundWhenClosedEnabled: backgroundWhenClosedEnabled,
+      backgroundConstraints: backgroundConstraints,
+    );
     await settingsStore.save(settings);
+
+    var bgStatus = state.backgroundStatus;
+    final bg = backgroundScheduler;
+    if (bg != null && bg.isPlatformSupported) {
+      bgStatus = backgroundWhenClosedEnabled
+          ? await bg.schedulePeriodic(
+              interval: Duration(hours: intervalHours),
+              constraints: backgroundConstraints,
+            )
+          : await bg.cancelPeriodic();
+    }
+
     if (!mounted) return;
-    state = state.copyWith(settings: settings);
+    state = state.copyWith(settings: settings, backgroundStatus: bgStatus);
     await _stopScheduler();
     _startScheduler();
   }
 
   Future<void> disable() async {
     await _stopScheduler();
+    var bgStatus = state.backgroundStatus;
+    final bg = backgroundScheduler;
+    if (bg != null && bg.isPlatformSupported) {
+      bgStatus = await bg.cancelPeriodic();
+    }
     await settingsStore.save(ClientBackupScheduleSettings.disabled);
     await secureStore.deleteSecret(passwordSecretKey);
     if (!mounted) return;
-    state = state.copyWith(settings: ClientBackupScheduleSettings.disabled, isSchedulerActive: false);
+    state = state.copyWith(
+      settings: ClientBackupScheduleSettings.disabled,
+      backgroundStatus: bgStatus,
+      isSchedulerActive: false,
+    );
+  }
+
+  Future<void> refreshBackgroundStatus() async {
+    final bg = backgroundScheduler;
+    if (bg == null || !bg.isPlatformSupported) return;
+    final bgStatus = await bg.getStatus();
+    if (mounted) state = state.copyWith(backgroundStatus: bgStatus);
   }
 
   /// Kayıtlı parola ile hemen yedek alır (Owner'ın "Şimdi Yedekle" komutu).

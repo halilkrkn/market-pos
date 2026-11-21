@@ -5,6 +5,8 @@ import 'package:mms_client_storage/mms_client_storage.dart'
     show BackupSchedulePolicy, RetentionPolicy;
 import 'package:path/path.dart' as p;
 
+import '../network/hub_lan_address_resolver.dart';
+
 class HubConfigException implements Exception {
   final String message;
   const HubConfigException(this.message);
@@ -36,6 +38,11 @@ class HubConfig {
   /// PAIR-CA: Eşleştirme QR'ındaki CA parmak izi ve `/api/v1/pairing/ca-cert` için kök CA
   /// sertifikası (yalnızca GENEL sertifika; `ca.key` Hub diskinde bulunmaz). Üretimde zorunlu.
   final String? caCertPath;
+
+  /// P-BLOCK-3 (`DEC-REV-4`): Çoklu NIC veya özel ağ durumlarında Hub'ın QR
+  /// içinde duyuracağı sabit LAN IPv4 adresi (`server.crt` SAN içinde bulunmalı ve yerel aktif olmalı).
+  final String? advertiseHost;
+
   final String tenantId;
   final String storeId;
   final String hubId;
@@ -57,6 +64,7 @@ class HubConfig {
     required this.certPath,
     required this.keyPath,
     this.caCertPath,
+    this.advertiseHost,
     required this.tenantId,
     required this.storeId,
     required this.hubId,
@@ -97,6 +105,7 @@ class HubConfig {
     'hub_id',
     'require_tenant_store_headers',
     'backup_schedule',
+    'advertise_host',
   };
 
   static HubConfig load(File file) {
@@ -229,6 +238,26 @@ class HubConfig {
       ),
     );
 
+    final advertiseHostRaw = json['advertise_host'];
+    String? advertiseHost;
+    if (advertiseHostRaw != null) {
+      if (advertiseHostRaw is! String || advertiseHostRaw.trim().isEmpty) {
+        throw const HubConfigException(
+          'advertise_host belirtilmişse geçerli ve boş olmayan bir LAN IPv4 adresi olmalıdır.',
+        );
+      }
+      final trimmedHost = advertiseHostRaw.trim();
+      final parsedAddr = InternetAddress.tryParse(trimmedHost);
+      if (parsedAddr == null ||
+          parsedAddr.type != InternetAddressType.IPv4 ||
+          HubLanAddressResolver.isDisqualifiedIpv4(trimmedHost)) {
+        throw HubConfigException(
+          'advertise_host geçerli bir yerel LAN IPv4 adresi olmalıdır (loopback/APIPA yasak): $trimmedHost',
+        );
+      }
+      advertiseHost = trimmedHost;
+    }
+
     return HubConfig(
       environment: environment,
       port: port,
@@ -242,6 +271,7 @@ class HubConfig {
       certPath: certPath,
       keyPath: keyPath,
       caCertPath: caCertPath,
+      advertiseHost: advertiseHost,
       tenantId: readId('tenant_id', 'default-tenant'),
       storeId: readId('store_id', 'default-store'),
       hubId: readId('hub_id', 'MMS-HUB-MASTER'),

@@ -1,6 +1,6 @@
 # Yedekleme ve Geri Yükleme Kılavuzu — MARKET MMS
 
-*Okuyucu: Market sahibi (Owner) ve kurulumu yapan teknik destek. Sürüm: 21 Kasım 2026 (3. oturum güncellemesi: §5.6, §6, §7).*
+*Okuyucu: Market sahibi (Owner) ve kurulumu yapan teknik destek. Sürüm: 21 Kasım 2026 (Release 1.0 güncellemesi: Android JobScheduler + Google Drive Listeleme/İndirme/Geri Yükleme + Hibrit Canlı Senkron).*
 
 MARKET MMS'te iki tür veritabanı vardır:
 
@@ -25,7 +25,7 @@ Asıl korunması gereken **Hub yedeğidir**. Cihaz yedekleri, internet/LAN kesik
 2. Sıklığı seçin (6 / 12 / 24 saat) ve en az 8 karakterlik bir **yedek parolası** girin → **Otomatik Yedeklemeyi Aç**. İlk yedek hemen alınır.
 3. Parola cihazın güvenli deposunda (Windows DPAPI / Android Keystore) saklanır; ekrana veya dosyaya yazılmaz. **Parolayı ayrıca not edin** — geri yükleme için gereklidir; kaybolursa yedek açılamaz.
 4. Ekranda son başarılı yedek zamanı, son hata ve son 5 denemenin geçmişi görünür. Kırmızı uyarı çıkarsa §5'e bakın.
-5. Android'de otomatik yedek **yalnızca uygulama açıkken** çalışır (ADR-020 pilot sonrasına ertelendi); uygulama kapalıyken yedek alınmaz, uygulama açıldığında gecikmiş yedek hemen başlatılır.
+5. **Android Arka Plan Zamanlayıcısı (`ADR-020` — Release 1.0):** Android 7.0+ (`minSdk 24`) cihazlarda otomatik yedekleme artık **uygulama kapalıyken de** Android sistem `JobScheduler` (`MmsBackgroundBackupJobService`) + arka plan `FlutterEngine` üzerinden çalışır (`setPersisted(true)` ile cihaz yeniden başlatmada korunur). Aynı ortak dosya kilidini (`BackupOperationLock`) kullanır; Keystore erişilemezse asla şifresiz yedek almaz (**fail-closed**). İlk zamanlandığında ve Tanılama ekranında sonraki çalışma / son arka plan sonucu görünür (`PAT-16` ile sahada doğrulanmalıdır).
 6. Aynı anda yalnızca bir yedek veya geri yükleme çalışır (hem istemci hem Hub ortak dosya kilidi kullanır). Geri yükleme sürerken zamanı gelen otomatik yedek hata vermeden atlanır ve bir sonraki kontrolde alınır.
 7. Android'in kendi "Google yedeklemesi" bu uygulama için **kapalıdır**: yerel veritabanı şifresiz olarak Google hesabına veya yeni telefona kopyalanmaz (aynı cihaz kimliğinin iki telefonda çalışması senkronizasyonu bozardı). Telefon değişiminde cihaz Hub'a **yeniden eşleştirilir**.
 
@@ -36,19 +36,22 @@ Asıl korunması gereken **Hub yedeğidir**. Cihaz yedekleri, internet/LAN kesik
 3. "Disk dolu" veya "hedef erişilemiyor" hatası alırsanız yarım dosya bırakılmaz; alanı boşaltıp veya USB'yi yeniden takıp tekrar deneyin.
 4. Yedeği USB'den geri almak için dosya yolunu **İçe aktarılacak .mmsbak dosyası** alanına yazıp **USB'den İçe Aktar**. Eksik/yarım kopyalanmış veya başka cihaza/şubeye ait dosyalar reddedilir.
 
-## 4. Google Drive (Şifreli Uzak Yedek)
+## 4. Google Drive (Şifreli Uzak Yedekleme, Geri Yükleme ve Canlı Senkron Fallback)
 
-> Drive **canlı senkronizasyon değildir**; yalnızca zaten şifreli yedek dosyaları yüklenir.
+> Drive **şifreli uzak yedek (.mmsbak)** ve **`ADR-021` hibrit canlı senkronizasyon fallback (`.mmsenv`)** sağlar; Windows Master Hub her koşulda birincil otoritedir.
 
-**Owner'ın bir kez yapması gerekenler (henüz yapılmadı — BLOCKED):**
+**Owner'ın bir kez yapması gerekenler (henüz yapılmadı — BLOCKED `C1`/`C2`):**
 1. Google Cloud Console'da bir proje oluşturun; **Google Drive API**'yi etkinleştirin.
 2. OAuth izin ekranını yapılandırın; kapsam olarak yalnızca `https://www.googleapis.com/auth/drive.file` ekleyin.
-3. **OAuth istemci kimliği → Uygulama türü: Masaüstü uygulaması** oluşturun.
-4. İstemci kimliğini Windows derlemesine verin: `flutter build windows --release --dart-define=MMS_GDRIVE_CLIENT_ID=<id> --dart-define=MMS_GDRIVE_CLIENT_SECRET=<secret>` (masaüstü istemci "secret"ı Google'ın tanımıyla gizli sayılmaz ama depoya yazılmamalıdır).
+3. **OAuth istemci kimliği** oluşturun (`MMS_GDRIVE_CLIENT_ID`, opsiyonel `MMS_GDRIVE_CLIENT_SECRET`).
+4. Derlemeye `--dart-define=MMS_GDRIVE_CLIENT_ID=<id> --dart-define=MMS_GDRIVE_CLIENT_SECRET=<secret>` ile verin (depoya yazmayın).
 
-**Sonrasında:** Tanılama → Harici Yedek → **Google Drive'ı Bağla** → tarayıcıda hesabı onaylayın. Her başarılı otomatik yedekten sonra henüz yüklenmemiş son 3 yedek "MARKET MMS Yedekleri" klasörüne yüklenir; aynı yedek iki kez yüklenmez; Drive'a ulaşılamazsa yerel yedek etkilenmez ve yükleme bir sonraki turda tekrar denenir.
+**Uzak Yedek Yükleme ve Kontrollü Geri Yükleme (`Faz C`):**
+- Her başarılı otomatik yedekten sonra henüz yüklenmemiş son 3 şifreli `.mmsbak` dosyası `"MARKET MMS Yedekleri"` klasörüne yüklenir; Drive'a ulaşılamazsa yerel yedek etkilenmez.
+- Geri yüklemek için **Tanılama → Harici Yedek → Drive Yedeklerinden Geri Yükle**: liste indirilir, seçilen `.mmsbak` dosyası `.part` devam ettirmeli olarak indirilir, boyut + SHA-256 + parola + HMAC-SHA256 + cihaz/şube + `PRAGMA integrity_check` canlı DB durdurulmadan **önce** doğrulanır. Doğrulama geçerse ortak `BackupOperationLock` + koruyucu kopya + Outbox korumasıyla geri yüklenir (`PAT-17`). Bağlantıyı Kaldır (`disconnect`) OAuth token'ını iptal edip temizler.
 
-Android'den Drive bağlantısı şu an desteklenmiyor (Owner kararı bekliyor: Google Sign-In paketi).
+**Hibrit Canlı Senkronizasyon Fallback (`ADR-021`):**
+- Normalde yalnızca Master Hub kullanılır (Drive trafiği sıfırdır). Hub doğrulanmış biçimde ulaşılamaz olduğunda `MMSENV01` şifreli zarfları (`drive_live_sync_secret_v1`, yedek parolasından ayrı) kullanılır; TLS pin/sertifika veya `401/403` hatalarında **ASLA** Drive'a geçilmez. Hub döndüğünde veriler kontrollü olarak uzlaştırılır (`PAT-18`).
 
 ## 5. Geri Yükleme
 

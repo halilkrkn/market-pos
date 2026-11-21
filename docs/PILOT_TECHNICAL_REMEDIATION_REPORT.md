@@ -3,7 +3,7 @@
 - **Tarih:** 21 Kasım 2026
 - **Proje / Dizin:** MARKET MANAGEMENT SYSTEM (MARKET MMS) · `market-pos`
 - **Koordinasyon ve Denetim:** Orchestrator (Neon) · Uygulama: Gemini 4 Hydrogen · Bağımsız Güvenlik/Mimari Reviewer alt ajanı (`6c673107-dd66-418a-a8dc-60b904a44ad7`)
-- **Durum Uyarısı:** **Proje tamamlanmış veya üretime hazır değildir. Fiziksel kabul testleri (`PAT-01…15`) henüz yapılmamıştır (`BLOCKED`). Bu belge bir üretim yayını veya faz kabulü yerine geçmez.**
+- **Durum Uyarısı:** **Bu belge `730/730` aşamasındaki Bütünleşik Teknik Düzeltme oturumunun kaydını tutar; sonraki Release 1.0 (Faz A–F) tamamlama turunda (`P-BLOCK-1..3`, Android `JobScheduler` arka plan yedekleme, Drive geri yükleme ve `ADR-021` hibrit canlı senkronizasyon) çalışma ağacı güncel `772/772` otomatik test + Android `:app:compileDebugKotlin` seviyesine çıkarılmıştır. Ancak `PAT-01…18` fiziksel kabul testleri henüz çalıştırılmadığı için (`BLOCKED`) proje fiziksel doğrulama olmadan üretime hazır ilan edilemez. Release 1.0 nihai teslim raporu için bkz.: [`RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](./RELEASE_1_0_FINAL_DELIVERY_REPORT.md).**
 
 ---
 
@@ -108,6 +108,8 @@ Tüm otomatik test ve analiz komutları CPU çekişmesini önlemek amacıyla **t
 | **Hub Backend** (`test_spikes/spike_01_backend`) | `dart test -j 1` | 226 | **232** | 0 | 0 | +6 | `task-758` |
 | **Ana Uygulama** (`market_pos`) | `flutter test -j 1` | 261 | **276** | 0 | 0 | +15 | `task-800` |
 | **Toplam** | **Sıralı 4 Süit** | **700** | **730** | **0** | **0** | **+30** | — |
+
+> **Sonraki Release 1.0 (Faz A–F) Doğrulama Güncellemesi:** Devam eden Release 1.0 tamamlama turunda `P-BLOCK-1..3`, `ADR-020` (`JobScheduler`), Drive yedek listeleme/geri yükleme ve `ADR-021` hibrit canlı senkronizasyon kodlanıp test edildikten sonra 4 paketin son sıralı doğrulaması şu sonuçla güncellenmiştir: **`packages/mms_contracts` `7/7`** (`dart analyze` `0`), **`packages/mms_client_storage` `225/225`** (`dart analyze` çıkış `0`, 16 önceden var olan `sqlite3 dispose` info), **`test_spikes/spike_01_backend` `245/245`** (`dart analyze` çıkış `0`, 18 önceden var olan `sqlite3 dispose` info), **kök `market_pos` `295/295`** (`flutter analyze` `0` sorun) = **Toplam `772/772` geçen test** + Android `:app:compileDebugKotlin` `BUILD SUCCESSFUL`. Ayrıntılar: [`RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](./RELEASE_1_0_FINAL_DELIVERY_REPORT.md).
 
 ### D.2 Statik Analiz Sonuçları
 

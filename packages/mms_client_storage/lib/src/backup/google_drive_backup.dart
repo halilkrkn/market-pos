@@ -9,7 +9,9 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import 'backup_crypto.dart';
+import 'backup_file_transfer.dart';
 import 'backup_manifest.dart';
+import 'database_backup_engine.dart';
 
 /// Faz 7D — Google Drive şifreli yedek (canlı senkronizasyon DEĞİL; ADR-011 `drive.file`).
 ///
@@ -95,6 +97,34 @@ class GoogleOAuthRefreshTokenProvider implements DriveAccessTokenProvider {
     // 60 sn güvenlik payı: token istek ortasında süresi dolmasın.
     _expiresAt = clock().add(Duration(seconds: max(0, expiresIn - 60)));
     return token;
+  }
+
+  /// Bellekte önbelleklenen kısa ömürlü erişim token'ını sıfırlar.
+  void clearCachedAccessToken() {
+    _cached = null;
+    _expiresAt = null;
+  }
+
+  /// Google OAuth 2.0 `revoke` ucu üzerinden refresh/access token'ı iptal eder.
+  Future<bool> revokeToken() async {
+    final refresh = await readRefreshToken();
+    final tokenToRevoke = (refresh != null && refresh.isNotEmpty) ? refresh : _cached;
+    clearCachedAccessToken();
+    if (tokenToRevoke == null || tokenToRevoke.isEmpty) {
+      return false;
+    }
+    try {
+      final resp = await httpClient
+          .post(
+            Uri.parse('https://oauth2.googleapis.com/revoke'),
+            headers: const {'Content-Type': 'application/x-www-form-urlencoded'},
+            body: {'token': tokenToRevoke},
+          )
+          .timeout(const Duration(seconds: 15));
+      return resp.statusCode == 200;
+    } catch (_) {
+      return false;
+    }
   }
 }
 
@@ -341,8 +371,10 @@ class GoogleDriveBackupUploader {
           'mms_backup_id': manifest.backupId,
           'mms_sha256': sha,
           'mms_device_id': manifest.deviceId,
+          'mms_tenant_id': manifest.tenantId,
           'mms_store_id': manifest.storeId,
           'mms_database_type': manifest.databaseType.value,
+          'mms_schema_version': manifest.schemaVersion.toString(),
         },
       );
       state = _withEntry(
@@ -527,6 +559,293 @@ class GoogleDriveBackupUploader {
       }
       await delay(baseDelay * (1 << (attempt - 1)));
     }
+  }
+
+  /// Google Drive klasöründeki şifreli `.mmsbak` yedeklerini listeler (en yeniden eskiye).
+  Future<List<DriveRemoteBackupInfo>> listRemoteBackups({
+    String? tenantId,
+    String? storeId,
+    String? deviceId,
+    DatabaseType? databaseType,
+  }) async {
+    final folderId = await _findFolderIdOnly();
+    if (folderId == null) return const [];
+
+    final items = <DriveRemoteBackupInfo>[];
+    String? pageToken;
+    do {
+      final queryParams = <String, String>{
+        'q': "'${_escape(folderId)}' in parents and trashed = false",
+        'fields': 'nextPageToken,files(id,name,size,createdTime,appProperties)',
+        'spaces': 'drive',
+        'pageSize': '100',
+        'orderBy': 'createdTime desc',
+        if (pageToken != null && pageToken.isNotEmpty) 'pageToken': pageToken,
+      };
+      final resp = await _send(
+        (token) => httpClient.get(
+          Uri.https('www.googleapis.com', '/drive/v3/files', queryParams),
+          headers: {'Authorization': 'Bearer $token'},
+        ),
+      );
+      final body = _decodeObject(resp.body);
+      final files = body['files'] as List<dynamic>? ?? const [];
+      for (final raw in files) {
+        if (raw is! Map) continue;
+        final info = DriveRemoteBackupInfo.tryParse(Map<String, dynamic>.from(raw));
+        if (info == null) continue;
+        if (tenantId != null && info.tenantId != null && info.tenantId != tenantId) {
+          continue;
+        }
+        if (storeId != null && info.storeId != null && info.storeId != storeId) {
+          continue;
+        }
+        if (deviceId != null && info.deviceId != null && info.deviceId != deviceId) {
+          continue;
+        }
+        if (databaseType != null &&
+            info.databaseType != null &&
+            info.databaseType != databaseType) {
+          continue;
+        }
+        items.add(info);
+      }
+      final next = body['nextPageToken'];
+      pageToken = next is String && next.isNotEmpty ? next : null;
+    } while (pageToken != null);
+
+    items.sort((a, b) {
+      final cmp = (b.createdTimeUtc ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true))
+          .compareTo(a.createdTimeUtc ?? DateTime.fromMillisecondsSinceEpoch(0, isUtc: true));
+      return cmp != 0 ? cmp : b.fileName.compareTo(a.fileName);
+    });
+    return items;
+  }
+
+  /// Şifreli `.mmsbak` paketini `.part` geçici dosyasıyla (Range destekli) indirir,
+  /// boyut + SHA-256 + paket yapısı doğrulamasından geçirip atomik olarak `.mmsbak` dosyasına alır.
+  /// Bozuk `.part` indirilen dosya asla korunmaz, otomatik silinir.
+  Future<File> downloadEncryptedBackup({
+    required DriveRemoteBackupInfo remote,
+    required Directory targetDir,
+  }) async {
+    if (!await targetDir.exists()) {
+      await targetDir.create(recursive: true);
+    }
+    final safeName = p.basename(remote.fileName).trim();
+    if (safeName.isEmpty || !safeName.endsWith('.mmsbak')) {
+      throw const DriveBackupException(
+        'ERR_DRIVE_NOT_ENCRYPTED_PACKAGE',
+        'Uzak dosya adı geçerli bir .mmsbak yedek paketi değil.',
+      );
+    }
+    final finalFile = File(p.join(targetDir.path, safeName));
+    final partFile = File('${finalFile.path}.part');
+
+    var offset = 0;
+    if (await partFile.exists()) {
+      final existingLen = await partFile.length();
+      if (remote.sizeBytes > 0 && existingLen >= remote.sizeBytes) {
+        await partFile.delete();
+        offset = 0;
+      } else {
+        offset = existingLen;
+      }
+    }
+
+    final downloadUri = Uri.https(
+      'www.googleapis.com',
+      '/drive/v3/files/${Uri.encodeComponent(remote.fileId)}',
+      const {'alt': 'media'},
+    );
+
+    try {
+      http.Response resp;
+      try {
+        resp = await _send(
+          (token) => httpClient.get(
+            downloadUri,
+            headers: {
+              'Authorization': 'Bearer $token',
+              if (offset > 0) 'Range': 'bytes=$offset-',
+            },
+          ),
+        );
+      } on DriveBackupException catch (e) {
+        // Stale Range (416): yarım kalmış .part dosyasını sil ve baştan indir.
+        if (offset > 0 && e.message.contains('HTTP 416')) {
+          if (await partFile.exists()) await partFile.delete();
+          offset = 0;
+          resp = await _send(
+            (token) => httpClient.get(
+              downloadUri,
+              headers: {'Authorization': 'Bearer $token'},
+            ),
+          );
+        } else {
+          rethrow;
+        }
+      }
+
+      if (offset > 0 && resp.statusCode == 206) {
+        await partFile.writeAsBytes(resp.bodyBytes, mode: FileMode.append, flush: true);
+      } else {
+        await partFile.writeAsBytes(resp.bodyBytes, mode: FileMode.write, flush: true);
+      }
+
+      final bytes = await partFile.readAsBytes();
+      if (remote.sizeBytes > 0 && bytes.length != remote.sizeBytes) {
+        throw DriveBackupException(
+          'ERR_DRIVE_DOWNLOAD_INCOMPLETE',
+          'İndirilen yedek boyutu eksik veya uyuşmuyor '
+              '(beklenen ${remote.sizeBytes}, alınan ${bytes.length}).',
+        );
+      }
+
+      final expectedSha = remote.sha256Checksum?.trim().toLowerCase();
+      if (expectedSha != null && expectedSha.isNotEmpty) {
+        final actualSha = sha256.convert(bytes).toString().toLowerCase();
+        if (!BackupCryptoService.constantTimeEquals(
+          utf8.encode(actualSha),
+          utf8.encode(expectedSha),
+        )) {
+          throw const DriveBackupException(
+            'ERR_DRIVE_CHECKSUM_MISMATCH',
+            'İndirilen yedek dosyasının SHA-256 özeti Drive kaydıyla uyuşmuyor.',
+          );
+        }
+      }
+
+      final BackupManifest manifest;
+      try {
+        manifest = BackupFileTransfer.verifyPackageStructure(bytes);
+      } on BackupException catch (e) {
+        throw DriveBackupException('ERR_DRIVE_NOT_ENCRYPTED_PACKAGE', e.message);
+      }
+
+      if (remote.backupId != null &&
+          remote.backupId!.isNotEmpty &&
+          manifest.backupId != remote.backupId) {
+        throw const DriveBackupException(
+          'ERR_DRIVE_CHECKSUM_MISMATCH',
+          'İndirilen yedeğin kimliği seçilen yedekle uyuşmuyor.',
+        );
+      }
+
+      if (await finalFile.exists()) {
+        await finalFile.delete();
+      }
+      await partFile.rename(finalFile.path);
+      return finalFile;
+    } catch (_) {
+      if (await partFile.exists()) {
+        try {
+          await partFile.delete();
+        } catch (_) {}
+      }
+      rethrow;
+    }
+  }
+
+  Future<String?> _findFolderIdOnly() async {
+    final cached = (await ledger.load()).folderId;
+    if (cached != null && cached.isNotEmpty) return cached;
+    final q = "mimeType = '$_folderMime' and name = '${_escape(folderName)}' and trashed = false";
+    final resp = await _send(
+      (token) => httpClient.get(
+        Uri.https('www.googleapis.com', '/drive/v3/files', {
+          'q': q,
+          'fields': 'files(id)',
+          'spaces': 'drive',
+        }),
+        headers: {'Authorization': 'Bearer $token'},
+      ),
+    );
+    final files = (_decodeObject(resp.body)['files'] as List<dynamic>?) ?? const [];
+    if (files.isEmpty) return null;
+    final id = (files.first as Map)['id'] as String?;
+    return (id != null && id.isNotEmpty) ? id : null;
+  }
+}
+
+class DriveRemoteBackupInfo {
+  final String fileId;
+  final String fileName;
+  final int sizeBytes;
+  final DateTime? createdTimeUtc;
+  final String? backupId;
+  final String? deviceId;
+  final String? tenantId;
+  final String? storeId;
+  final DatabaseType? databaseType;
+  final int? schemaVersion;
+  final String? sha256Checksum;
+
+  const DriveRemoteBackupInfo({
+    required this.fileId,
+    required this.fileName,
+    required this.sizeBytes,
+    this.createdTimeUtc,
+    this.backupId,
+    this.deviceId,
+    this.tenantId,
+    this.storeId,
+    this.databaseType,
+    this.schemaVersion,
+    this.sha256Checksum,
+  });
+
+  static DriveRemoteBackupInfo? tryParse(Map<String, dynamic> json) {
+    final id = json['id'] as String?;
+    final name = json['name'] as String?;
+    if (id == null || id.isEmpty || name == null || !name.endsWith('.mmsbak')) {
+      return null;
+    }
+    final rawSize = json['size'];
+    final sizeBytes = rawSize is int
+        ? rawSize
+        : (rawSize is num
+            ? rawSize.toInt()
+            : int.tryParse(rawSize?.toString() ?? '') ?? 0);
+    final rawCreated = json['createdTime'] as String?;
+    final createdTimeUtc =
+        rawCreated != null ? DateTime.tryParse(rawCreated)?.toUtc() : null;
+    final propsRaw = json['appProperties'];
+    final props = propsRaw is Map
+        ? Map<String, dynamic>.from(propsRaw)
+        : const <String, dynamic>{};
+
+    DatabaseType? dbType;
+    final rawDbType = props['mms_database_type'] as String?;
+    if (rawDbType != null && rawDbType.isNotEmpty) {
+      try {
+        dbType = DatabaseType.fromString(rawDbType);
+      } catch (_) {}
+    }
+
+    String? backupId = props['mms_backup_id'] as String?;
+    String? deviceId = props['mms_device_id'] as String?;
+    if (backupId == null || backupId.isEmpty) {
+      final stem = name.substring(0, name.length - '.mmsbak'.length);
+      final idx = stem.lastIndexOf('_');
+      if (idx > 0 && idx + 1 < stem.length) {
+        backupId = stem.substring(idx + 1);
+      }
+    }
+
+    return DriveRemoteBackupInfo(
+      fileId: id,
+      fileName: name,
+      sizeBytes: sizeBytes,
+      createdTimeUtc: createdTimeUtc,
+      backupId: backupId,
+      deviceId: deviceId,
+      tenantId: props['mms_tenant_id'] as String?,
+      storeId: props['mms_store_id'] as String?,
+      databaseType: dbType,
+      schemaVersion: int.tryParse(props['mms_schema_version']?.toString() ?? ''),
+      sha256Checksum: props['mms_sha256'] as String?,
+    );
   }
 }
 

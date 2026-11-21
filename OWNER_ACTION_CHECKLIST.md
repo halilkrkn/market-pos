@@ -1,8 +1,8 @@
 # MARKET MMS — Owner (Proje Sahibi) İşlem Listesi
 
-*Tarih: 21 Kasım 2026 (Teknik Düzeltme Oturumu Güncellemesi) · Kaynaklar: [`docs/FINAL_COMPLETION_REPORT.md`](docs/FINAL_COMPLETION_REPORT.md), [`docs/PILOT_TECHNICAL_REMEDIATION_REPORT.md`](docs/PILOT_TECHNICAL_REMEDIATION_REPORT.md)*
+*Tarih: 21 Kasım 2026 (Release 1.0 Güncellemesi) · Kaynaklar: [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/PILOT_TECHNICAL_REMEDIATION_REPORT.md`](docs/PILOT_TECHNICAL_REMEDIATION_REPORT.md)*
 
-Bu listede **sizin** karar veya uygulama gerektiren maddeleriniz yer alır. ADR-015…020 kapsamındaki yazılım düzeltmeleri uygulandı ve otomatik testlerle doğrulandı; ancak **fiziksel kabul testleri (PAT-01…15) henüz çalıştırılmadı ve sistem üretime hazır değildir**. Aşağıdaki maddeler açık karar, gizli anahtar/sertifika, temizlik veya gerçek donanım gerektirir.
+Bu listede **sizin** karar, gizli anahtar, ortam temizliği veya fiziksel test gerektiren maddeleriniz yer alır. **`P-BLOCK-1..3` (`DEC-REV-1..5`), Android arka plan yedeği (`ADR-020`), Google Drive listeleme/indirme/kontrollü geri yükleme (`Faz C`) ve Google Drive hibrit canlı senkronizasyon (`ADR-021`) teknik olarak uygulanmış ve otomatik testlerle doğrulanmıştır; ancak fiziksel kabul testleri (`PAT-01…18`) henüz çalıştırılmadığı için sistem henüz sahaya / üretime tam hazır ilan edilmemiştir (`TECHNICALLY COMPLETE — PHYSICAL VALIDATION REQUIRED`).**
 
 > **Bu belgede hiçbir gerçek parola, token, sertifika veya özel anahtar yoktur; eklemeyin.**
 
@@ -19,12 +19,12 @@ Bu listede **sizin** karar veya uygulama gerektiren maddeleriniz yer alır. ADR-
 
 | # | Madde | Tür | Engellediği iş | Öncelik |
 |---|---|---|---|---|
-| A1 | ADR-015…020 kararları ve P-BLOCK-1..3 | Karar | Mimari kayıtlar + QR/TLS eşleştirme açılışı | **Yüksek** |
-| A2 | Değişikliklerin commit edilmesi | Karar | Sürüm takibi | Yüksek |
+| A1 | ADR-015…021 kararları ve `DEC-REV-1..5` | **Kapsam Onaylı / Teknik Tamam** | Mimari kayıtlar + `P-BLOCK-1..3`, `ADR-020`, `ADR-021` teknik kodlama tamamlandı (`PAT-01..18` saha onayı bekleniyor) | **Orta** |
+| A2 | Değişikliklerin commit edilmesi | Karar | Sürüm takibi (Owner açık onayından sonra) | Yüksek |
 | A3 | Kategori/KDV senkronu (ADR-019) | **DEFERRED_POST_PILOT** | Pilotta %20 KDV kısıtlarıyla kabul; pilot sonrası migrasyon | Orta (pilot sonrası) |
-| A4 | Discovery TLS protokol kararı (ADR-018 §2.2) | **CONFIRMED (Seçenek C)** + **P-BLOCK-1..3** | İlk eşleştirmede TLS/QR uyumluluğu | **Yüksek (P-BLOCK-1..3)** |
-| A5 | WorkManager bağımlılığı (ADR-020) | **DEFERRED_POST_PILOT** | Android'de uygulama kapalıyken yedek (açıkken çalışır) | Düşük (pilot sonrası) |
-| A6 | Android Drive SDK (Google Sign-In) | Karar + bağımlılık | Android'den Drive yedeği | Düşük |
+| A4 | Discovery TLS protokol kararı (ADR-018 §2.2) & `P-BLOCK-1..3` | **IMPLEMENTED (Otomatik Testli)** | İlk eşleştirmede TLS/QR (`DEC-REV-1..5` kodlandı; `PAT-03`, `PAT-12` bekleniyor) | **Saha Testi (`PAT-03`)** |
+| A5 | Android kapalıyken arka plan yedek (`ADR-020`) | **IMPLEMENTED (`JobScheduler`)** | `MmsBackgroundBackupJobService` + headless engine ile harici bağımlılıksız uygulandı (`PAT-16` bekleniyor) | **Saha Testi (`PAT-16`)** |
+| A6 | Google Drive Yedek + Hibrit Canlı Senkron (`ADR-021`) | **IMPLEMENTED (Otomatik Testli)** | Drive `listRemoteBackups`, `.part` indirme/restore (`PAT-17`) ve `MMSENV01` hibrit canlı senkron (`PAT-18`) uygulandı; OAuth (`C1/C2`) + `drive_live_sync_secret_v1` bekleniyor | **Orta (`C1/C2`, `PAT-13/17/18`)** |
 | A7 | QR görseli paketi | Karar + bağımlılık | Windows ekranında QR görüntüsü | Düşük |
 | A8 | Güncelleme paketi imzalama | Karar + sertifika | İmzalı güncelleme | Orta |
 | B1 | Android üretim imza anahtarı | Gizli anahtar | Release APK | **Engelleyici** |
@@ -89,17 +89,13 @@ Bu listede **sizin** karar veya uygulama gerektiren maddeleriniz yer alır. ADR-
   7. Pilot sonrası ADR-019 migrasyonu başlatılmadan önce doğrulanmış şifreli `.mmsbak` Hub yedeği alınmalıdır.
 - **Pilot Sonrası Uygulama Kapsamı (9 Kalıcı Gereksinim):** Ayrıntılı liste [`docs/decisions/019-category-vat-sync.md`](docs/decisions/019-category-vat-sync.md) §2 içindedir.
 
-### A4. Discovery TLS (ADR-018 **CONFIRMED — Seçenek C**) ve Eşleştirme Bloklayıcıları (**P-BLOCK-1..3**)
-- **Onaylanan Karar:** Eşleştirilmiş cihaz keşfi yalnızca `https://` kullanır (§2.1 `CONFIRMED`); UDP keşif yanıtı `protocol_version: "1.0"` olarak değişmeden kalır (§2.2 Seçenek C `CONFIRMED`). `PairingQrPayload` artık Hub'ın `ca_fingerprint` alanını okur ve `UNKNOWN` değerini temizler.
-- **Tespit Edilen Açık Pilot Bloklayıcıları (Protokol/Güvenlik Değişikliği Owner Onayı Bekler):**
-  1. **`P-BLOCK-1`:** Hub `server.dart` `/api/v1/pairing/session`, `ca_fingerprint` değerini CA PEM dosyasının ham baytlarından SHA-256 alıyor; istemci (`MmsPinnedTlsClientFactory` / `DevicePairingClient`) sertifika DER SHA-256 bekliyor.
-  2. **`P-BLOCK-2`:** `DevicePairingClient`, `initialCaPem == null && expectedCaSha256 != null` akışında ilk `/api/v1/pairing/ca-cert` isteğini leaf-pin modunda açtığından Hub'ın yaprak sertifikasını CA parmak iziyle uyuşmadığı için reddeder ve `resolvedCaPem` sonrasında istemciyi yenilemez.
-  3. **`P-BLOCK-3`:** `server.dart` yerel kasada oturum açılırken `hub_url` değerini `https://127.0.0.1:8945` üretir; Android `HubUrlValidator(allowLoopback: false)` bu adresi reddeder (Android kurulumunda Hub LAN IP'si girilmelidir).
-- **Sizden İstenen:** Gerçek Android–Hub QR/TLS eşleştirme (`PAT-03`) öncesi `P-BLOCK-1..3` protokol/akış düzeltmeleri için ayrı uygulama onayı vermeniz gerekir.
+### A4. Discovery TLS (ADR-018 **CONFIRMED — Seçenek C**) ve `P-BLOCK-1..3` (`DEC-REV-1..5` Uygulandı)
+- **Durum (Release 1.0):** `DEC-REV-1..5` kapsamındaki tüm `P-BLOCK-1..3` düzeltmeleri (`extractCanonicalSingleCertDer`, dar `MmsX509PreValidator`, `ALT-BOOT-2`, crash-safe `ACK_PENDING` + idempotent `/ack`, Windows `GetAdaptersAddresses`+`GetIfEntry2` x64 FFI + `advertise_host`) kodlandı ve otomatik testlerden geçti (`HUB-T01..T09b`, `APP-T01..T18`).
+- **Sizden İstenen:** Gerçek donanımda `PAT-03` ve `PAT-12` fiziksel kabul testlerinin yürütülmesi (`DEC-REV-6`).
 
-### A5. WorkManager bağımlılığı (ADR-020 — **DEFERRED_POST_PILOT**)
-- **Karar Durumu:** `workmanager` paketi ve `MainActivity.kt` eklenti yeniden tasarımı Owner kararıyla pilot sonrasına **ertelendi**.
-- **Pilotta Uygulanan Güvenlik İyileştirmesi:** `AndroidKeystoreTokenStore` artık `PlatformException` ve `MissingPluginException` istisnalarını gizli veri sızdırmadan fail-closed `SecureStorageException` nesnesine çevirir (`MainActivity.kt` ve `pubspec.yaml` değişmedi). Android otomatik yedeği **yalnızca uygulama açıkken** çalışır (açılışta gecikmiş yedek hemen alınır).
+### A5. Android Uygulama Kapalıyken Zamanlanmış Yedek (`ADR-020` — **IMPLEMENTED (`JobScheduler`)**)
+- **Karar & Uygulama Durumu:** Harici pub paketi (`workmanager`) olmadan saf Android SDK `JobScheduler` (`MmsBackgroundBackupJobService`) + headless `FlutterEngine` + paylaşılan `MmsSecureStorageChannelHandler` (`AndroidKeystore`) + `BackgroundBackupWorkerExecutor` uygulandı; `BackupOperationLock` ve üstel geri çekilme (exponential backoff) entegre edildi ve 19 otomatik testle doğrulandı.
+- **Sizden İstenen:** Fiziksel Android cihazda `PAT-16` ile uygulama kapalıyken yedekleme + yeniden başlatma kalıcılığının doğrulanması.
 
 ### A6. Android Drive SDK kararı
 - **Neden gerekli?**
@@ -265,7 +261,7 @@ Bu listede **sizin** karar veya uygulama gerektiren maddeleriniz yer alır. ADR-
 ## E. Pilot Ortamı, Fiziksel Testler ve Kabul
 
 ### E1. Pilot ortamı ve gerekli donanım
-- **Neden gerekli?** Fiziksel kabul testlerinin **hiçbiri** yapılmadı. Liste: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](PHYSICAL_ACCEPTANCE_TEST_PLAN.md), PAT-01…PAT-15.
+- **Neden gerekli?** Fiziksel kabul testlerinin **hiçbiri** yapılmadı. Liste: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](PHYSICAL_ACCEPTANCE_TEST_PLAN.md), **`PAT-01…PAT-18`**.
 - **Gerekli donanım:**
   - **Hub:** Windows 10/11 bilgisayar. Yönetici hesabı ve sabit LAN IP gerekli.
   - **Kasa:** En az bir Windows kasa bilgisayarı ve USB HID barkod okuyucu.
@@ -277,7 +273,7 @@ Bu listede **sizin** karar veya uygulama gerektiren maddeleriniz yer alır. ADR-
 - **Ne yapmalısınız?**
   1. B1 ve B2'yi tamamlayın.
   2. Hub'ı temiz DB ile kurun.
-  3. PAT-01…PAT-15'i sırayla uygulayın ve her test için kanıtı kaydedin.
+  3. `PAT-01…PAT-18`'i sırayla uygulayın ve her test için kanıtı kaydedin.
 - **Güvenlik uyarısı:** Pilotu gerçek satış verisiyle değil, test ürünleriyle başlatın. Restore ve çökme testlerinden önce şifreli yedek alın.
 
 ### E2. Faz kabulleri

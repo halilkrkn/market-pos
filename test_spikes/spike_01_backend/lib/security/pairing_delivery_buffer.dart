@@ -10,6 +10,9 @@ class DeliveryItem {
   final String deviceId;
   String rawToken;
   final Uint8List tokenSha256;
+  String? pendingTokenHash;
+  String? pendingSalt;
+  final bool isRePair;
   final DateTime deliveredAt;
   final DateTime expiresAt;
   bool isAcked;
@@ -19,6 +22,9 @@ class DeliveryItem {
     required this.deviceId,
     required this.rawToken,
     required this.tokenSha256,
+    this.pendingTokenHash,
+    this.pendingSalt,
+    this.isRePair = false,
     required this.deliveredAt,
     required this.expiresAt,
     this.isAcked = false,
@@ -37,6 +43,9 @@ class PairingDeliveryBuffer {
     required String sessionId,
     required String deviceId,
     required String rawToken,
+    String? pendingTokenHash,
+    String? pendingSalt,
+    bool isRePair = false,
   }) {
     final now = DateTime.now();
     final tokenBytes = utf8.encode(rawToken);
@@ -47,6 +56,9 @@ class PairingDeliveryBuffer {
       deviceId: deviceId,
       rawToken: rawToken,
       tokenSha256: tokenSha256,
+      pendingTokenHash: pendingTokenHash,
+      pendingSalt: pendingSalt,
+      isRePair: isRePair,
       deliveredAt: now,
       expiresAt: now.add(deliveryTtl),
       isAcked: false,
@@ -87,21 +99,31 @@ class PairingDeliveryBuffer {
 
     item.isAcked = true;
     item.rawToken = ''; // Bellek referansını temizle
+    final stagedHash = item.pendingTokenHash;
+    final stagedSalt = item.pendingSalt;
+    item.pendingTokenHash = null;
+    item.pendingSalt = null;
     _buffer.remove(sessionId);
 
-    // Veritabanında cihazı confirmed yap
+    // Veritabanında cihazı confirmed yap (re-pairing ise yeni hash/salt yalnızca burada terfi edilir)
     await writeQueue.enqueue(() async {
       await db.transaction(() async {
         await (db.update(db.devices)..where((d) => d.deviceId.equals(item.deviceId))).write(
-          const DevicesCompanion(
-            isConfirmed: Value(true),
+          DevicesCompanion(
+            isConfirmed: const Value(true),
+            tokenHash: (item.isRePair && stagedHash != null && stagedSalt != null)
+                ? Value(stagedHash)
+                : const Value.absent(),
+            salt: (item.isRePair && stagedHash != null && stagedSalt != null)
+                ? Value(stagedSalt)
+                : const Value.absent(),
           ),
         );
 
         await db.into(db.deviceAuditLogs).insert(
           DeviceAuditLogsCompanion(
             deviceId: Value(item.deviceId),
-            action: const Value('PAIRING_DELIVERY_CONFIRMED'),
+            action: Value(item.isRePair ? 'PAIRING_REPAIR_DELIVERY_CONFIRMED' : 'PAIRING_DELIVERY_CONFIRMED'),
             details: Value('Session: $sessionId, Delivery acknowledged and confirmed.'),
           ),
         );
@@ -129,19 +151,27 @@ class PairingDeliveryBuffer {
       final item = _buffer.remove(sessionId);
       if (item != null && !item.isAcked) {
         item.rawToken = ''; // RAM temizliği
+        item.pendingTokenHash = null;
+        item.pendingSalt = null;
         await writeQueue.enqueue(() async {
           await db.transaction(() async {
-            await (db.update(db.devices)..where((d) => d.deviceId.equals(item.deviceId))).write(
-              const DevicesCompanion(
-                isActive: Value(false),
-              ),
-            );
+            if (!item.isRePair) {
+              await (db.update(db.devices)..where((d) => d.deviceId.equals(item.deviceId))).write(
+                const DevicesCompanion(
+                  isActive: Value(false),
+                ),
+              );
+            }
 
             await db.into(db.deviceAuditLogs).insert(
               DeviceAuditLogsCompanion(
                 deviceId: Value(item.deviceId),
-                action: const Value('PAIRING_DELIVERY_TIMEOUT'),
-                details: Value('Session: $sessionId, 120s ACK timeout. Device deactivated.'),
+                action: Value(item.isRePair
+                    ? 'PAIRING_REPAIR_DELIVERY_TIMEOUT'
+                    : 'PAIRING_DELIVERY_TIMEOUT'),
+                details: Value(item.isRePair
+                    ? 'Session: $sessionId, 120s ACK timeout. Existing active device token preserved.'
+                    : 'Session: $sessionId, 120s ACK timeout. Device deactivated.'),
               ),
             );
           });

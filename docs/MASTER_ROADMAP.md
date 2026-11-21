@@ -5,6 +5,9 @@ Bu belge, **MARKET MANAGEMENT SYSTEM (MMS)** ürünü için kabul edilmiş ve ba
 > [!IMPORTANT]
 > **Tarihsel MVP Planından Ayrım:** Bu belge, erken dönem çekirdek MVP kuruluşunu (15 Kasım 2026 öncesi `Faz 0–8` numaralandırması; [`docs/ROADMAP.md`](./ROADMAP.md) ve [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) v1.4) yöneten tarihsel kayıtlardan **ayrıdır ve onlarla karıştırılmamalıdır**. Çekirdek MVP temeli tamamlandıktan sonra ürünleştirme ve çok cihazlı saha hazırlığı bu belgedeki **Faz 1–7** sırasıyla yürütülür.
 
+> [!NOTE]
+> **21 Kasım 2026 — Release 1.0 Teknik Tamamlama Durumu (Faz Kabulü Henüz Verilmemiştir):** Onaylanan `DEC-REV-1..5` (`P-BLOCK-1..3`), `ADR-020` (Android `JobScheduler` + arka plan `FlutterEngine` yedekleme), Google Drive uzak yedek listeleme/indirme/pre-verified geri yükleme ve `ADR-021` (Hub öncelikli Google Drive canlı senkronizasyon fallback) yazılımları uygulanmış; son kod temizliği sonrası **4 pakette 772/772 otomatik test** ve Android `:app:compileDebugKotlin` derlemesi geçmiştir. Ancak fiziksel cihaz/servis kabul testleri (`PAT-01…18`), üretim imza/sertifika/OAuth hazırlıkları (`OWNER_ACTION_CHECKLIST.md`) tamamlanmadan ve Owner açık kabul vermeden aşağıdaki fazların hiçbiri kabul edilmiş sayılmaz (`TECHNICALLY COMPLETE — PHYSICAL VALIDATION REQUIRED`). Ayrıntılar: [`LIVE_PROJECT_STATUS.md`](./LIVE_PROJECT_STATUS.md) ve [`RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](./RELEASE_1_0_FINAL_DELIVERY_REPORT.md).
+
 ---
 
 ## 1. Ürün Vizyonu ve Kapsam Sınırı

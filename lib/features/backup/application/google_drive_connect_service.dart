@@ -74,7 +74,23 @@ class GoogleDriveConnectService {
     }
   }
 
-  Future<void> disconnect() => secureStore.deleteSecret(refreshTokenSecretKey);
+  Future<void> saveRefreshToken(String refreshToken) async {
+    final trimmed = refreshToken.trim();
+    if (trimmed.isEmpty) {
+      throw const DriveBackupException(
+        'ERR_OAUTH_NO_REFRESH_TOKEN',
+        'Google Drive refresh token boş olamaz.',
+      );
+    }
+    await secureStore.saveSecret(refreshTokenSecretKey, trimmed);
+  }
+
+  Future<void> disconnect({GoogleOAuthRefreshTokenProvider? tokenProvider}) async {
+    if (tokenProvider != null) {
+      await tokenProvider.revokeToken();
+    }
+    await secureStore.deleteSecret(refreshTokenSecretKey);
+  }
 
   static Future<void> _openWithSystemBrowser(Uri url) async {
     if (!Platform.isWindows) {
