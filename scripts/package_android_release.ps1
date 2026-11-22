@@ -1,6 +1,7 @@
 ﻿param(
     [string]$OutputDir = "dist\android_release",
     [string]$Version = "",
+    [string]$GoogleDriveWebClientId = "",
     [switch]$BuildAppBundle,
     [switch]$SkipFlutterBuild
 )
@@ -44,12 +45,16 @@ try {
     Write-Host "Algılanan Flutter sürümü (pubspec.yaml): $fullVersion (build-name=$buildName, build-number=$buildNumber)" -ForegroundColor Cyan
 
     if (-not $SkipFlutterBuild) {
+        $extraDartDefines = @()
+        if (-not [string]::IsNullOrWhiteSpace($GoogleDriveWebClientId)) {
+            $extraDartDefines += "--dart-define=MMS_GDRIVE_WEB_CLIENT_ID=$($GoogleDriveWebClientId.Trim())"
+        }
         if ($BuildAppBundle) {
             Write-Host "[1/3] Android AppBundle (--release) derleniyor..." -ForegroundColor Yellow
-            & flutter build appbundle --release "--build-name=$buildName" "--build-number=$buildNumber"
+            & flutter build appbundle --release "--build-name=$buildName" "--build-number=$buildNumber" @extraDartDefines
         } else {
             Write-Host "[1/3] Android APK (--release) derleniyor..." -ForegroundColor Yellow
-            & flutter build apk --release "--build-name=$buildName" "--build-number=$buildNumber"
+            & flutter build apk --release "--build-name=$buildName" "--build-number=$buildNumber" @extraDartDefines
         }
         if ($LASTEXITCODE -ne 0) {
             throw "Android Release derlemesi başarısız oldu ($LASTEXITCODE)."

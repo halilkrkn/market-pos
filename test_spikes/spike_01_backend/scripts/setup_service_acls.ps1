@@ -73,7 +73,7 @@ $sidUsers  = "*S-1-5-32-545"
 
 # 4. Dizin Yapisi Olusturma
 Write-Host "[4/7] Dizin yapisi hazirlaniyor: $BaseDir ..." -ForegroundColor Yellow
-$dirs = @("bin", "bin\broker", "config", "certs", "data", "security", "logs", "backups", "run")
+$dirs = @("bin", "bin\broker", "bin\lib", "lib", "config", "certs", "data", "security", "logs", "backups", "run")
 if (!(Test-Path $BaseDir)) {
     New-Item -ItemType Directory -Path $BaseDir -Force | Out-Null
 }
@@ -81,7 +81,7 @@ foreach ($d in $dirs) {
     $p = Join-Path $BaseDir $d
     if (!(Test-Path $p)) { New-Item -ItemType Directory -Path $p -Force | Out-Null }
 }
-Write-Host "  -> 9 standart alt dizin hazirlandi." -ForegroundColor Green
+Write-Host "  -> 11 standart alt dizin hazirlandi." -ForegroundColor Green
 
 # 5. Sahiplik ve Kalitim Kirma
 Write-Host "[5/7] Sahiplik Administrators grubuna ataniyor ve kalitim kiriliyor..." -ForegroundColor Yellow
@@ -96,11 +96,14 @@ Write-Host "[6/7] NTFS ACL izin matrisi uygulaniyor..." -ForegroundColor Yellow
 # Kok dizin: System F, Admin F, Service SID Traverse (NP)X, Users Traverse (NP)X
 Invoke-AclCommand "icacls" @($BaseDir, "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant", "${sidTarget}:(NP)X", "/grant", "${sidUsers}:(NP)X")
 
-# bin/: Users Traverse Only ((NP)X), Service SID RX
+# bin/: Users Traverse Only ((NP)X), Service SID RX (bin\lib mirasi dahil)
 Invoke-AclCommand "icacls" @("$BaseDir\bin", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)RX", "/grant", "${sidUsers}:(NP)X")
 
 # bin/broker/: Users Read & Execute (RX), Service SID RX
 Invoke-AclCommand "icacls" @("$BaseDir\bin\broker", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)RX", "/grant:r", "${sidUsers}:(OI)(CI)RX")
+
+# lib/ (Dart native assets sqlite3.dll): Service SID Read & Execute (RX), Users ERISIM YOK
+Invoke-AclCommand "icacls" @("$BaseDir\lib", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)RX")
 
 # data/, logs/, backups/, run/: Service SID Modify (M), Users ERISIM YOK
 Invoke-AclCommand "icacls" @("$BaseDir\data", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)M")
@@ -108,15 +111,15 @@ Invoke-AclCommand "icacls" @("$BaseDir\logs", "/grant:r", "${sidSystem}:(OI)(CI)
 Invoke-AclCommand "icacls" @("$BaseDir\backups", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)M")
 Invoke-AclCommand "icacls" @("$BaseDir\run", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)M")
 
-# config/, certs/, security/: Service SID Read (R), Users ERISIM YOK
+# config/, certs/: Service SID Read (R); security/: pepper.dpapi ve live_drive_sync_secret.dpapi olusturma/rotasyon icin Service SID Modify (M), Users ERISIM YOK
 Invoke-AclCommand "icacls" @("$BaseDir\config", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)R")
 Invoke-AclCommand "icacls" @("$BaseDir\certs", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)R")
-Invoke-AclCommand "icacls" @("$BaseDir\security", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)R")
+Invoke-AclCommand "icacls" @("$BaseDir\security", "/grant:r", "${sidSystem}:(OI)(CI)F", "/grant:r", "${sidAdmin}:(OI)(CI)F", "/grant:r", "${sidTarget}:(OI)(CI)M")
 Write-Host "  -> Izin matrisi basariyla uygulandi." -ForegroundColor Green
 
 # 7. Bildirimsel SID Denetimi (Self-Check)
 Write-Host "[7/7] Bildirimsel SID denetimi yapiliyor..." -ForegroundColor Yellow
-$criticalPaths = @("$BaseDir\data", "$BaseDir\config", "$BaseDir\certs", "$BaseDir\security", "$BaseDir\run", "$BaseDir\logs")
+$criticalPaths = @("$BaseDir\data", "$BaseDir\config", "$BaseDir\certs", "$BaseDir\security", "$BaseDir\run", "$BaseDir\logs", "$BaseDir\lib")
 foreach ($p in $criticalPaths) {
     $acl = Get-Acl -Path $p
     foreach ($access in $acl.Access) {

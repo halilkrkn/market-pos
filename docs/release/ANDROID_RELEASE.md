@@ -54,11 +54,17 @@ Tekil sürüm kaynağı kök dizindeki [`pubspec.yaml`](../../pubspec.yaml) dosy
 ```powershell
 flutter test
 flutter analyze
-pwsh scripts/package_android_release.ps1                  # APK (sürüm pubspec.yaml'dan okunur -> market_mms_v1.0.0-b1.apk)
-pwsh scripts/package_android_release.ps1 -BuildAppBundle  # AAB (market_mms_v1.0.0-b1.aab)
-# İsteğe bağlı tutarlılık doğrulaması ile:
-pwsh scripts/package_android_release.ps1 -Version 1.0.0+1
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_android_release.ps1                  # APK (sürüm pubspec.yaml'dan okunur -> market_mms_v1.0.0-b1.apk)
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_android_release.ps1 -BuildAppBundle  # AAB (market_mms_v1.0.0-b1.aab)
+# İsteğe bağlı tutarlılık doğrulaması ve ADR-022 Google Drive Web Client ID (serverClientId) ile:
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_android_release.ps1 `
+  -Version 1.0.0+1 `
+  -GoogleDriveWebClientId "<WEB_SERVER_CLIENT_ID>"
 ```
+
+> **Notlar:**
+> - `scripts/package_android_release.ps1` hem **Windows PowerShell 5.1** (UTF-8 BOM'lu) hem **PowerShell 7 (`pwsh`)** ile çalışır.
+> - `-GoogleDriveWebClientId` verildiğinde derlemeye `--dart-define=MMS_GDRIVE_WEB_CLIENT_ID=...` eklenir (`ADR-022`); Android APK'ya `client_secret` **hiçbir zaman** geçilmez.
 
 Betik `dist/android_release/` altına sürüm etiketli paket, `.sha256` ve yerel güncelleme `manifest.json` (`latest_version`, `build_number`, `download_url`, `sha256`) örneğini üretir.
 

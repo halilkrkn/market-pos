@@ -123,7 +123,7 @@ class GoogleDriveConnectService {
     if (!Platform.isWindows) {
       throw const DriveBackupException(
         'ERR_DRIVE_PLATFORM_UNSUPPORTED',
-        'Google Drive bağlantısı şu an yalnızca Windows uygulamasından yapılabilir.',
+        'Google Drive bağlantısı yalnızca Windows ve Android uygulamalarından yapılabilir.',
       );
     }
     // url.dll FileProtocolHandler: kabuk (cmd) yorumlaması olmadan varsayılan tarayıcıyı açar.

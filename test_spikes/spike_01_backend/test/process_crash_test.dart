@@ -278,7 +278,7 @@ void main() {
     print('[ADIM 6.5] stock_movements toplam değişim: $movementSum (Beklenen: -3000)');
     expect(movementSum, equals(-3000));
 
-    rawDb.dispose();
+    rawDb.close();
 
     // ADIM 7: Kurtarma Sonrası Tekrar Gönderim (Idempotency & Re-execution)
     print('[ADIM 7] Kurtarma sonrası yarıda kalan Tx 4 yeniden gönderiliyor...');
@@ -403,7 +403,7 @@ void main() {
       final interrupted = rawDb.select("SELECT * FROM sales WHERE client_seq = $crashSeq;");
       expect(interrupted.isEmpty, isTrue);
 
-      rawDb.dispose();
+      rawDb.close();
       print('[Döngü $cycle] SQLite WAL Recovery doğrulandı.');
     }
 

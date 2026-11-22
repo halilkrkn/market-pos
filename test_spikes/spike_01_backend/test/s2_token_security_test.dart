@@ -170,7 +170,7 @@ void main() {
           }
         }
       }
-      rawDb.dispose();
+      rawDb.close();
     });
 
     test('5. Salt her cihaz bazında birbirinden farklı ve benzersizdir', () {
@@ -178,7 +178,7 @@ void main() {
       final rows = rawDb.select('SELECT salt FROM devices;');
       final salts = rows.map((r) => r['salt'] as String).toSet();
       expect(salts.length, equals(rows.length));
-      rawDb.dispose();
+      rawDb.close();
     });
 
     test('6. Doğru token ile korumalı API çağrısı kabul edilmelidir (200 OK)', () async {
@@ -358,7 +358,7 @@ void main() {
       for (final log in logs) {
         expect(log['details']?.toString() ?? '', isNot(contains(validCashierToken)));
       }
-      rawDb.dispose();
+      rawDb.close();
     });
 
     test('14. İptal edilmiş token tekrar etkinleştirilemez olmalıdır', () async {

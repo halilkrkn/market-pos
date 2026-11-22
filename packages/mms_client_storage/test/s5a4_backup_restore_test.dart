@@ -125,7 +125,7 @@ void main() {
       // SQLite WAL modunda olduğunu doğrula
       final raw = sqlite3.open(clientDbFile.path);
       final journalMode = raw.select('PRAGMA journal_mode;').first.columnAt(0).toString().toLowerCase();
-      raw.dispose();
+      raw.close();
       expect(journalMode, equals('wal'));
 
       // Satış ekle (WAL dosyasına yazılır)
@@ -170,7 +170,7 @@ void main() {
       final snapDb = sqlite3.open(tempRestoreFile.path);
       final salesCount = snapDb.select('SELECT COUNT(*) FROM local_sales;').first.columnAt(0) as int;
       final checkRes = snapDb.select('PRAGMA integrity_check;').first.columnAt(0).toString().toLowerCase();
-      snapDb.dispose();
+      snapDb.close();
 
       expect(salesCount, equals(1));
       expect(checkRes, equals('ok'));
@@ -754,7 +754,7 @@ void main() {
         CREATE TABLE central_sales (id TEXT PRIMARY KEY, amount INTEGER);
         INSERT INTO central_sales VALUES ('cs_1', 99000);
       ''');
-      masterRaw.dispose();
+      masterRaw.close();
 
       // Merkezi DB yedeği al
       final centralBackup = await DatabaseBackupEngine.createBackup(
@@ -762,7 +762,7 @@ void main() {
         executeVacuumInto: (snapPath) async {
           final raw = sqlite3.open(masterDbFile.path);
           raw.execute("VACUUM INTO '${snapPath.replaceAll("'", "''")}';");
-          raw.dispose();
+          raw.close();
         },
         deviceId: 'SERVER_HUB',
         tenantId: tenantId,
@@ -989,7 +989,7 @@ void main() {
             raw.execute('INSERT INTO customer_loyalty VALUES (\'cust_1\', 500);');
             raw.execute('PRAGMA user_version = 2;');
           } finally {
-            raw.dispose();
+            raw.close();
           }
         },
         resumeLiveDb: () async {
@@ -1008,7 +1008,7 @@ void main() {
         final rows = checkRaw.select('SELECT points FROM customer_loyalty WHERE id = ?;', ['cust_1']);
         expect(rows.first['points'], equals(500));
       } finally {
-        checkRaw.dispose();
+        checkRaw.close();
       }
     });
 
@@ -1214,7 +1214,7 @@ void main() {
         INSERT INTO local_sales VALUES ('sale_recovered_1', 1, 5000);
         INSERT INTO local_sales VALUES ('sale_recovered_2', 2, 7500);
       ''');
-      rawStaging.dispose();
+      rawStaging.close();
 
       // 3. Simülasyon: Canlı veritabanını kapat, canlı dosyayı swap_bak'a taşı ve journal yaz (Elektrik tam burada kesildi!)
       await clientDb.close();
@@ -1250,7 +1250,7 @@ void main() {
       // Canlı veritabanını aç ve kurtarılan 2 satışın okunduğunu doğrula
       final checkDb = sqlite3.open(clientDbFile.path);
       final rows = checkDb.select('SELECT id, total_amount FROM local_sales ORDER BY client_seq;');
-      checkDb.dispose();
+      checkDb.close();
 
       expect(rows.length, equals(2));
       expect(rows[0]['id'], equals('sale_recovered_1'));
@@ -1273,7 +1273,7 @@ void main() {
         CREATE TABLE local_sales (id TEXT PRIMARY KEY, client_seq INTEGER, total_amount INTEGER);
         INSERT INTO local_sales VALUES ('sale_original_live', 1, 9900);
       ''');
-      rawSwap.dispose();
+      rawSwap.close();
 
       // stagingFile: yarım yazılmış / hasarlı dosya simülasyonu
       await stagingFile.writeAsBytes([0x00, 0x01, 0x02, 0x03], flush: true);
@@ -1304,7 +1304,7 @@ void main() {
       // Orijinal verinin korunduğunu doğrula
       final checkDb = sqlite3.open(clientDbFile.path);
       final rows = checkDb.select('SELECT id, total_amount FROM local_sales;');
-      checkDb.dispose();
+      checkDb.close();
 
       expect(rows.length, equals(1));
       expect(rows.first['id'], equals('sale_original_live'));
@@ -1319,7 +1319,7 @@ void main() {
         CREATE TABLE mobile_sales (id TEXT PRIMARY KEY, client_seq INTEGER, total_amount INTEGER);
         INSERT INTO mobile_sales VALUES ('mob_sale_1', 1, 3500);
       ''');
-      rawMobile.dispose();
+      rawMobile.close();
 
       // Mobil cihaz yedeği al
       final mobileBackup = await DatabaseBackupEngine.createBackup(
@@ -1327,7 +1327,7 @@ void main() {
         executeVacuumInto: (snapPath) async {
           final raw = sqlite3.open(mobileDbFile.path);
           raw.execute("VACUUM INTO '${snapPath.replaceAll("'", "''")}';");
-          raw.dispose();
+          raw.close();
         },
         deviceId: 'DEV_MOBILE_ANDROID_01',
         tenantId: tenantId,
@@ -1365,7 +1365,7 @@ void main() {
       // Canlı mobil DB'ye yeni satış ekle
       final rawMobileUpdate = sqlite3.open(mobileDbFile.path);
       rawMobileUpdate.execute("INSERT INTO mobile_sales VALUES ('mob_sale_2', 2, 8000);");
-      rawMobileUpdate.dispose();
+      rawMobileUpdate.close();
 
       final mobileRestoreRes = await DatabaseBackupEngine.restoreBackup(
         backupId: mobileBackup.backupId,
@@ -1386,7 +1386,7 @@ void main() {
       // 4. Mobil DB'nin durum 1'e (1 satış) döndüğünü ve bütünlüğün korunduğunu doğrula
       final checkMobile = sqlite3.open(mobileDbFile.path);
       final mRows = checkMobile.select('SELECT id FROM mobile_sales;');
-      checkMobile.dispose();
+      checkMobile.close();
 
       expect(mRows.length, equals(1));
       expect(mRows.first['id'], equals('mob_sale_1'));

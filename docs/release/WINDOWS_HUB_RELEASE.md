@@ -55,16 +55,31 @@ Bilinmeyen anahtarlar (yazım hataları) açılışı durdurur.
 ```powershell
 cd test_spikes\spike_01_backend
 .\scripts\build_aot.ps1                 # mms_backend.exe
-# Sertifikaları %ProgramData%\MarketMMS\certs\ altına yerleştirin (server.crt / server.key)
-.\scripts\install_mms_service.ps1        # dizinler + ACL + config + admin secret + servis + health check
+# Sertifikaları %ProgramData%\MarketMMS\certs\ altına yerleştirin (ca.crt / server.crt / server.key)
+.\scripts\install_mms_service.ps1        # dizinler + ACL + sqlite3.dll + config + admin secret + servis + health check
 ..\..\scripts\configure_hub_firewall.ps1 # TCP/UDP portları hub_config.json'dan
 ```
 
-Kurulum betiği (v2.1):
+Kurulum betiği (`install_mms_service.ps1` + `setup_service_acls.ps1`):
 - Mevcut `hub_config.json` ve `admin_secret.txt` dosyalarını **asla ezmez** (güncellemede ayarlar korunur).
 - Sertifika yoksa, çalışan servise dokunmadan durur (fail-closed).
+- Dart `sqlite3` native-asset ikilisini (`sqlite3.dll`) üretim dizininde **üç konuma** (`bin\`, `bin\lib\` ve `$TargetBaseDir\lib\`) kopyalar ve başarısızlıkta önceki `bin\` yedeğinden geri alır (`[ROLLBACK]`).
+- `setup_service_acls.ps1`: `bin\lib` + `lib\` için Service SID'ye salt okuma/çalıştırma (`RX`, `Users` sıfır erişim), `security\` için `pepper.dpapi` + `live_drive_sync_secret.dpapi` oluşturma/rotasyon amacıyla `(OI)(CI)M` verir; `install_mms_service.ps1` ise `security\admin_secret.txt` dosyasını Service SID için salt okunur (`:R`) kilidiyle sınırlar.
 - WinSW `install`/`start` çıkış kodlarını kontrol eder; servis `Running` değilse veya port yanıt vermiyorsa hata verir.
-- Betikler **Windows PowerShell 5.1** ile çalışır (Unicode içerenler UTF-8 BOM'ludur). PowerShell 7 gerekmez.
+- Betikler **Windows PowerShell 5.1** ile çalışır (`setup_service_acls.ps1`, `build_aot.ps1`, `configure_hub_firewall.ps1`, `uninstall_mms_service.ps1` UTF-8 BOM'ludur; `install_mms_service.ps1` saf ASCII'dir). PowerShell 7 gerekmez.
+- **OpenSSL Sürüm Notu:** Eski OpenSSL ikilileri `-addext` bayrağını desteklemiyorsa Kök CA (`ca.crt`) ve sunucu sertifikası (`server.crt`, zorunlu `IP:127.0.0.1` + LAN IP SAN) için `-config <dosya>.cnf -extensions v3_ca` / `-extfile <dosya>.cnf -extensions v3_req` kullanın.
+
+### 2.1. Pilot Dağıtım Paketi (`scripts/package_windows_release.ps1`)
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\package_windows_release.ps1 `
+  -GoogleDriveClientId "<DESKTOP_CLIENT_ID>" `
+  -GoogleDriveClientSecret "<DESKTOP_CLIENT_SECRET_OR_EMPTY>"
+```
+
+- Hub AOT derlemesini (`mms_backend.exe` + `sqlite3.dll`) geçici izole staging klasöründe (`$env:TEMP\mms_hub_aot_stage_*`) çalıştırır; çalışan bir test/geliştirme servisinin `sqlite3.dll` kilidine takılmaz.
+- `-GoogleDriveClientId` / `-GoogleDriveClientSecret` verilirse Windows masaüstü istemci (`flutter build windows --release`) içine `--dart-define=MMS_GDRIVE_CLIENT_ID=...` / `MMS_GDRIVE_CLIENT_SECRET=...` ile gömülür (verilmezse fail-safe devre dışı kalır).
+- Çıktı (`dist\windows_release\`): `client\` (`market_pos.exe` + Flutter runtime DLL'leri), `hub_bin\` (`mms_backend.exe`, `sqlite3.dll`, `lib\sqlite3.dll`, `MarketMMSService.exe`, `MarketMMSService.xml`, `hub_config.example.json`), `hub_scripts\` (4 Hub kurulum/ACL/güvenlik duvarı/kaldırma betiği) ve tüm paket dosyaları için `SHA256SUMS.txt`.
 
 Firewall betiği varsayılan olarak yalnızca **Private** profilde ve yalnızca **yerel alt ağdan** (`-RemoteAddress LocalSubnet`) gelen bağlantılara izin verir. Kasalar farklı bir alt ağdaysa: `configure_hub_firewall.ps1 -RemoteAddress "192.168.10.0/24,192.168.20.0/24"`. Mağaza ağının Windows'ta **Özel (Private)** olarak işaretlendiğini kontrol edin.
 

@@ -189,7 +189,7 @@ void main() {
         final snapDb = sqlite3.open(path);
         final check = snapDb.select('PRAGMA integrity_check;');
         expect(check.first['integrity_check'], equals('ok'));
-        snapDb.dispose();
+        snapDb.close();
       }
 
       // 3 isteğin de kesinlikle benzersiz dosya adı ürettiğini doğrula (çakışma ve üzerine yazma yok!)

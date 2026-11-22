@@ -205,7 +205,7 @@ void main() {
     expect(stock, equals(497000));
     print('[TEST 3] Güncel stok: $stock (Beklenen: 497000)');
 
-    rawDb.dispose();
+    rawDb.close();
     print('\n======================================================================');
     print('BAŞARILI: Windows Service Graceful Shutdown Düzeltmesi %100 Doğrulandı!');
     print('======================================================================\n');

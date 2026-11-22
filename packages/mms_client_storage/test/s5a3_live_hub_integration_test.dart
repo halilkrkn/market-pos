@@ -205,7 +205,7 @@ void main() {
         ('$testDeviceId', 'Canlı Windows Test Cihazı', '$tokenHash', '$salt', 1, 1);
     ''');
 
-    rawMaster.dispose();
+    rawMaster.close();
 
     // İstemci yerel veritabanını hazırla
     clientDb = ClientDatabase(File(clientDbPath));
@@ -377,6 +377,6 @@ void main() {
     expect(masterMeatStockAfter, equals(99500)); // Stok değişmedi
     expect(masterMilkStockAfter, equals(48750)); // Stok değişmedi
 
-    rawMaster.dispose();
+    rawMaster.close();
   });
 }

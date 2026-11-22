@@ -145,7 +145,7 @@ void main() {
         expect(rawSync, equals(2));
         expect(rawJournal, equals('wal'));
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -302,7 +302,7 @@ void main() {
         final salesCount = rawDb.select('SELECT COUNT(*) as cnt FROM sales;').first['cnt'] as int;
         expect(salesCount, equals(3));
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -337,7 +337,7 @@ void main() {
         expect(server.lifecycle.lastCheckpointResult?.busy, equals(1));
       } finally {
         lockerDb.execute('ROLLBACK;');
-        lockerDb.dispose();
+        lockerDb.close();
       }
 
       // Yeniden açıldığında satış kaydı WAL recovery ile eksiksiz okunmalıdır
@@ -411,7 +411,7 @@ void main() {
         final stockRow = rawDb.select("SELECT stock FROM products WHERE id = 'prod_cola';");
         expect(stockRow.first['stock'], equals(99000)); // 100000 - 1000 = 99000
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -465,7 +465,7 @@ void main() {
         final colaStock = rawDb.select("SELECT stock FROM products WHERE id = 'prod_cola';");
         expect(colaStock.first['stock'], equals(98000), reason: 'Stok sadece bir kez düşmelidir (100000 - 2000 = 98000).');
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -524,7 +524,7 @@ void main() {
         expect(sales.length, equals(1));
         expect(sales.first['total_amount'], equals(2500)); // Değiştirilmemiş olmalı
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -591,7 +591,7 @@ void main() {
         expect(ops.any((o) => o['idempotency_key'] == '$deviceId:1'), isTrue);
         expect(ops.any((o) => o['idempotency_key'] == '$deviceIdB:1'), isTrue);
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -651,7 +651,7 @@ void main() {
         final sale = rawDb.select("SELECT * FROM sales WHERE client_seq = 1;");
         expect(sale.first['device_id'], equals(deviceId));
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -692,7 +692,7 @@ void main() {
         final cola = rawDb.select("SELECT stock FROM products WHERE id = 'prod_cola';");
         expect(cola.first['stock'], equals(100000));
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 
@@ -735,7 +735,7 @@ void main() {
         expect(movements.first['quantity'], equals(-12000));
         expect(movements.first['movement_type'], equals('SATIS'));
       } finally {
-        rawDb.dispose();
+        rawDb.close();
       }
     });
 

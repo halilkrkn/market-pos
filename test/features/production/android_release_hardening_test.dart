@@ -131,4 +131,44 @@ void main() {
     );
     expect(patPlan, isNot(contains('202611')));
   });
+
+  test('Pilot dağıtım betikleri Android/Windows Drive OAuth define ve sqlite3.dll paketlemesini destekler', () {
+    final androidPkgFile = File('scripts/package_android_release.ps1');
+    final winPkgFile = File('scripts/package_windows_release.ps1');
+    expect(androidPkgFile.existsSync(), isTrue);
+    expect(winPkgFile.existsSync(), isTrue);
+
+    final androidScript = androidPkgFile.readAsStringSync();
+    expect(androidScript, contains('GoogleDriveWebClientId'));
+    expect(androidScript, contains('MMS_GDRIVE_WEB_CLIENT_ID='));
+
+    final winScript = winPkgFile.readAsStringSync();
+    expect(winScript, contains('GoogleDriveClientId'));
+    expect(winScript, contains('MMS_GDRIVE_CLIENT_ID='));
+    expect(winScript, contains('sqlite3.dll'));
+    expect(winScript, contains('uninstall_mms_service.ps1'));
+    expect(winScript, contains('MarketMMSService.exe'));
+    expect(winScript, contains('hub_config.example.json'));
+
+    for (final scriptFile in [androidPkgFile, winPkgFile]) {
+      final bytes = scriptFile.readAsBytesSync();
+      final hasBom = bytes.length >= 3 &&
+          bytes[0] == 0xEF &&
+          bytes[1] == 0xBB &&
+          bytes[2] == 0xBF;
+      expect(
+        hasBom || !bytes.any((b) => b > 0x7F),
+        isTrue,
+        reason: '${scriptFile.path} PowerShell 5.1 için UTF-8 BOM veya ASCII olmalı',
+      );
+      if (Platform.isWindows) {
+        final parseRes = Process.runSync('powershell.exe', [
+          '-NoProfile',
+          '-Command',
+          '[System.Management.Automation.Language.Parser]::ParseFile("${scriptFile.absolute.path}", [ref]\$null, [ref]\$null)',
+        ]);
+        expect(parseRes.exitCode, 0, reason: '${scriptFile.path} AST hatası: ${parseRes.stderr}');
+      }
+    }
+  });
 }

@@ -1,15 +1,15 @@
 # MARKET MMS — Owner (Proje Sahibi) İşlem Listesi
 
-*Tarih: 22 Kasım 2026 (Release 1.0 + Phase 1.1 + WP-1/K-05/A7 Commit `ebf726a` + Phase 2 `ADR-022` & WP-4 Yazılım Kapanışı) · Kaynaklar: [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`](docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md), [`docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md`](docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md), [`docs/LIVE_PROJECT_STATUS.md`](docs/LIVE_PROJECT_STATUS.md)*
+*Tarih: 22 Kasım 2026 (Commit 1 `ebf726a` + Commit 2 `3ebeda9` + Commit 3 Pilot 1.0 Sıfır-Hata Dağıtım & Canlı AOT Kapanışı) · Kaynaklar: [`docs/PILOT_1_0_FINAL_VERIFICATION_REPORT.md`](docs/PILOT_1_0_FINAL_VERIFICATION_REPORT.md), [`docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md`](docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md), [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/LIVE_PROJECT_STATUS.md`](docs/LIVE_PROJECT_STATUS.md)*
 
-Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam temizliği ve fiziksel kabul testi gerektiren maddeleriniz yer alır. Pilot 1.0 yazılım geliştirme kapsamı (`P-BLOCK-1..3`, `WP-1`, `A7` QR, `K-05` Hub provizyonu, `ADR-020` [`JOB_ID = 70201`], `Faz C` Drive Restore, `ADR-021` hibrit canlı senkronizasyon ve **`ADR-022` Phase 2 `google_sign_in: ^7.2.0`** Android OAuth implementasyonu) tümüyle tamamlanmış; **799/799 otomatik test**, **4 paket statik analiz (`0` hata/uyarı)**, **Windows Debug + Release (`market_pos.exe`)**, **Android Debug APK (`app-debug.apk`)**, **Hub Dart AOT (`mms_backend.exe`)**, **Android Release fail-closed kontrolü** ve **7 PowerShell betiği sözdizimi doğrulaması** geçmiştir. Ancak fiziksel kabul testleri (**`PAT-01…PAT-18`**), üretim Android imza anahtarı (**`B1`**), üretim Hub TLS sertifikaları (**`B2`**), Google Cloud OAuth kurulumu (**`C1/C2`**), ortam temizliği (**`D1–D4`**) ve resmî faz kabulleri (**`E2`**) dış donanım/hesap gerektirdiği için sahada henüz yürütülmemiştir (**`ALL SOFTWARE DELIVERED & VALIDATED (799/799) — PAT-01…18 BLOCKED`**).
+Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam temizliği ve fiziksel kabul testi gerektiren maddeleriniz yer alır. Pilot 1.0 yazılım geliştirme kapsamı (`P-BLOCK-1..3`, `WP-1`, `A7` QR, `K-05` Hub provizyonu, `ADR-020` [`JOB_ID = 70201`], `Faz C` Drive Restore, `ADR-021` hibrit canlı senkronizasyon, **`ADR-022` Android OAuth `google_sign_in: ^7.2.0`** ve Pilot kurulum/paketleme sertleştirmeleri) tümüyle tamamlanmış; **4/4 pakette `0` analyzer sorunu**, **800/800 otomatik test**, **Windows Pilot Release paketi (`dist\windows_release\`, `26/26` SHA-256 doğrulamalı)**, **Canlı Derlenmiş AOT `mms_backend.exe` duman testi (`7/7`)**, **Android Debug APK (`189.28 MB`)**, **Android Release fail-closed kontrolü** ve **7/7 PowerShell betiği sözdizimi/BOM doğrulaması** geçmiştir. Ancak fiziksel kabul testleri (**`PAT-01…PAT-18`**), üretim Android imza anahtarı (**`B1`**), üretim Hub TLS sertifikaları (**`B2`**), Google Cloud OAuth kurulumu (**`C1/C2`**), ortam temizliği (**`D1–D4`**) ve resmî faz kabulleri (**`E2`**) dış donanım/hesap gerektirdiği için sahada henüz yürütülmemiştir (**`ALL SOFTWARE DELIVERED & VALIDATED (800/800, 0 ANALYZER ISSUES) — PAT-01…18 BLOCKED`**).
 
 > **Bu belgede hiçbir gerçek parola, token, sertifika veya özel anahtar yoktur; eklemeyin.**
 
 **Sizin İçin Sıradaki Uygulama Sırası:**
 1. Temizlik (**`D1–D4`**) — `MarketMmsSpike01` kaldırılması (`D1`), eski test token/DB temizliği (`D2–D4`).
 2. Üretim anahtarları ve sertifikalar (**`B2`** + **`B1`**) — OpenSSL ile Hub `ca.crt`/`server.crt` (`IP:127.0.0.1` + sabit LAN IP SAN) ve `keytool` ile Android upload keystore + `android/key.properties` (`SHA-1`/`SHA-256` kaydedin).
-3. Google Cloud OAuth (**`C1/C2`**) — Drive API açma, OAuth izin ekranını `"In production"` yapma; aynı projede Desktop + Android (`SHA-1`) + Web (`serverClientId` → `--dart-define=MMS_GDRIVE_WEB_CLIENT_ID=...`) Client ID üretme (`K-05` sır dağıtımı zaten Hub üzerinden otomatizedir).
+3. Google Cloud OAuth (**`C1/C2`**) — Drive API açma, OAuth izin ekranını `"In production"` yapma; aynı projede Desktop + Android (`SHA-1`) + Web (`serverClientId`) Client ID üretip `package_windows_release.ps1` (`-GoogleDriveClientId`) / `package_android_release.ps1` (`-GoogleDriveWebClientId`) parametreleriyle derleme (`K-05` canlı senkron sırrı zaten Hub üzerinden otomatizedir).
 4. Pilot donanımı, fiziksel kabul testleri (**`PAT-01…PAT-18`**) ve resmî faz kabulleri (**`E2`**).
 
 ---
@@ -19,7 +19,7 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 | # | Madde | Tür | Durum / Engellediği iş | Öncelik |
 |---|---|---|---|---|
 | A1 | ADR-015…022 kararları | **Teknik Tamam (Yazılım)** | `ADR-015, 016, 018, 020, 021, 022` tamamı kodlandı ve otomatik testlerden geçti (`PAT-01…18` saha doğrulaması **BLOCKED**); `ADR-017` `PAT-12` sonrası kesin onay, `ADR-019` pilot sonrası (`v1.1`) | **Saha Testi (`PAT-01…18`)** |
-| A2 | Git commit ve sürüm takibi | **Commit 1 (`ebf726a`) + Commit 2 Tamamlandı** | WP-1/`A7`/`K-05`/Docs Commit 1 (`ebf726a`) ve WP-3 `ADR-022` + WP-4 Pilot 1.0 Yazılım Kapanış Commit 2 `origin/main`'e kaydedildi; 4 yerel dosya (`.vscode/settings.json`, `*.bat`) commit dışı korundu | Tamamlandı |
+| A2 | Git commit ve sürüm takibi | **Commit 1 (`ebf726a`) + Commit 2 (`3ebeda9`) + Commit 3 Tamamlandı** | WP-1/`A7`/`K-05`/Docs Commit 1 (`ebf726a`), WP-3/WP-4 Commit 2 (`3ebeda9`) ve Pilot dağıtım/analiz/canlı-AOT kapanışı Commit 3 `origin/main`'e kaydedilmiştir; 4 yerel dosya (`.vscode/settings.json`, `*.bat`) commit dışı korundu | Tamamlandı |
 | A3 | Kategori/KDV senkronu (ADR-019) | **DEFERRED_POST_PILOT (`v1.1`)** | Pilotta 7 geçici %20 KDV kısıtıyla kabul; pilot sonrası (`v1.1`) migrasyon | Orta (pilot sonrası) |
 | A4 | Discovery TLS (ADR-018 §2.2) & `P-BLOCK-1..3` | **IMPLEMENTED (Otomatik Testli)** | `DEC-REV-1..5` + `WP-1` (`networkError` DHCP/Wi-Fi reconnect) kodlandı; fiziksel doğrulama **`PAT-03` & `PAT-12`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-03`, `PAT-12`)** |
 | A5 | Android kapalıyken arka plan yedek (`ADR-020`) | **IMPLEMENTED (`JobScheduler`, `JOB_ID = 70201`)** | `MmsBackgroundBackupJobService` + headless `FlutterEngine` + Keystore ile harici bağımlılıksız uygulandı; fiziksel doğrulama **`PAT-16`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-16`)** |
@@ -63,11 +63,11 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 
 ### A2. Değişikliklerin commit edilmesi ve sürüm takibi
 - **Mevcut Durum:**
-  - Release 1.0 (`a02a3c6`), Phase 1.1 (`a118434`) ve Aşama 1/3/4/2 paketi (**`ebf726a`**) `origin/main` üzerinde kayıtlıdır; **WP-3 `ADR-022` Phase 2 ve WP-4 Pilot 1.0 yazılım/dokümantasyon kapanışı** da `origin/main`'e commit edilerek çalışma ağacı yalnızca 4 korunan yerel dosyayla temizlenir.
+  - Release 1.0 (`a02a3c6`), Phase 1.1 (`a118434`), Commit 1 (`ebf726a`), Commit 2 (`3ebeda9`) ve **Commit 3 (Pilot 1.0 sıfır-hata dağıtım/analiz/canlı-AOT kapanışı)** `origin/main`'e commit edilerek çalışma ağacı yalnızca 4 korunan yerel dosyayla temizlenmiştir.
   - Bilinçli olarak commit dışı bırakılan 4 korunan yerel dosya (`.vscode/settings.json`, `run_windows_client.bat`, `start_master_hub.bat`, `stop_master_hub.bat`) ve çalışma zamanı verileri/servisleri dokunulmadan korunur.
 - **Güvenlik kontrolü:**
-  - `git status --ignored` / `git diff --cached` içinde şu dosyalar **asla bulunmaz**: `manual_test_env/`, `*.db`, `*.key`, `pepper.dpapi`, `live_drive_sync_secret.dpapi`, `android/key.properties`, `*.jks`.
-- **Tamamlandığında yapılacak test:** Dört test süitinin (**`799/799`**), statik analizlerin (`0` hata/uyarı), Hub Dart AOT derlemesinin, Windows Debug+Release ve Android Debug + Android Release fail-closed kontrolünün tam yeşil olduğu doğrulanmıştır.
+  - `git status --ignored` / `git diff --cached` içinde şu dosyalar **asla bulunmaz**: `manual_test_env/`, `*.db`, `*.key`, `pepper.dpapi`, `live_drive_sync_secret.dpapi`, `android/key.properties`, `*.jks`, `dist/`.
+- **Tamamlandığında yapılacak test:** Dört test süitinin (**`800/800`**), statik analizlerin (`4/4` pakette `0` sorun), `dist\windows_release\` paketinin (`26/26` SHA-256), canlı derlenmiş AOT `mms_backend.exe` duman testinin (`7/7`), Windows Release + Android Debug (`189.28 MB`) + Android Release fail-closed kontrolünün ve `7/7` `.ps1` sözdizimi/BOM kontrolünün tam yeşil olduğu doğrulanmıştır.
 
 ### A3. Kategori / KDV senkronizasyonu kararı (SYNC-CAT, ADR-019 — **DEFERRED_POST_PILOT**)
 - **Karar Durumu:** Owner kararıyla pilot sonrasına **ertelendi**. Şema v3 → v4, `CATEGORY_UPSERT`, `PRODUCT_UPSERT` değişiklikleri ve kısmi KDV senkronizasyonu pilotta uygulanmayacaktır.
@@ -158,8 +158,8 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
   - **LAN IP SAN & `advertise_host`:** `server.crt` ayrıca Hub'ın aktif LAN IPv4 adres(ler)ini (ör. `IP:192.168.1.50`) içermelidir; çoklu NIC ortamında `hub_config.json` içinde `advertise_host` tanımlanabilir. LAN IP SAN uyuşmazlığında Hub yerel POS için açık kalır ancak `/api/v1/pairing/session` **`503`** döner (ayrıntı: [`docs/release/WINDOWS_HUB_RELEASE.md`](docs/release/WINDOWS_HUB_RELEASE.md) §1.1).
 - **Ne yapmalısınız?**
   1. **Hub dışında** güvenli bir bilgisayarda OpenSSL ile şunları üretin:
-     - Kök CA: `ca.key` ve `ca.crt`. Öneri: RSA 2048+, uzun ömürlü ve açık X.509 uzantılarıyla (`-addext "basicConstraints=critical,CA:TRUE"` `-addext "keyUsage=critical,keyCertSign,cRLSign"`); **`ca.crt` üzerinde sunucu SAN'ı bulunmamalıdır**.
-     - Sunucu sertifikası: `server.key` ve `server.crt`. CA ile imzalanmalı (`keyUsage=digitalSignature,keyEncipherment`, `extendedKeyUsage=serverAuth`). `subjectAltName` alanında **zorunlu `IP:127.0.0.1`** + Hub'ın sabit **LAN IPv4 adres(ler)i** + isteğe bağlı makine adı (`DNS:localhost,DNS:<hub-hostname>`) bulunmalıdır.
+     - Kök CA: `ca.key` ve `ca.crt`. Öneri: RSA 2048+, uzun ömürlü ve açık X.509 uzantılarıyla (`-addext "basicConstraints=critical,CA:TRUE"` `-addext "keyUsage=critical,keyCertSign,cRLSign"` — eski OpenSSL ikilileri `-addext` desteklemiyorsa `-config ca.cnf -extensions v3_ca` kullanın); **`ca.crt` üzerinde sunucu SAN'ı bulunmamalıdır**.
+     - Sunucu sertifikası: `server.key` ve `server.crt`. CA ile imzalanmalı (`keyUsage=digitalSignature,keyEncipherment`, `extendedKeyUsage=serverAuth`; eski OpenSSL'de `-extfile srv.cnf -extensions v3_req`). `subjectAltName` alanında **zorunlu `IP:127.0.0.1`** + Hub'ın sabit **LAN IPv4 adres(ler)i** + isteğe bağlı makine adı (`DNS:localhost,DNS:<hub-hostname>`) bulunmalıdır.
   2. `server.crt`, `server.key` ve `ca.crt` dosyalarını `%ProgramData%\MarketMMS\certs\` altına koyun.
   3. `ca.key` dosyasını **Hub'a koymayın**. Çevrimdışı ve şifreli saklayın. ACL betiği Hub'da `ca.key` bulursa kurulumu durdurur.
   4. `hub_config.json` → `tls` alanının `cert`, `key` ve `ca_cert` dosyalarını gösterdiğini ve çoklu NIC varsa `advertise_host` değerinin `server.crt` SAN ile eşleştiğini kontrol edin.
@@ -175,25 +175,25 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 ## C. Google Drive OAuth ve Hibrit Canlı Senkronizasyon Hazırlığı
 
 > [!NOTE]
-> **Kapsam Ayrımı (`ADR-022` — Pilot Kapsamına Dahil):** Android Google Drive entegrasyonu Owner kararıyla pilot kapsamına dahil edilmiştir (`ADR-022`, Seçenek A — `google_sign_in`, implementasyon Phase 2). Başlangıç yerel ağ testi için Windows Hub yerel yedek + USB çalışsa da, **Google Drive uzak yedek (`PAT-13`, `PAT-17`)** ve **`ADR-021` hibrit canlı senkronizasyon (`PAT-18`)** için `C1`, `C2` (Desktop + Android + Web `serverClientId`), `drive_live_sync_secret_v1` ve Phase 2 `ADR-022` kodlaması zorunlu ön koşullardır.
+> **Kapsam Ayrımı (`ADR-022` — Pilot Kapsamına Dahil & Kodlandı):** Android Google Drive entegrasyonu Owner kararıyla pilot kapsamına alınmış ve `WP-3` (`ADR-022`, `google_sign_in: ^7.2.0`) olarak kodlanıp otomatik test + Debug APK ile doğrulanmıştır (`PAT-13/17/18` saha testleri **`C1/C2`** bekler). Yerel ağ testi için Windows Hub yerel yedek + USB tek başına çalışsa da, **Google Drive uzak yedek (`PAT-13`, `PAT-17`)** ve **`ADR-021` hibrit canlı senkronizasyon (`PAT-18`)** için `C1` ve `C2` (Desktop + Android + Web `serverClientId`) zorunlu Owner ön koşullarıdır; `drive_live_sync_secret_v1` dağıtımı `K-05` ile Hub DPAPI üzerinden otomatiktir.
 
 ### C1. Google Cloud projesi
-- **Neden gerekli?** Drive yedekleme (`Faz C`) ve hibrit canlı senkronizasyon (`ADR-021`) yazılımı hazır olup sahte/mock transport ile test edilmiştir; gerçek Google hesabıyla hiç denenmemiştir (`PAT-13`, `PAT-17`, `PAT-18` **BLOCKED**).
+- **Neden gerekli?** Drive yedekleme (`Faz C`) ve hibrit canlı senkronizasyon (`ADR-021`) yazılımı hazır olup sahte/mock transport ve `android_google_sign_in_oauth_test.dart` (`9/9`) ile test edilmiştir; gerçek Google hesabıyla hiç denenmemiştir (`PAT-13`, `PAT-17`, `PAT-18` **BLOCKED**).
 - **Ne yapmalısınız?**
   1. Google Cloud Console'da mağazaya özel 2FA korumalı bir proje oluşturun.
   2. **Google Drive API**'yi etkinleştirin.
 - **Etkilenen:** Yok (dış hesap).
 - **Güvenlik uyarısı:** Projeyi market adına açılmış, iki adımlı doğrulamalı bir hesapta oluşturun.
-- **Tamamlandığında yapılacak test:** `C2` ve Phase 2 `ADR-022` sonrasında `PAT-13`, `PAT-17` ve (2 cihaz + `drive_live_sync_secret_v1` ile) `PAT-18`.
+- **Tamamlandığında yapılacak test:** `C2` ve üretim derlemeleri sonrasında `PAT-13`, `PAT-17` ve `PAT-18`.
 
-### C2. Google OAuth yapılandırması ve `drive_live_sync_secret_v1`
+### C2. Google OAuth yapılandırması (`K-05` Hub canlı senkron sırrı dahil)
 - **Ne yapmalısınız?** [`docs/operations/BACKUP_AND_RESTORE_GUIDE.md`](docs/operations/BACKUP_AND_RESTORE_GUIDE.md) §4 ve [`docs/decisions/022-android-google-drive-oauth-design.md`](docs/decisions/022-android-google-drive-oauth-design.md) belgelerini izleyin:
   1. **OAuth Consent Screen:** Kapsam **yalnızca** `https://www.googleapis.com/auth/drive.file` olmalı ve 7 günlük token iptalinden kaçınmak için durum **`"In production"`** statüsüne geçirilmelidir.
-  2. **Desktop app OAuth Client ID (Windows):** Oluşturup Windows derlemesine `--dart-define=MMS_GDRIVE_CLIENT_ID=…` ile verin.
+  2. **Desktop app OAuth Client ID (Windows):** Oluşturup `scripts\package_windows_release.ps1 -GoogleDriveClientId "<ID>" -GoogleDriveClientSecret "<SECRET>"` ile paketleyin.
   3. **Android OAuth Client ID (`com.marketmms.market_pos`):** **Aynı Google Cloud projesinde** geliştirme (debug SHA-1) ve üretim (`B1` Release `market_mms_upload.jks` SHA-1; ileride Play kullanılırsa Play App Signing SHA-1) için tanımlayın (`SHA-256` değerini de denetim kaydına ekleyin).
-  4. **Web Application OAuth Client ID (`serverClientId` — `google_sign_in` v7+ için ZORUNLU):** Aynı Google Cloud projesinde bir **Web application** OAuth Client ID oluşturun; yalnızca Client ID string'i Android derlemesine (`--dart-define=MMS_GDRIVE_WEB_CLIENT_ID=…`, Phase 2) verilir, Web `client_secret` **asla** APK'ya konulmaz.
-  5. **`drive_live_sync_secret_v1`:** `ADR-021` hibrit canlı senkronizasyonu (`MARKET MMS LiveSync`) için yedek parolasından bağımsız yüksek entropili gizliyi mağaza cihazlarına güvenli kanaldan dağıtın.
-- **Etkilenen:** Derleme komutu ve güvenli depo (kimlik/gizli değerler asla Git deposuna yazılmaz).
+  4. **Web Application OAuth Client ID (`serverClientId` — `google_sign_in` v7+ için ZORUNLU):** Aynı Google Cloud projesinde bir **Web application** OAuth Client ID oluşturun ve `scripts\package_android_release.ps1 -GoogleDriveWebClientId "<WEB_CLIENT_ID>"` ile derleyin (Web `client_secret` **asla** APK'ya konulmaz).
+  5. **`drive_live_sync_secret_v1` (`K-05` Otomatik):** `ADR-021` hibrit canlı senkronizasyonu (`MARKET MMS LiveSync`) sırrı Hub'da DPAPI (`live_drive_sync_secret.dpapi`) ile otomatik üretilir ve eşleştirilmiş cihazlara TLS `GET /api/v1/sync/live-drive-config` üzerinden dağıtılır (manuel dağıtım gerekmez; rotasyon için `POST /api/v1/admin/live-drive-secret/rotate` kullanılır).
+- **Etkilenen:** Derleme parametreleri (`MMS_GDRIVE_CLIENT_ID`, `MMS_GDRIVE_CLIENT_SECRET`, `MMS_GDRIVE_WEB_CLIENT_ID`) ve Hub DPAPI deposu (kimlik/gizli değerler asla Git deposuna yazılmaz).
 - **Güvenlik uyarısı:**
   - Geniş kapsam (`drive`) eklemeyin.
   - OAuth client secret veya `drive_live_sync_secret_v1` değerini APK'ya, depoya, loglara veya SQLite tablolarına yazmayın.

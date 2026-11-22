@@ -284,7 +284,7 @@ void main() {
       final snapshotProductsCount = snapshotRawDb.select('SELECT COUNT(*) as cnt FROM products;').first['cnt'];
       expect(snapshotProductsCount, equals(originalProductsCount));
 
-      snapshotRawDb.dispose();
+      snapshotRawDb.close();
     });
 
     test('Kontrollü Restore: Snapshot yedeğinden veritabanı geri yüklenebilmeli ve tutarlı çalışmalıdır', () async {

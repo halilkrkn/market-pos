@@ -44,17 +44,34 @@ if (!(Test-Path $backendExeSrc)) {
     & "$scriptDir\build_aot.ps1"
 }
 
+$sqliteDllCandidates = @(
+    (Join-Path $spikeRoot "build\sqlite3.dll"),
+    (Join-Path $spikeRoot "build\lib\sqlite3.dll"),
+    (Join-Path $spikeRoot "build\bundle\bundle\lib\sqlite3.dll")
+)
+$sqliteDllSrc = $sqliteDllCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+if ([string]::IsNullOrWhiteSpace($sqliteDllSrc)) {
+    throw "HATA: sqlite3.dll bulunamadi ($spikeRoot\build\). Once build_aot.ps1 calistirin."
+}
+
 # 3. Dizin Yapisi ve Temel NTFS ACL Yapilandirmasi
 Write-Host "[1/5] Hedef dizin ve NTFS ACL yapilandiriliyor: $TargetBaseDir ..." -ForegroundColor Yellow
 & "$scriptDir\setup_service_acls.ps1" -BaseDir $TargetBaseDir -ServiceName $ServiceName
 
 # 4. Hedef yollar
 $targetBinDir = Join-Path $TargetBaseDir "bin"
+$targetBinLibDir = Join-Path $targetBinDir "lib"
+$targetRootLibDir = Join-Path $TargetBaseDir "lib"
 $previousBinDir = Join-Path $TargetBaseDir "bin.previous"
 $deployedWrapperExe = Join-Path $targetBinDir "MarketMMSService.exe"
 $deployedWrapperXml = Join-Path $targetBinDir "MarketMMSService.xml"
 $deployedBackendExe = Join-Path $targetBinDir "mms_backend.exe"
-if (!(Test-Path $targetBinDir)) { New-Item -ItemType Directory -Path $targetBinDir -Force | Out-Null }
+$deployedSqliteDll = Join-Path $targetBinDir "sqlite3.dll"
+$deployedBinLibSqliteDll = Join-Path $targetBinLibDir "sqlite3.dll"
+$deployedRootLibSqliteDll = Join-Path $targetRootLibDir "sqlite3.dll"
+foreach ($dirPath in @($targetBinDir, $targetBinLibDir, $targetRootLibDir)) {
+    if (!(Test-Path $dirPath)) { New-Item -ItemType Directory -Path $dirPath -Force | Out-Null }
+}
 
 # 4b. REL-01: Tek yapilandirma kaynagi (config\hub_config.json)
 #     Mevcut yapilandirma ASLA uzerine yazilmaz (guncellemede ayarlar ve sirlar korunur).
@@ -123,6 +140,18 @@ function Install-AndStartMmsService {
     $qsidOutput = sc.exe qsidtype $ServiceName 2>&1
     Write-Host "  -> SCM Yapilandirma Durumu: $qsidOutput"
 
+    # admin_secret.txt dosyasini servis icin salt-okunur (:R) olarak kilitle
+    if (Test-Path $adminSecretFile) {
+        $sidSvc = "NT SERVICE\$ServiceName"
+        try {
+            $sidSvc = "*" + (New-Object System.Security.Principal.NTAccount("NT SERVICE\$ServiceName")).Translate([System.Security.Principal.SecurityIdentifier]).Value
+        } catch {}
+        & icacls $adminSecretFile /inheritance:r /grant:r "*S-1-5-18:F" /grant:r "*S-1-5-32-544:F" /grant:r "${sidSvc}:R" | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "HATA: admin_secret.txt salt-okunur ACL atamasi basarisiz oldu ($LASTEXITCODE)."
+        }
+    }
+
     $startRes = & "$deployedWrapperExe" start 2>&1
     if ($LASTEXITCODE -ne 0) { throw "HATA: Servis baslatilamadi ($LASTEXITCODE): $startRes" }
     Write-Host "  -> $startRes" -ForegroundColor Green
@@ -153,7 +182,7 @@ $hasPrevious = $false
 if (Test-Path $deployedBackendExe) {
     if (Test-Path $previousBinDir) { Remove-Item -Recurse -Force $previousBinDir }
     New-Item -ItemType Directory -Path $previousBinDir -Force | Out-Null
-    foreach ($f in @($deployedWrapperExe, $deployedWrapperXml, $deployedBackendExe)) {
+    foreach ($f in @($deployedWrapperExe, $deployedWrapperXml, $deployedBackendExe, $deployedSqliteDll)) {
         if (Test-Path $f) { Copy-Item -Path $f -Destination $previousBinDir -Force }
     }
     $hasPrevious = $true
@@ -164,6 +193,9 @@ Write-Host "[3/5] Servis ikilileri ProgramData dizinine kopyalaniyor..." -Foregr
 Copy-Item -Path $wrapperExeSrc -Destination $deployedWrapperExe -Force
 Copy-Item -Path $wrapperXmlSrc -Destination $deployedWrapperXml -Force
 Copy-Item -Path $backendExeSrc -Destination $deployedBackendExe -Force
+Copy-Item -Path $sqliteDllSrc -Destination $deployedSqliteDll -Force
+Copy-Item -Path $sqliteDllSrc -Destination $deployedBinLibSqliteDll -Force
+Copy-Item -Path $sqliteDllSrc -Destination $deployedRootLibSqliteDll -Force
 
 # 7-9. Kur, SID ata, baslat, saglik kontrolu. Basarisizsa onceki ikililere otomatik don.
 Write-Host "[4/5] WinSW v2.12.0 ile servis kuruluyor ve baslatiliyor: $ServiceName ..." -ForegroundColor Yellow
@@ -178,6 +210,12 @@ try {
     foreach ($name in @("MarketMMSService.exe", "MarketMMSService.xml", "mms_backend.exe")) {
         $prev = Join-Path $previousBinDir $name
         if (Test-Path $prev) { Copy-Item -Path $prev -Destination (Join-Path $targetBinDir $name) -Force }
+    }
+    $prevSqlite = Join-Path $previousBinDir "sqlite3.dll"
+    if (Test-Path $prevSqlite) {
+        Copy-Item -Path $prevSqlite -Destination $deployedSqliteDll -Force
+        Copy-Item -Path $prevSqlite -Destination $deployedBinLibSqliteDll -Force
+        Copy-Item -Path $prevSqlite -Destination $deployedRootLibSqliteDll -Force
     }
     $srv = Install-AndStartMmsService
     throw "GUNCELLEME BASARISIZ: Onceki surume geri donuldu ve servis calisiyor. Neden: $installError. Yeni surum veritabani semasini yukselttiyse bkz. docs/release/WINDOWS_HUB_RELEASE.md (Guncelleme ve Geri Donus)."

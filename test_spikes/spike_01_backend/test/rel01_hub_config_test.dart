@@ -326,6 +326,19 @@ void main() {
       expect(s, contains('[ROLLBACK]'));
       expect(s, contains(r'if ($LASTEXITCODE -ne 0) { throw "HATA: WinSW install basarisiz'));
       expect(s, isNot(contains('Remove-Item -Recurse -Force \$configDir')));
+
+      // Dart 3.13 native asset sqlite3.dll kurulumu, rollback ve admin_secret.txt :R ACL kilidi
+      expect(s, contains('sqlite3.dll'));
+      expect(s, contains(r'$deployedBinLibSqliteDll'));
+      expect(s, contains(r'$deployedRootLibSqliteDll'));
+      expect(s, contains(r'$prevSqlite'));
+      expect(s, contains(r'${sidSvc}:R'));
+
+      final aclScript = File(p.join(root, 'scripts', 'setup_service_acls.ps1')).readAsStringSync();
+      expect(aclScript, contains('"lib"'));
+      expect(aclScript, contains(r'$BaseDir\lib'));
+      expect(aclScript, contains(r'$BaseDir\security'));
+      expect(aclScript, contains(r'${sidTarget}:(OI)(CI)M'));
     });
 
     test('ADR-015 H-3 & M-1: --config ile başlatılan başlangıç akışı ADMIN_SECRET ve ROOT_CA_CERT_FILE env sızıntısını reddeder; eksik backup_dir System32 yerine config/backups olur', () async {
