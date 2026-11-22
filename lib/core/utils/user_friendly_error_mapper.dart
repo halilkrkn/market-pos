@@ -94,8 +94,20 @@ abstract final class UserFriendlyErrorMapper {
     }
 
     // Yığın izi (stack trace) veya aşırı teknik sınıf adlarını gizle
-    final firstLine = redacted.split('\n').first.trim();
-    if (firstLine.contains('#0 ') || firstLine.length > 220) {
+    var firstLine = redacted.split('\n').first.trim();
+    const technicalPrefixes = <String>[
+      'Bad state:',
+      'Invalid argument(s):',
+      'RangeError:',
+      'Exception:',
+    ];
+    for (final prefix in technicalPrefixes) {
+      if (firstLine.startsWith(prefix)) {
+        firstLine = firstLine.substring(prefix.length).trim();
+        break;
+      }
+    }
+    if (firstLine.isEmpty || firstLine.contains('#0 ') || firstLine.length > 220) {
       return fallback;
     }
 

@@ -321,5 +321,48 @@ void main() {
       final finalStock = (await repo.getProductById(milkProd.id))!.stock;
       expect(finalStock, equals(initialMilkStock)); // Asla initialStock + 1000 olmamalı!
     });
+
+    test('getRefundTotalsBySaleIds iade toplamlarını doğru toplar', () async {
+      expect(await repo.getRefundTotalsBySaleIds(const []), isEmpty);
+
+      final saleWithRefunds = await repo.createOfflineSale(
+        deviceId: testDeviceId,
+        paymentMethod: 'CARD',
+        items: [CartItemInput.units(milkProd.id, 3)], // 90.00 TL
+      );
+      final saleWithoutRefunds = await repo.createOfflineSale(
+        deviceId: testDeviceId,
+        paymentMethod: 'CASH',
+        items: [CartItemInput.units(milkProd.id, 1)], // 30.00 TL
+      );
+
+      final detail = await repo.getSaleDetail(saleWithRefunds.saleId);
+      final itemId = detail!.items.first.id;
+      await repo.refundSale(
+        saleId: saleWithRefunds.saleId,
+        items: [
+          RefundItemInput(saleItemId: itemId, quantity: 1000, productCondition: 'SELLABLE'),
+        ],
+        reason: '1. kısmi iade',
+        deviceId: testDeviceId,
+      );
+      await repo.refundSale(
+        saleId: saleWithRefunds.saleId,
+        items: [
+          RefundItemInput(saleItemId: itemId, quantity: 500, productCondition: 'DAMAGED'),
+        ],
+        reason: '2. kısmi iade',
+        deviceId: testDeviceId,
+      );
+
+      final totals = await repo.getRefundTotalsBySaleIds([
+        saleWithRefunds.saleId,
+        saleWithoutRefunds.saleId,
+        'non_existing_sale',
+      ]);
+      expect(totals[saleWithRefunds.saleId], equals(4500)); // 30.00 + 15.00 TL
+      expect(totals.containsKey(saleWithoutRefunds.saleId), isFalse);
+      expect(totals.containsKey('non_existing_sale'), isFalse);
+    });
   });
 }

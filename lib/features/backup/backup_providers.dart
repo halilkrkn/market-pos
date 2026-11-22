@@ -88,6 +88,12 @@ final backgroundBackupSchedulerProvider =
   return const MethodChannelBackgroundBackupScheduler();
 });
 
+/// Uygulama açılışında zamanlanmış yerel / Android arka plan yedek denetleyicisinin
+/// otomatik başlatılıp başlatılmayacağını denetler (`main.dart` içinde `true` yapılır).
+final backupAutoScheduleLifecycleEnabledProvider = Provider<bool>((ref) {
+  return false;
+});
+
 /// Faz 3 / ADR-020: Zamanlanmış yerel ve Android arka plan yedek denetleyicisi.
 final backupScheduleControllerProvider =
     StateNotifierProvider<BackupScheduleController, BackupScheduleViewState>((ref) {

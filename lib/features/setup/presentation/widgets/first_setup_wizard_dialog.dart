@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/theme/design_tokens.dart';
+import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart';
 import '../../../sync/application/hub_connection_notifier.dart';
 import '../../setup_providers.dart';
@@ -100,7 +101,10 @@ class _FirstSetupWizardDialogState
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _errorMessage = 'Kurulum kaydedilemedi: $e';
+        _errorMessage = UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Kurulum kaydedilemedi. Girilen bilgileri kontrol edip tekrar deneyin.',
+        );
       });
     } finally {
       if (mounted) {

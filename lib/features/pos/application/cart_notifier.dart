@@ -51,7 +51,7 @@ class CartNotifier extends StateNotifier<CartState> {
         case BarcodeLookupStatus.notFoundOffline:
           state = state.copyWith(
             errorMessage:
-                'Barkod yerel katalogda bulunamadı (${result.barcode}). Çevrimdışı ortamda tanımsız ürün sepete eklenemez veya oluşturulamaz; yeni ürün için Master Hub bağlantısı gereklidir.',
+                'Barkod yerel katalogda bulunamadı (${result.barcode}). Tanımsız ürün doğrudan sepete eklenemez; ürünü Ürünler ekranından ekleyebilir veya Master Hub ile senkronize edebilirsiniz.',
             infoMessage: null,
           );
           return false;

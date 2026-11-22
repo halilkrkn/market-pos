@@ -1143,6 +1143,32 @@ class ClientStorageRepository {
     );
   }
 
+  /// Verilen satış kimlikleri için toplam iade tutarlarını (kuruş) döner.
+  Future<Map<String, int>> getRefundTotalsBySaleIds(
+    Iterable<String> saleIds,
+  ) async {
+    final uniqueIds = saleIds.where((id) => id.isNotEmpty).toSet().toList();
+    if (uniqueIds.isEmpty) return const <String, int>{};
+
+    final totals = <String, int>{};
+    const chunkSize = 400;
+    for (var offset = 0; offset < uniqueIds.length; offset += chunkSize) {
+      final chunk = uniqueIds.sublist(
+        offset,
+        offset + chunkSize > uniqueIds.length
+            ? uniqueIds.length
+            : offset + chunkSize,
+      );
+      final rows = await (db.select(db.localRefunds)
+            ..where((r) => r.saleId.isIn(chunk)))
+          .get();
+      for (final row in rows) {
+        totals[row.saleId] = (totals[row.saleId] ?? 0) + row.totalRefundAmount;
+      }
+    }
+    return totals;
+  }
+
   // =========================================================================
   // FAZ 1.3.3: TAM SATIŞ İPTALİ (BR-POS-08)
   // =========================================================================

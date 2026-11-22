@@ -13,6 +13,7 @@ import 'core/security/windows_dpapi_token_store.dart';
 import 'core/storage/local_database_service.dart';
 import 'core/theme/theme_preference_store.dart';
 import 'core/theme/theme_provider.dart';
+import 'features/backup/backup_providers.dart';
 import 'features/diagnostics/application/system_status_notifier.dart';
 import 'features/security/data/device_pairing_client.dart';
 import 'features/setup/data/local_setup_config_store.dart';
@@ -127,6 +128,7 @@ Future<void> main() async {
             .overrideWithValue(initialHubConnectionState),
         hubAutoDiscoveryLifecycleEnabledProvider
             .overrideWithValue(autoDiscoveryEnabled),
+        backupAutoScheduleLifecycleEnabledProvider.overrideWithValue(true),
         themePreferenceStoreProvider.overrideWithValue(themeStore),
         initialThemeModeProvider.overrideWithValue(initialThemeMode),
         driveAuthorizedRegistryStoreProvider.overrideWithValue(registryStore),

@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
+import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../data/sales_repository.dart';
 import '../domain/models/sale_history_filter.dart';
 import 'sales_history_state.dart';
@@ -7,10 +8,14 @@ import 'sales_history_state.dart';
 class SalesHistoryNotifier extends StateNotifier<SalesHistoryState> {
   final SalesRepository _repository;
   final String _deviceId;
+  final Future<void> Function()? onSaleMutated;
   int _loadEpoch = 0;
 
-  SalesHistoryNotifier(this._repository, this._deviceId)
-      : super(const SalesHistoryState()) {
+  SalesHistoryNotifier(
+    this._repository,
+    this._deviceId, {
+    this.onSaleMutated,
+  }) : super(const SalesHistoryState()) {
     loadSales();
   }
 
@@ -33,7 +38,10 @@ class SalesHistoryNotifier extends StateNotifier<SalesHistoryState> {
       if (!mounted || requestEpoch != _loadEpoch) return;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Satış geçmişi yüklenirken hata oluştu: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Satış geçmişi yüklenirken bir hata oluştu.',
+        ),
       );
     }
   }
@@ -58,7 +66,10 @@ class SalesHistoryNotifier extends StateNotifier<SalesHistoryState> {
       if (!mounted) return;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Fiş detayları yüklenemedi: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Fiş detayları yüklenemedi.',
+        ),
       );
     }
   }
@@ -97,12 +108,16 @@ class SalesHistoryNotifier extends StateNotifier<SalesHistoryState> {
         actionSuccessMessage:
             'Satış başarıyla iptal edildi ve stoklar iade edildi.',
       );
+      await _notifySaleMutated();
       return true;
     } catch (e) {
       if (!mounted) return false;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Satış iptali başarısız oldu: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Satış iptali tamamlanamadı. Lütfen tekrar deneyin.',
+        ),
       );
       return false;
     }
@@ -138,14 +153,28 @@ class SalesHistoryNotifier extends StateNotifier<SalesHistoryState> {
         selectedSaleDetail: updatedDetail,
         actionSuccessMessage: 'İade işlemi başarıyla tamamlandı.',
       );
+      await _notifySaleMutated();
       return true;
     } catch (e) {
       if (!mounted) return false;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'İade işlemi başarısız oldu: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'İade işlemi tamamlanamadı. Lütfen tekrar deneyin.',
+        ),
       );
       return false;
+    }
+  }
+
+  Future<void> _notifySaleMutated() async {
+    final callback = onSaleMutated;
+    if (callback == null) return;
+    try {
+      await callback();
+    } catch (_) {
+      // Yerel satış mutasyonu işlendi; dış gözlemci hatası sonucu bozmaz.
     }
   }
 }

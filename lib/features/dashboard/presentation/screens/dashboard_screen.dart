@@ -7,6 +7,7 @@ import '../../../../core/design_system/design_system.dart';
 import '../../../../core/platform/mms_ui_profile.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/date_formatter.dart';
+import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../diagnostics/application/system_status_notifier.dart';
 import '../../../pos/domain/money.dart';
 import '../../../sales/presentation/widgets/sale_detail_dialog.dart';
@@ -80,7 +81,10 @@ class DashboardScreen extends ConsumerWidget {
                 message: 'Mağaza verileri hazırlanıyor...',
               ),
               error: (err, _) => AppErrorState(
-                message: 'Dashboard verileri okunamadı: $err',
+                message: UserFriendlyErrorMapper.map(
+                  err,
+                  fallback: 'Dashboard verileri şu anda yüklenemedi. Lütfen tekrar deneyin.',
+                ),
                 onRetry: () => ref.invalidate(dashboardSnapshotProvider),
               ),
               data: (data) => Column(

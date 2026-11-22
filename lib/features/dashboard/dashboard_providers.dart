@@ -47,9 +47,10 @@ class DashboardSnapshot {
 /// Mevcut yerel Drift SQLite verilerinden (local_sales, local_products)
 /// gerçek zamanlı Dashboard özetini hesaplar. Sahte veri üretmez.
 final dashboardSnapshotProvider = FutureProvider<DashboardSnapshot>((ref) async {
-  // Sistem durumu yenilendiğinde (ör. satış sonrası) otomatik güncellenir
+  // Sistem durumu yenilendiğinde (satış, iptal, iade, ürün/stok, sync sonrası) güncellenir
   ref.watch(systemStatusProvider.select((s) => s.localSalesCount));
   ref.watch(systemStatusProvider.select((s) => s.localProductsCount));
+  ref.watch(systemStatusProvider.select((s) => s.localMetricsRevision));
 
   final dbService = ref.watch(localDatabaseServiceProvider);
   final repo = dbService.repository;
@@ -58,7 +59,16 @@ final dashboardSnapshotProvider = FutureProvider<DashboardSnapshot>((ref) async 
   final todayStart = DateTime(now.year, now.month, now.day);
   final sevenDaysAgo = todayStart.subtract(const Duration(days: 6));
 
-  final recentSales = await repo.getSalesHistory(limit: 200);
+  final periodSales = await repo.getSalesHistory(
+    startDate: sevenDaysAgo,
+    limit: 2000,
+  );
+  final recentSales = periodSales.isNotEmpty
+      ? periodSales.take(8).toList()
+      : await repo.getSalesHistory(limit: 8);
+  final refundTotalsBySaleId = await repo.getRefundTotalsBySaleIds(
+    periodSales.map((s) => s.id),
+  );
   final activeProducts = await repo.getProducts(isActive: true, limit: 500);
 
   int todayTotal = 0;
@@ -75,23 +85,32 @@ final dashboardSnapshotProvider = FutureProvider<DashboardSnapshot>((ref) async 
     dayCounts[day] = 0;
   }
 
-  for (final sale in recentSales) {
-    if (sale.status == 'CANCELLED') continue;
-    final saleDay =
-        DateTime(sale.createdAt.year, sale.createdAt.month, sale.createdAt.day);
+  for (final sale in periodSales) {
+    if (sale.status == 'CANCELLED' || sale.status == 'REFUNDED') continue;
+    final refundedCents = refundTotalsBySaleId[sale.id] ?? 0;
+    final netAmountCents =
+        (sale.totalAmount - refundedCents).clamp(0, sale.totalAmount);
+    if (netAmountCents <= 0) continue;
+
+    final localCreatedAt = sale.createdAt.toLocal();
+    final saleDay = DateTime(
+      localCreatedAt.year,
+      localCreatedAt.month,
+      localCreatedAt.day,
+    );
 
     if (saleDay == todayStart) {
-      todayTotal += sale.totalAmount;
+      todayTotal += netAmountCents;
       todayCount++;
       if (sale.paymentMethod == 'CASH') {
-        todayCash += sale.totalAmount;
+        todayCash += netAmountCents;
       } else {
-        todayCard += sale.totalAmount;
+        todayCard += netAmountCents;
       }
     }
 
     if (dayTotals.containsKey(saleDay)) {
-      dayTotals[saleDay] = dayTotals[saleDay]! + sale.totalAmount;
+      dayTotals[saleDay] = dayTotals[saleDay]! + netAmountCents;
       dayCounts[saleDay] = dayCounts[saleDay]! + 1;
     }
   }

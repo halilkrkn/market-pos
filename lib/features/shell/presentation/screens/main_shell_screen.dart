@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/platform/mms_ui_profile.dart';
 import '../../../../core/theme/design_tokens.dart';
+import '../../../backup/backup_providers.dart';
 import '../../../catalog/presentation/screens/catalog_screen.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
 import '../../../diagnostics/presentation/screens/diagnostics_view.dart';
@@ -28,6 +29,9 @@ class MainShellScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final uiProfile = ref.watch(mmsUiProfileProvider);
+    if (ref.watch(backupAutoScheduleLifecycleEnabledProvider)) {
+      ref.watch(backupScheduleControllerProvider);
+    }
     final selectedDestination = ref.watch(activeDestinationProvider);
     final windowClass = context.windowClass;
     final setupConfig = ref.watch(setupConfigProvider);

@@ -118,6 +118,15 @@ class _SalesHistoryScreenState extends ConsumerState<SalesHistoryScreen> {
       firstDate: DateTime(now.year - 1),
       lastDate: DateTime(now.year + 1),
       initialDateRange: initialRange,
+      helpText: 'Tarih Aralığı Seçin',
+      cancelText: 'İptal',
+      confirmText: 'Uygula',
+      saveText: 'Uygula',
+      fieldStartLabelText: 'Başlangıç Tarihi',
+      fieldEndLabelText: 'Bitiş Tarihi',
+      errorFormatText: 'Geçersiz tarih biçimi',
+      errorInvalidText: 'Geçersiz tarih',
+      errorInvalidRangeText: 'Geçersiz tarih aralığı',
     );
 
     if (!mounted || picked == null) return;

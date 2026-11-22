@@ -8,6 +8,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   final CatalogRepository _repository;
   final String _deviceId;
   final void Function()? onProductChanged;
+  int _loadEpoch = 0;
 
   CatalogNotifier(
     this._repository,
@@ -27,22 +28,35 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   Future<void> loadCategories() async {
     try {
       final categories = await _repository.getCategories(includeInactive: true);
+      if (!mounted) return;
       state = state.copyWith(categories: categories);
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Kategoriler yüklenemedi: $e');
+      if (!mounted) return;
+      state = state.copyWith(
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Kategoriler yüklenemedi.',
+        ),
+      );
     }
   }
 
-  Future<void> loadProducts() async {
-    state = state.copyWith(isLoading: true, clearMessages: true);
+  Future<void> loadProducts({bool silent = false}) async {
+    if (!mounted) return;
+    final requestEpoch = ++_loadEpoch;
+    if (!silent) {
+      state = state.copyWith(isLoading: true, clearMessages: true);
+    }
     try {
       final products = await _repository.getProducts(
         searchQuery: state.searchQuery,
         categoryId: state.selectedCategoryId,
         isActive: state.filterIsActive,
       );
+      if (!mounted || requestEpoch != _loadEpoch) return;
       state = state.copyWith(isLoading: false, products: products);
     } catch (e) {
+      if (!mounted || requestEpoch != _loadEpoch) return;
       state = state.copyWith(
         isLoading: false,
         errorMessage: UserFriendlyErrorMapper.map(
@@ -77,10 +91,17 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     try {
       await _repository.createCategory(name: name, parentId: parentId);
       await loadCategories();
+      if (!mounted) return false;
       state = state.copyWith(successMessage: 'Kategori başarıyla oluşturuldu.');
       return true;
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Kategori oluşturulamadı: $e');
+      if (!mounted) return false;
+      state = state.copyWith(
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Kategori oluşturulamadı.',
+        ),
+      );
       return false;
     }
   }
@@ -99,10 +120,17 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         isActive: isActive,
       );
       await loadCategories();
+      if (!mounted) return false;
       state = state.copyWith(successMessage: 'Kategori başarıyla güncellendi.');
       return true;
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Kategori güncellenemedi: $e');
+      if (!mounted) return false;
+      state = state.copyWith(
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Kategori güncellenemedi.',
+        ),
+      );
       return false;
     }
   }
@@ -111,10 +139,17 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     try {
       await _repository.deactivateCategory(id);
       await loadCategories();
+      if (!mounted) return false;
       state = state.copyWith(successMessage: 'Kategori pasife alındı.');
       return true;
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Kategori pasife alınamadı: $e');
+      if (!mounted) return false;
+      state = state.copyWith(
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Kategori pasife alınamadı.',
+        ),
+      );
       return false;
     }
   }
@@ -146,6 +181,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         deviceId: _deviceId,
       );
       await loadProducts();
+      if (!mounted) return false;
       onProductChanged?.call();
       state = state.copyWith(
         isLoading: false,
@@ -153,9 +189,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       );
       return true;
     } catch (e) {
+      if (!mounted) return false;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Ürün oluşturulamadı: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Ürün oluşturulamadı.',
+        ),
       );
       return false;
     }
@@ -189,6 +229,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         deviceId: _deviceId,
       );
       await loadProducts();
+      if (!mounted) return false;
       onProductChanged?.call();
       state = state.copyWith(
         isLoading: false,
@@ -196,9 +237,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
       );
       return true;
     } catch (e) {
+      if (!mounted) return false;
       state = state.copyWith(
         isLoading: false,
-        errorMessage: 'Ürün güncellenemedi: $e',
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Ürün güncellenemedi.',
+        ),
       );
       return false;
     }
@@ -208,11 +253,18 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     try {
       await _repository.deactivateProduct(id, deviceId: _deviceId);
       await loadProducts();
+      if (!mounted) return false;
       onProductChanged?.call();
       state = state.copyWith(successMessage: 'Ürün pasife alındı.');
       return true;
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Ürün pasife alınamadı: $e');
+      if (!mounted) return false;
+      state = state.copyWith(
+        errorMessage: UserFriendlyErrorMapper.map(
+          e,
+          fallback: 'Ürün pasife alınamadı.',
+        ),
+      );
       return false;
     }
   }
@@ -226,11 +278,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         loadCategories(),
         loadProducts(),
       ]);
+      if (!mounted) return;
       state = state.copyWith(
         isLoading: false,
         successMessage: 'Ürün kataloğu Hub ile başarıyla senkronize edildi.',
       );
     } catch (e) {
+      if (!mounted) return;
       state = state.copyWith(
         isLoading: false,
         errorMessage: UserFriendlyErrorMapper.map(
@@ -245,7 +299,14 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     try {
       return await _repository.getPriceHistory(productId);
     } catch (e) {
-      state = state.copyWith(errorMessage: 'Fiyat geçmişi yüklenemedi: $e');
+      if (mounted) {
+        state = state.copyWith(
+          errorMessage: UserFriendlyErrorMapper.map(
+            e,
+            fallback: 'Fiyat geçmişi yüklenemedi.',
+          ),
+        );
+      }
       return [];
     }
   }

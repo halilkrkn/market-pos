@@ -46,7 +46,7 @@ class SystemStatus {
   });
 
   factory SystemStatus.initial({
-    String backendUrl = 'https://127.0.0.1:8443',
+    String backendUrl = 'https://127.0.0.1:8945',
     String deviceId = 'POS-WIN-01',
     String localDbPath = '',
     OutboxSummary? outboxSummary,

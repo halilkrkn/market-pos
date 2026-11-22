@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
@@ -37,6 +38,7 @@ class StockOverviewData {
 final stockOverviewProvider = FutureProvider<StockOverviewData>((ref) async {
   ref.watch(systemStatusProvider.select((s) => s.localProductsCount));
   ref.watch(systemStatusProvider.select((s) => s.localSalesCount));
+  ref.watch(systemStatusProvider.select((s) => s.localMetricsRevision));
 
   final repo = ref.watch(localDatabaseServiceProvider).repository;
   final products = await repo.getProducts(isActive: true, limit: 500);
@@ -68,8 +70,23 @@ final stockReceiptProvider = StateNotifierProvider.autoDispose<
     repository: repo,
     readDeviceId: () => apiClient.deviceId,
     onStockCommitted: () async {
+      try {
+        await ref.read(systemStatusProvider.notifier).refreshLocalMetrics();
+      } catch (e, s) {
+        debugPrint(
+          '[stock_providers] onStockCommitted refreshLocalMetrics hatası: $e\n$s',
+        );
+      }
       ref.invalidate(stockOverviewProvider);
-      syncCoordinator.triggerSync(reason: SyncTriggerReason.productCommitted);
+      try {
+        await syncCoordinator.triggerSync(
+          reason: SyncTriggerReason.productCommitted,
+        );
+      } catch (e, s) {
+        debugPrint(
+          '[stock_providers] onStockCommitted triggerSync hatası: $e\n$s',
+        );
+      }
     },
   );
 });
