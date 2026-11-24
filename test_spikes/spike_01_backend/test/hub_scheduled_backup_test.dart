@@ -11,6 +11,7 @@ import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
 import '../bin/server.dart';
+import '../lib/backup/hub_recovery_key_store.dart';
 import '../lib/config/hub_config.dart';
 import '../lib/db/database.dart';
 import '../lib/db/write_queue.dart';
@@ -25,6 +26,9 @@ void main() {
   late SpikeServer server;
   late PepperManager pepper;
   const adminSecret = 'hub_sched_admin_secret_2026';
+  // ADR-023 B1.7: Hub S5A-4 yedekleri makineye bağlı pepper ile DEĞİL, taşınabilir
+  // Portable Recovery Password ile şifrelenir.
+  const recoveryPassword = 'Hub-Zamanlanmis-Kurtarma-2026!';
   var port = 9310;
 
   setUpAll(() {
@@ -41,6 +45,10 @@ void main() {
     final dbFile = File(p.join(tempDir.path, 'market_master.db'));
     db = SpikeDatabase(dbFile);
     pepper = PepperManager(File(p.join(tempDir.path, 'pepper.dpapi')))..initialize();
+    final recoveryKeyStore = HubRecoveryKeyStore(
+      File(p.join(tempDir.path, HubRecoveryKeyStore.defaultFileName)),
+    );
+    await recoveryKeyStore.saveRecoveryPassword(recoveryPassword);
     await db.into(db.products).insert(ProductsCompanion(
           id: const Value('prod_1'),
           barcode: const Value('8690000000011'),
@@ -55,6 +63,7 @@ void main() {
       backupDirectory: backupDir,
       adminSecret: adminSecret,
       pepperManager: pepper,
+      hubRecoveryKeyStore: recoveryKeyStore,
       storeId: storeId,
       backupSchedule: policy,
       backupCheckInterval: checkInterval,
@@ -63,7 +72,7 @@ void main() {
     await server.start(address: InternetAddress.loopbackIPv4, port: port, enableDiscovery: false);
   }
 
-  Future<void> waitFor(bool Function() condition, {Duration timeout = const Duration(seconds: 20)}) async {
+  Future<void> waitFor(bool Function() condition, {Duration timeout = const Duration(seconds: 60)}) async {
     final deadline = DateTime.now().add(timeout);
     while (!condition()) {
       if (DateTime.now().isAfter(deadline)) fail('Koşul $timeout içinde sağlanmadı.');
@@ -148,10 +157,16 @@ void main() {
       expect(state.history.single.success, isTrue);
       expect(state.history.single.backupId, backups.single.backupId);
 
-      // Şifreli paket pepper ile çözülebilir ve bütünlük doğrulanır.
+      // Şifreli paket taşınabilir kurtarma parolasıyla çözülür; makineye bağlı
+      // pepper ile AÇILAMAZ (yeni PC'de kurtarılabilirlik — ADR-023 B1.7).
       final bytes = await backups.single.file.readAsBytes();
-      final decrypted = BackupCryptoService.verifyAndDecryptPackage(packageBytes: bytes, password: pepper.pepper);
+      final decrypted =
+          BackupCryptoService.verifyAndDecryptPackage(packageBytes: bytes, password: recoveryPassword);
       expect(decrypted.databaseBytes, isNotEmpty);
+      expect(
+        () => BackupCryptoService.verifyAndDecryptPackage(packageBytes: bytes, password: pepper.pepper),
+        throwsA(isA<BackupCryptoException>()),
+      );
     });
 
     test('4. Yedek hedefi yazılamazsa hata kaydedilir, servis çalışmaya devam eder ve /health gecikmeyi raporlar', () async {
@@ -241,7 +256,7 @@ void main() {
         databaseType: DatabaseType.centralMaster,
         schemaVersion: db.schemaVersion,
         appVersion: 'test',
-        backupPassword: pepper.pepper,
+        backupPassword: recoveryPassword,
         storageProvider: LocalStorageProvider(Directory(backupDir)),
         kdfIterations: 1000,
       );

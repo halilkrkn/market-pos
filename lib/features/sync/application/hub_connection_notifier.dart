@@ -7,6 +7,7 @@ import 'package:mms_client_storage/mms_client_storage.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_response.dart';
+import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../../diagnostics/application/system_status_notifier.dart';
 import '../../setup/setup_providers.dart';
 import '../domain/hub_connection_state.dart';
@@ -510,7 +511,11 @@ class HubConnectionNotifier extends StateNotifier<HubConnectionState> {
         timeout: timeout,
       );
     } catch (e) {
-      debugPrint('[HubConnectionNotifier] UDP keşif hatası: $e');
+      debugPrint(
+        UserFriendlyErrorMapper.redactSecrets(
+          '[HubConnectionNotifier] UDP keşif hatası: $e',
+        ),
+      );
     }
 
     if (_isDisposed || epoch != _operationEpoch) return false;
@@ -803,7 +808,11 @@ final StateNotifierProvider<HubConnectionNotifier, HubConnectionState>
         }
         return false;
       }).catchError((Object error, StackTrace _) {
-        debugPrint('[HubConnectionNotifier] Başlangıç yükleme hatası: $error');
+        debugPrint(
+          UserFriendlyErrorMapper.redactSecrets(
+            '[HubConnectionNotifier] Başlangıç yükleme hatası: $error',
+          ),
+        );
         return false;
       }),
     );

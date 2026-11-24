@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="Market Management System (MMS)"
+    Manufacturer="Market MMS"
+    Version="$(var.MmsVersion)"
+    UpgradeCode="8F4E2D1A-6C7B-4E93-A521-9D3C0478B6E2"
+    Scope="perMachine"
+    Language="1055"
+    Codepage="65001">
+
+    <MajorUpgrade
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="Daha yeni bir Market MMS surumu zaten kurulu. Kurulum iptal edildi." />
+
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Launch
+      Condition="Installed OR VersionNT64"
+      Message="Market MMS yalnizca 64-bit Windows isletim sistemi uzerinde kurulabilir." />
+
+    <Launch
+      Condition="Installed OR ALLUSERS=1"
+      Message="Market MMS yalnizca makine geneli (ALLUSERS=1) kurulum modunu destekler." />
+
+    <!-- Guvenli varsayilan MSI ozellikleri: kaldirma sirasinda ProgramData verisi ASLA otomatik silinmez -->
+    <Property Id="PURGE_USER_DATA" Value="0" Secure="yes" />
+    <Property Id="CONFIRM_PURGE_TOKEN" Secure="yes" />
+    <Property Id="ALLOW_DEFERRED_TLS_START" Value="1" Secure="yes" />
+    <Property Id="HUB_PORT" Value="8945" Secure="yes" />
+    <Property Id="DISCOVERY_PORT" Value="8946" Secure="yes" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/market-pos" />
+    <Property Id="ARPCOMMENTS" Value="Market Management System (MMS) Masauastu Istemcisi ve Local Master Hub Servisi" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MarketMMS">
+        <Directory Id="ClientFolder" Name="client" />
+        <Directory Id="HubPayloadFolder" Name="hub_bin" />
+        <Directory Id="HubScriptsFolder" Name="hub_scripts" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="Market MMS" />
+    </StandardDirectory>
+
+    <StandardDirectory Id="DesktopFolder" />
+
+    <ComponentGroup Id="ProductShortcuts">
+      <Component Id="CmpStartMenuShortcut" Directory="INSTALLFOLDER" Guid="4B7C2D10-9F42-480A-BC31-208A510F3E01">
+        <Shortcut
+          Id="StartMenuShortcut"
+          Directory="ApplicationProgramsFolder"
+          Name="Market MMS"
+          Description="Market Management System POS Istemcisi"
+          Target="[ClientFolder]market_pos.exe"
+          WorkingDirectory="ClientFolder" />
+        <RemoveFolder Id="RemoveProgramsFolder" Directory="ApplicationProgramsFolder" On="uninstall" />
+        <RegistryValue Root="HKLM" Key="Software\MarketMMS" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+
+      <Component Id="CmpDesktopShortcut" Directory="INSTALLFOLDER" Guid="4B7C2D10-9F42-480A-BC31-208A510F3E02">
+        <Shortcut
+          Id="DesktopShortcut"
+          Directory="DesktopFolder"
+          Name="Market MMS"
+          Description="Market Management System POS Istemcisi"
+          Target="[ClientFolder]market_pos.exe"
+          WorkingDirectory="ClientFolder" />
+        <RegistryValue Root="HKLM" Key="Software\MarketMMS" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+
+    <CustomAction
+      Id="CA_SetInstallCtx"
+      Property="MMS_CA_INSTALL_CTX"
+      Value="Install|[INSTALLFOLDER].|$(var.MmsVersion)|[HUB_PORT]|[DISCOVERY_PORT]|[ALLOW_DEFERRED_TLS_START]" />
+
+    <CustomAction
+      Id="CA_SetUninstallCtx"
+      Property="MMS_CA_UNINSTALL_CTX"
+      Value="Uninstall|[INSTALLFOLDER].|[HUB_PORT]|[DISCOVERY_PORT]|[PURGE_USER_DATA]|[CONFIRM_PURGE_TOKEN]|END" />
+
+    <CustomAction
+      Id="CA_RollbackInstall"
+      Directory="HubScriptsFolder"
+      ExeCommand='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[HubScriptsFolder]mms_installer_engine.ps1" -Action Rollback -InstallDir "[INSTALLFOLDER]." -AppVersion "$(var.MmsVersion)" -MsiManaged'
+      Execute="rollback"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="CA_InstallOrUpgrade"
+      Directory="HubScriptsFolder"
+      ExeCommand='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[HubScriptsFolder]mms_installer_engine.ps1" -MsiManaged -MsiContext "[MMS_CA_INSTALL_CTX]"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <CustomAction
+      Id="CA_CommitInstall"
+      Directory="HubScriptsFolder"
+      ExeCommand='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[HubScriptsFolder]mms_installer_engine.ps1" -Action Commit -InstallDir "[INSTALLFOLDER]." -AppVersion "$(var.MmsVersion)" -MsiManaged'
+      Execute="commit"
+      Impersonate="no"
+      Return="ignore" />
+
+    <CustomAction
+      Id="CA_Uninstall"
+      Directory="HubScriptsFolder"
+      ExeCommand='powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "[HubScriptsFolder]mms_installer_engine.ps1" -MsiManaged -MsiContext "[MMS_CA_UNINSTALL_CTX]"'
+      Execute="deferred"
+      Impersonate="no"
+      Return="check" />
+
+    <InstallExecuteSequence>
+      <Custom Action="CA_SetInstallCtx" Before="CA_RollbackInstall" Condition='NOT REMOVE="ALL"' />
+      <Custom Action="CA_RollbackInstall" Before="CA_InstallOrUpgrade" Condition='NOT REMOVE="ALL"' />
+      <Custom Action="CA_InstallOrUpgrade" After="InstallFiles" Condition='NOT REMOVE="ALL"' />
+      <Custom Action="CA_CommitInstall" After="CA_InstallOrUpgrade" Condition='NOT REMOVE="ALL"' />
+      <Custom Action="CA_SetUninstallCtx" Before="CA_Uninstall" Condition='REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE' />
+      <Custom Action="CA_Uninstall" Before="RemoveFiles" Condition='REMOVE="ALL" AND NOT UPGRADINGPRODUCTCODE' />
+    </InstallExecuteSequence>
+
+    <Feature Id="MainFeature" Title="Market MMS Tam Kurulum" Level="1">
+      <ComponentGroupRef Id="MmsStagingPayload" />
+      <ComponentGroupRef Id="ProductShortcuts" />
+    </Feature>
+  </Package>
+</Wix>

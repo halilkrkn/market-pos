@@ -322,7 +322,11 @@ class ClientBackupService {
       if (stagingDir.existsSync()) {
         try {
           stagingDir.deleteSync(recursive: true);
-        } catch (_) {}
+        } catch (e) {
+          stderr.writeln(
+            '[ClientBackupService] Geçici staging dizini silinemedi (${p.basename(stagingDir.path)}): ${e.runtimeType}',
+          );
+        }
       }
     }
   }

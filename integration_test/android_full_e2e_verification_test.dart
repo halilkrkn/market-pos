@@ -9,6 +9,8 @@ import 'package:market_pos/core/storage/local_database_service.dart';
 import 'package:market_pos/features/sync/infrastructure/udp_hub_discovery_client.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
+import 'support/e2e_hub_target_guard.dart';
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -16,13 +18,34 @@ void main() {
   late ClientStorageRepository repo;
   late ClientSyncService syncService;
   late File dbFile;
+  // GAP-A03 veri güvenliği: E2E testi ASLA uygulamanın gerçek `client_local.db`
+  // dosyasını kullanmaz; her koşumda izole geçici bir SQLite dosyası açılır.
+  late Directory isolatedDir;
+  late String isolatedDbPath;
 
   const testDeviceId = 'POS-ANDROID-01';
-  const rawToken = 'android_e2e_secret_token_8899';
+  const configuredToken = String.fromEnvironment('MMS_E2E_DEVICE_TOKEN');
   const configuredHubUrl = String.fromEnvironment('MMS_E2E_HUB_URL');
+  // Yerel ağ keşfi üretim Hub'ını bulup ona test satışı gönderebileceğinden
+  // yalnızca açık onayla (`MMS_E2E_ALLOW_DISCOVERY=true`) kullanılır.
+  const allowDiscovery = bool.fromEnvironment('MMS_E2E_ALLOW_DISCOVERY');
+  // S6: Üretim Hub'ına yazmayı teknik olarak engelleyen zorunlu hedef kısıtları.
+  const configuredAllowlist = String.fromEnvironment('MMS_E2E_HUB_ALLOWLIST');
+  const configuredExpectedHubId = String.fromEnvironment('MMS_E2E_EXPECTED_HUB_ID');
+  late final String rawToken;
   late final String hubUrl;
 
   setUpAll(() async {
+    final envToken = Platform.environment['MMS_E2E_DEVICE_TOKEN'] ?? '';
+    rawToken = configuredToken.trim().isNotEmpty
+        ? configuredToken.trim()
+        : envToken.trim();
+    if (rawToken.isEmpty) {
+      throw StateError(
+        'MMS_E2E_DEVICE_TOKEN tanımlı değil. E2E testi çalıştırmadan önce '
+        '--dart-define=MMS_E2E_DEVICE_TOKEN=... ile geçici test cihaz tokenı verin.',
+      );
+    }
     final allowLoopback = !Platform.isAndroid;
     if (configuredHubUrl.trim().isNotEmpty) {
       hubUrl = HubUrlValidator.normalizeAndValidate(
@@ -30,6 +53,13 @@ void main() {
         allowLoopback: allowLoopback,
       );
     } else {
+      if (!allowDiscovery) {
+        throw StateError(
+          'MMS_E2E_HUB_URL tanımlı değil. E2E testi yalnızca izole TEST Hub '
+          'adresiyle çalışır (--dart-define=MMS_E2E_HUB_URL=https://...). '
+          'Yerel ağ keşfi için ayrıca --dart-define=MMS_E2E_ALLOW_DISCOVERY=true verin.',
+        );
+      }
       final candidates = await const UdpHubDiscoveryClient().discover(
         deviceId: testDeviceId,
       );
@@ -49,9 +79,41 @@ void main() {
       hubUrl = discoveredUrl;
     }
 
-    dbService = await LocalDatabaseService.initialize();
+    // S6: Ağ isteğinden önce adres allowlist + test Hub kimliği kuralı (fail-closed).
+    final allowlist = configuredAllowlist.trim().isNotEmpty
+        ? configuredAllowlist
+        : (Platform.environment['MMS_E2E_HUB_ALLOWLIST'] ?? '');
+    final expectedHubId = configuredExpectedHubId.trim().isNotEmpty
+        ? configuredExpectedHubId.trim()
+        : (Platform.environment['MMS_E2E_EXPECTED_HUB_ID'] ?? '').trim();
+    E2eHubTargetGuard.validateTarget(
+      hubUrl: hubUrl,
+      allowlistCsv: allowlist,
+      expectedHubId: expectedHubId,
+    );
+    // S6: Hiçbir yazma işleminden önce salt-okunur kimlik doğrulaması.
+    final transport = HttpSyncTransport();
+    await E2eHubTargetGuard.verifyHubIdentity(
+      transport: transport,
+      hubUrl: hubUrl,
+      deviceToken: rawToken,
+      expectedHubId: expectedHubId,
+    );
+
+    isolatedDir = Directory.systemTemp.createTempSync('mms_e2e_isolated_');
+    isolatedDbPath = p.join(isolatedDir.path, 'client_local_e2e.db');
+    // S6: Gerçek uygulama veritabanı yolu açılmadan önce reddedilir.
+    if (p.equals(isolatedDbPath, LocalDatabaseService.resolveDefaultDatabasePath())) {
+      throw StateError('E2E testi gerçek uygulama veritabanını açmaya çalıştı; durduruldu.');
+    }
+    dbService = await LocalDatabaseService.initialize(customPath: isolatedDbPath);
     repo = dbService.repository;
     dbFile = File(dbService.databasePath);
+    expect(
+      p.equals(dbFile.path, LocalDatabaseService.resolveDefaultDatabasePath()),
+      isFalse,
+      reason: 'E2E testi gerçek uygulama veritabanına dokunmamalıdır.',
+    );
 
     // Test cihazı için temiz başlangıç durumu sağla
     await (dbService.database.delete(dbService.database.outboxOperations)..where((o) => o.deviceId.equals(testDeviceId))).go();
@@ -62,7 +124,7 @@ void main() {
 
     syncService = ClientSyncService(
       repository: repo,
-      transport: HttpSyncTransport(),
+      transport: transport,
       deviceId: testDeviceId,
       deviceToken: rawToken,
       hubUrl: hubUrl,
@@ -72,6 +134,9 @@ void main() {
   tearDownAll(() async {
     try {
       await dbService.close();
+    } catch (_) {}
+    try {
+      if (isolatedDir.existsSync()) isolatedDir.deleteSync(recursive: true);
     } catch (_) {}
   });
 
@@ -272,7 +337,7 @@ void main() {
 
       expect(refundId, isNotEmpty);
       final refundedDetail = await repo.getSaleDetail(saleCardId);
-      expect(refundedDetail!.sale.status, 'COMPLETED'); // Kısmi iadede ana satış tamamlandı kalır
+      expect(refundedDetail!.sale.status, 'PARTIALLY_REFUNDED'); // Kısmi iade sonrası gerçek sözleşme durumu
       expect(refundedDetail.totalRefundedAmount, 2500);
       expect(refundedDetail.refunds, isNotEmpty);
 
@@ -334,8 +399,8 @@ void main() {
       // 1. Veritabanını kapat (Uygulamanın sonlanması simülasyonu)
       await dbService.close();
 
-      // 2. Yeniden başlat
-      dbService = await LocalDatabaseService.initialize();
+      // 2. Yeniden başlat (aynı izole test DB yolu)
+      dbService = await LocalDatabaseService.initialize(customPath: isolatedDbPath);
       repo = dbService.repository;
 
       // Ürünler korunmuş mu?
@@ -376,19 +441,20 @@ void main() {
       final storageProvider = LocalStorageProvider(backupDir);
       const backupPassword = 'MmsStrongBackupPassword!2026';
 
-      // 1. S5A-4 Yedek Oluştur (VACUUM INTO + PBKDF2 + AES-256-CBC + HMAC-SHA256)
+      // 1. S5A-4 Yedek Oluştur (Gerçek VACUUM INTO + PBKDF2 + AES-256-CBC + HMAC-SHA256)
       final backupRes = await DatabaseBackupEngine.createBackup(
         liveDbFile: dbFile,
         executeVacuumInto: (path) async {
           final snapshotFile = File(path);
           if (snapshotFile.existsSync()) snapshotFile.deleteSync();
-          await dbFile.copy(path);
+          final escaped = path.replaceAll("'", "''");
+          await dbService.database.customStatement("VACUUM INTO '$escaped';");
         },
         deviceId: testDeviceId,
         tenantId: 'TENANT_DEFAULT',
         storeId: 'STORE_DEFAULT',
         databaseType: DatabaseType.mobileLocal,
-        schemaVersion: 2,
+        schemaVersion: dbService.database.schemaVersion,
         appVersion: '1.0.0',
         backupPassword: backupPassword,
         storageProvider: storageProvider,

@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
+
 import 'backup_operation_lock.dart';
 import 'backup_retention_policy.dart';
 import 'database_backup_engine.dart';
@@ -246,12 +248,18 @@ class BackupScheduleStateStore {
       try {
         await file.rename(quarantine);
       } on FileSystemException catch (renameErr) {
-        stderr.writeln('[BackupSchedule] Bozuk durum dosyası karantinaya alınamadı: ${renameErr.message}');
+        stderr.writeln(
+          '[BackupSchedule] Bozuk durum dosyası karantinaya alınamadı: ${DatabaseBackupEngine.redactLogText(renameErr.message)}',
+        );
       }
-      stderr.writeln('[BackupSchedule] Durum dosyası bozuk (${e.message}); $quarantine olarak saklandı.');
+      stderr.writeln(
+        '[BackupSchedule] Durum dosyası bozuk (${DatabaseBackupEngine.redactLogText(e.message)}); ${p.basename(quarantine)} olarak saklandı.',
+      );
       return BackupScheduleState.empty;
     } on TypeError catch (e) {
-      stderr.writeln('[BackupSchedule] Durum dosyası beklenmeyen biçimde: $e');
+      stderr.writeln(
+        '[BackupSchedule] Durum dosyası beklenmeyen biçimde: ${DatabaseBackupEngine.redactLogText(e.toString())}',
+      );
       return BackupScheduleState.empty;
     }
   }
@@ -301,7 +309,9 @@ class BackupFailureClassifier {
       case 'ERR_ACCESS_DENIED':
         return 'Yedek hedefine yazma izni yok.';
       default:
-        return error is BackupException ? error.message : 'Yedekleme başarısız: $error';
+        return error is BackupException
+            ? DatabaseBackupEngine.redactLogText(error.message)
+            : 'Yedekleme başarısız: ${DatabaseBackupEngine.redactLogText(error.toString())}';
     }
   }
 }
@@ -372,12 +382,16 @@ class ScheduledBackupRunner {
       try {
         if (pruneExpired != null) pruned = (await pruneExpired!()).length;
       } catch (e) {
-        postError = 'Saklama politikası temizliği başarısız: $e';
+        postError =
+            'Saklama politikası temizliği başarısız: ${DatabaseBackupEngine.redactLogText(e.toString())}';
       }
       try {
         if (afterSuccess != null) await afterSuccess!(result);
       } catch (e) {
-        postError = [if (postError != null) postError, 'Uzak yedek adımı başarısız: $e'].join(' | ');
+        postError = [
+          if (postError != null) postError,
+          'Uzak yedek adımı başarısız: ${DatabaseBackupEngine.redactLogText(e.toString())}',
+        ].join(' | ');
       }
       record = BackupRunRecord(
         startedAt: startedAt,
@@ -433,13 +447,16 @@ class BackupScheduler {
   }
 
   Future<void> _tick() async {
+    if (runner.isRunning) return;
     try {
       final record = await runner.runIfDue();
       if (record != null) onRun?.call(record);
     } catch (e) {
       // runIfDue hatalarını kendi içinde kaydeder; buraya yalnızca durum dosyası
       // yazılamadığında düşülür. Zamanlayıcı durmaz, bir sonraki turda tekrar dener.
-      stderr.writeln('[BackupScheduler] Zamanlanmış yedek kontrolü başarısız: $e');
+      stderr.writeln(
+        '[BackupScheduler] Zamanlanmış yedek kontrolü başarısız: ${DatabaseBackupEngine.redactLogText(e.toString())}',
+      );
     }
   }
 
@@ -453,7 +470,9 @@ class BackupScheduler {
       try {
         await active;
       } catch (e) {
-        stderr.writeln('[BackupScheduler] Kapanış sırasında bekleyen yedek hatayla bitti: $e');
+        stderr.writeln(
+          '[BackupScheduler] Kapanış sırasında bekleyen yedek hatayla bitti: ${DatabaseBackupEngine.redactLogText(e.toString())}',
+        );
       }
     }
   }

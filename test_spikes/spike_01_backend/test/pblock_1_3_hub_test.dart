@@ -608,6 +608,7 @@ void main() {
       final noLbServer = SpikeServer(
         db: db,
         writeQueue: WriteQueue(),
+        backupDirectory: p.join(dir.path, 'backups_nolb'),
         adminSecret: 'adm',
         pepperManager: pepper,
         securityContext: CertificateManager.createServerSecurityContext(
@@ -645,6 +646,7 @@ void main() {
       final lanMismatchServer = SpikeServer(
         db: db,
         writeQueue: WriteQueue(),
+        backupDirectory: p.join(dir.path, 'backups_lan'),
         adminSecret: 'adm_lan_test',
         pepperManager: pepper,
         securityContext: CertificateManager.createServerSecurityContext(
@@ -716,6 +718,7 @@ void main() {
       final server = SpikeServer(
         db: db,
         writeQueue: queue,
+        backupDirectory: p.join(dir.path, 'backups'),
         adminSecret: adminSecret,
         pepperManager: pepper,
         requireTls: false,

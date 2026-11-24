@@ -166,6 +166,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       );
 
       await ref.read(deviceAuthProvider.notifier).loadForDevice(setup.deviceId);
+      await ref.read(deviceRoleProvider.notifier).refreshRole(force: true);
       // Not: P1..P4 başarılıysa pin + Hub URL zaten terfi edilmiştir; backward compatibility için güvenli sync:
       if (result.caSha256 != null && result.caSha256!.isNotEmpty) {
         _pinController.text = result.caSha256!;

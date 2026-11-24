@@ -6,6 +6,47 @@ import 'package:mms_client_storage/mms_client_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:test/test.dart';
 
+class _CapturingStderrSink implements Stdout {
+  final List<String> lines = <String>[];
+  final StringBuffer _current = StringBuffer();
+
+  _CapturingStderrSink();
+
+  @override
+  void write(Object? object) {
+    _current.write(object ?? '');
+  }
+
+  @override
+  void writeln([Object? object = '']) {
+    _current.write(object ?? '');
+    lines.add(_current.toString());
+    _current.clear();
+  }
+
+  @override
+  void writeAll(Iterable objects, [String separator = '']) {
+    _current.writeAll(objects, separator);
+  }
+
+  @override
+  void writeCharCode(int charCode) {
+    _current.writeCharCode(charCode);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
+
+class _SecretThrowingScheduleStateStore extends BackupScheduleStateStore {
+  final Object error;
+
+  _SecretThrowingScheduleStateStore(super.file, this.error);
+
+  @override
+  Future<BackupScheduleState> load() => Future<BackupScheduleState>.error(error);
+}
+
 /// Faz 3 / 7D — Zamanlanmış yerel yedekleme iş kuralları (TDD, altyapıdan bağımsız).
 void main() {
   late Directory tempDir;
@@ -224,6 +265,136 @@ void main() {
       await BackupScheduleStateStore(stateFile).save(BackupScheduleState.empty.copyWith(lastSuccessAt: now));
       expect(tempDir.listSync().where((f) => f.path.endsWith('.tmp')), isEmpty);
       expect(() => jsonDecode(stateFile.readAsStringSync()), returnsNormally);
+    });
+  });
+
+  group('AUD-LOW-01: Zamanlayıcı & Kurtarma Log Maskeleme', () {
+    test('15. ScheduledBackup, BackupScheduleStateStore, BackupScheduler ve recoverPendingRestoreSync hata loglarında tam yol ve sırlar maskelenir', () async {
+      final secretErrText =
+          'Bearer JwtTok9 mms_dt_sched_55 ya29.SchedTok99 1//0gSchedRef88 '
+          'recovery_password=SchedRecPass-2026! x-mms-admin-secret: SchedAdm-99 '
+          'https://hub.local/cb?code=4/0AXSchedCode&upload_id=SchedUpId&state=ok '
+          '${tempDir.path}\\client_local.db '
+          'file:///C:/Users/halil/Github/market-pos/packages/mms_client_storage/lib/src/backup/scheduled_backup.dart:256:5';
+
+      final sink = _CapturingStderrSink();
+      await IOOverrides.runZoned(() async {
+        // 15a. TypeError durumunda karantina/tip hatası logu
+        stateFile.writeAsStringSync(jsonEncode({'consecutive_failures': 'not_int'}));
+        final loaded = await BackupScheduleStateStore(stateFile).load();
+        expect(loaded.consecutiveFailures, 0);
+
+        // 15b. Runner hata mesajı ve postProcessError içinde yol/token/secret maskelenir, hata kodu korunur
+        final failingRunner = ScheduledBackupRunner(
+          readPolicy: () => const BackupSchedulePolicy(interval: Duration(hours: 24)),
+          stateStore: BackupScheduleStateStore(stateFile),
+          createBackup: () async => throw Exception('Yedek hatası: $secretErrText'),
+          clock: () => now,
+        );
+        final failedRec = await failingRunner.runNow(trigger: BackupTrigger.scheduled);
+        expect(failedRec.success, isFalse);
+        expect(failedRec.errorCode, 'ERR_BACKUP_FAILED');
+        expect(failedRec.errorMessage, isNot(contains(tempDir.path)));
+        expect(failedRec.errorMessage, isNot(contains('ya29.SchedTok99')));
+        expect(failedRec.errorMessage, isNot(contains('SchedRecPass-2026!')));
+        expect(failedRec.errorMessage, isNot(contains('SchedAdm-99')));
+        expect(failedRec.errorMessage, isNot(contains('4/0AXSchedCode')));
+        expect(failedRec.errorMessage, contains('client_local.db'));
+
+        final postRunner = ScheduledBackupRunner(
+          readPolicy: () => const BackupSchedulePolicy(interval: Duration(hours: 24)),
+          stateStore: BackupScheduleStateStore(stateFile),
+          createBackup: () async => fakeResult('b_post'),
+          afterSuccess: (_) async => throw StateError('Drive erişilemiyor: $secretErrText'),
+          clock: () => now.add(const Duration(hours: 1)),
+        );
+        final postRec = await postRunner.runNow(trigger: BackupTrigger.scheduled);
+        expect(postRec.success, isTrue);
+        expect(postRec.postProcessError, contains('Drive erişilemiyor'));
+        expect(postRec.postProcessError, isNot(contains('ya29.SchedTok99')));
+        expect(postRec.postProcessError, isNot(contains(tempDir.path)));
+
+        // 15c. BackupScheduler._tick hatası (L445)
+        final schedulerTick = BackupScheduler(
+          runner: ScheduledBackupRunner(
+            readPolicy: () => const BackupSchedulePolicy(interval: Duration(hours: 24)),
+            stateStore: _SecretThrowingScheduleStateStore(stateFile, Exception(secretErrText)),
+            createBackup: () async => fakeResult('b_unused'),
+          ),
+          checkInterval: const Duration(hours: 1),
+        );
+        schedulerTick.start(runImmediately: true);
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+        await schedulerTick.stop();
+
+        // 15d. BackupScheduler.stop bekleyen çalışma hatası (L459)
+        final slowGate = Completer<void>();
+        BackupRunRecord fakeFailedRecord() => BackupRunRecord(
+              startedAt: now,
+              finishedAt: now,
+              trigger: BackupTrigger.manual,
+              success: false,
+            );
+        final stopFailRunner = ScheduledBackupRunner(
+          readPolicy: () => const BackupSchedulePolicy(interval: Duration(hours: 24)),
+          stateStore: _SecretThrowingScheduleStateStore(stateFile, Exception('Stop fail: $secretErrText')),
+          createBackup: () async {
+            await slowGate.future;
+            return fakeResult('b_stop');
+          },
+        );
+        final schedulerStop = BackupScheduler(runner: stopFailRunner);
+        final futureRun = stopFailRunner.runNow(trigger: BackupTrigger.manual);
+        slowGate.complete();
+        await Future.wait([
+          schedulerStop.stop(),
+          futureRun.catchError((_) => fakeFailedRecord()),
+        ]);
+
+        // 15e. DatabaseBackupEngine.recoverPendingRestoreSync (L362): safety -> live copy Directory üzerine düşünce tam yol fırlatır
+        final livePath = Directory(p.join(tempDir.path, 'recover_sub', 'client_local.db'));
+        livePath.parent.createSync(recursive: true);
+        // Canlı DB yolunda bir dizin oluşturarak copySync'in PathExistsException (tam yol) atmasını sağla
+        livePath.createSync();
+        final safetyFile = File(p.join(tempDir.path, 'recover_sub', 'safety_snap.db'))
+          ..writeAsBytesSync(const [1, 2, 3]);
+        final journalFile = File('${livePath.path}.restore_journal')
+          ..writeAsStringSync(jsonEncode({
+            'version': 1,
+            'safety_file': safetyFile.path,
+            'live_file': livePath.path,
+          }));
+        expect(journalFile.existsSync(), isTrue);
+        final recOk = DatabaseBackupEngine.recoverPendingRestoreSync(File(livePath.path));
+        expect(recOk, isFalse);
+      }, stderr: () => sink);
+
+      final allStderr = sink.lines.join('\n');
+      expect(allStderr, contains('[BackupScheduler] Zamanlanmış yedek kontrolü başarısız:'));
+      expect(allStderr, contains('[BackupScheduler] Kapanış sırasında bekleyen yedek hatayla bitti:'));
+      expect(allStderr, contains('[CRITICAL] recoverPendingRestoreSync kurtarma hatası:'));
+
+      for (final secret in [
+        tempDir.path,
+        'JwtTok9',
+        'mms_dt_sched_55',
+        'ya29.SchedTok99',
+        '1//0gSchedRef88',
+        'SchedRecPass-2026!',
+        'SchedAdm-99',
+        '4/0AXSchedCode',
+        'SchedUpId',
+        'C:/Users/halil',
+      ]) {
+        expect(
+          allStderr,
+          isNot(contains(secret)),
+          reason: 'stderr çıktısı tam yol veya sır sızdırmamalı: $secret',
+        );
+      }
+      expect(allStderr, contains('client_local.db'));
+      expect(allStderr, contains('scheduled_backup.dart:256:5'));
+      expect(allStderr, contains('&state=ok'));
     });
   });
 }

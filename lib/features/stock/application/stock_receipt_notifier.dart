@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
+import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../../pos/domain/barcode_input_sanitizer.dart';
 import '../domain/stock_receipt_input.dart';
 
@@ -104,7 +105,11 @@ class StockReceiptNotifier extends StateNotifier<StockReceiptState> {
     try {
       product = await repository.getProductByBarcode(barcode);
     } catch (e, stack) {
-      debugPrint('[StockReceipt] Barkod sorgu hatası: $e\n$stack');
+      debugPrint(
+        UserFriendlyErrorMapper.redactSecrets(
+          '[StockReceipt] Barkod sorgu hatası: $e\n$stack',
+        ),
+      );
       if (!mounted) return;
       state = state.copyWith(
         phase: StockReceiptPhase.idle,
@@ -217,7 +222,11 @@ class StockReceiptNotifier extends StateNotifier<StockReceiptState> {
       }
       return false;
     } catch (e, stack) {
-      debugPrint('[StockReceipt] Kayıt hatası: $e\n$stack');
+      debugPrint(
+        UserFriendlyErrorMapper.redactSecrets(
+          '[StockReceipt] Kayıt hatası: $e\n$stack',
+        ),
+      );
       if (mounted) {
         // receiptId korunur: kullanıcı tekrar denerse aynı giriş ikinci kez uygulanmaz.
         state = state.copyWith(

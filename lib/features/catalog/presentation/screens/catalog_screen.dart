@@ -15,6 +15,7 @@ import '../../../sync/domain/sync_coordinator_state.dart';
 import '../../../sync/sync_providers.dart';
 import '../widgets/category_edit_dialog.dart';
 import '../widgets/price_history_dialog.dart';
+import '../widgets/product_barcodes_dialog.dart';
 import '../widgets/product_edit_dialog.dart';
 
 /// MARKET MMS — Ürün ve Kategori Yönetimi Ekranı (Shopify Admin — Modern Emerald)
@@ -348,7 +349,7 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
               ),
             ),
           ),
-          const SizedBox(width: 148),
+          const SizedBox(width: 192),
         ],
       ),
       itemCount: state.products.length,
@@ -413,6 +414,17 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
                                     : AppBadgeTone.danger,
                                 compact: true,
                               ),
+                              if (state.catalogSyncStatus[prod.id] != null) ...[
+                                const SizedBox(width: MmsSpacing.xs),
+                                // Dar sütunda taşmaması için rozet de esner
+                                // (AppBadge etiketi ellipsis ile kısalır).
+                                Flexible(
+                                  child: _CatalogSyncBadge(
+                                    productId: prod.id,
+                                    status: state.catalogSyncStatus[prod.id]!,
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                           const SizedBox(height: 2),
@@ -492,10 +504,16 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
                 ),
               ),
               SizedBox(
-                width: 148,
+                width: 192,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    AppIconButton(
+                      key: Key('product_barcodes_button_${prod.id}'),
+                      icon: Icons.qr_code_2_rounded,
+                      tooltip: 'Barkodları Yönet',
+                      onPressed: () => _openBarcodeManager(prod),
+                    ),
                     AppIconButton(
                       icon: Icons.history_rounded,
                       tooltip: 'Fiyat Değişiklik Geçmişi',
@@ -592,6 +610,11 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
                         tone: AppBadgeTone.neutral,
                         compact: true,
                       ),
+                    if (state.catalogSyncStatus[prod.id] != null)
+                      _CatalogSyncBadge(
+                        productId: prod.id,
+                        status: state.catalogSyncStatus[prod.id]!,
+                      ),
                     Text(
                       'Stok: ${Money.formatMilliWithUnit(prod.stock, prod.stockUnit)}',
                       style: TextStyle(
@@ -623,6 +646,13 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
                           fontFeatures: MmsTypography.tabularFigures,
                         ),
                       ),
+                    ),
+                    AppIconButton(
+                      key: Key('product_barcodes_button_${prod.id}'),
+                      icon: Icons.qr_code_2_rounded,
+                      tooltip: 'Barkodları Yönet',
+                      size: 48,
+                      onPressed: () => _openBarcodeManager(prod),
                     ),
                     AppIconButton(
                       icon: Icons.history_rounded,
@@ -858,6 +888,13 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
     );
   }
 
+  Future<void> _openBarcodeManager(LocalProduct prod) async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => ProductBarcodesDialog(productId: prod.id),
+    );
+  }
+
   Future<void> _openProductEdit(
     LocalProduct prod,
     List<LocalCategory> categories,
@@ -984,5 +1021,40 @@ class _CatalogScreenState extends ConsumerState<CatalogScreen>
     if (confirm == true) {
       await ref.read(catalogProvider.notifier).deactivateCategory(cat.id);
     }
+  }
+}
+
+/// Ürün bazlı Hub gönderim rozeti (yalnızca eşitlenmemiş ürünlerde gösterilir).
+class _CatalogSyncBadge extends StatelessWidget {
+  final String productId;
+  final ProductCatalogSyncStatus status;
+
+  const _CatalogSyncBadge({required this.productId, required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, tone, icon) = switch (status.state) {
+      ProductCatalogSyncState.failed => (
+          'HUB HATASI',
+          AppBadgeTone.danger,
+          Icons.sync_problem_rounded,
+        ),
+      ProductCatalogSyncState.retrying => (
+          'YENİDEN DENENECEK',
+          AppBadgeTone.warning,
+          Icons.sync_rounded,
+        ),
+      _ => ("HUB'A GİDECEK", AppBadgeTone.warning, Icons.schedule_rounded),
+    };
+    return Tooltip(
+      message: 'Bu ürünün ${status.unsyncedOperationCount} değişikliği henüz Hub tarafından onaylanmadı.',
+      child: AppBadge(
+        key: Key('product_sync_badge_$productId'),
+        label: label,
+        tone: tone,
+        icon: icon,
+        compact: true,
+      ),
+    );
   }
 }

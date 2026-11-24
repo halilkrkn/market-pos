@@ -45,7 +45,7 @@ class DashboardSnapshot {
 }
 
 /// Mevcut yerel Drift SQLite verilerinden (local_sales, local_products)
-/// gerçek zamanlı Dashboard özetini hesaplar. Sahte veri üretmez.
+/// sınırsız SQL aggregate sorgularıyla gerçek zamanlı Dashboard özetini hesaplar. Sahte veri üretmez.
 final dashboardSnapshotProvider = FutureProvider<DashboardSnapshot>((ref) async {
   // Sistem durumu yenilendiğinde (satış, iptal, iade, ürün/stok, sync sonrası) güncellenir
   ref.watch(systemStatusProvider.select((s) => s.localSalesCount));
@@ -57,90 +57,33 @@ final dashboardSnapshotProvider = FutureProvider<DashboardSnapshot>((ref) async 
 
   final now = DateTime.now();
   final todayStart = DateTime(now.year, now.month, now.day);
-  final sevenDaysAgo = todayStart.subtract(const Duration(days: 6));
 
-  final periodSales = await repo.getSalesHistory(
-    startDate: sevenDaysAgo,
-    limit: 2000,
+  final productSummary = await repo.getDashboardProductSummary(
+    criticalStockThresholdMilli: kCriticalStockThresholdMilli,
+    previewLimit: 8,
   );
-  final recentSales = periodSales.isNotEmpty
-      ? periodSales.take(8).toList()
-      : await repo.getSalesHistory(limit: 8);
-  final refundTotalsBySaleId = await repo.getRefundTotalsBySaleIds(
-    periodSales.map((s) => s.id),
+  final salesSummary = await repo.getDashboardSalesSummary(
+    todayStart: todayStart,
+    trendDays: 7,
   );
-  final activeProducts = await repo.getProducts(isActive: true, limit: 500);
-
-  int todayTotal = 0;
-  int todayCount = 0;
-  int todayCash = 0;
-  int todayCard = 0;
-
-  // Son 7 günün kova haritası
-  final dayTotals = <DateTime, int>{};
-  final dayCounts = <DateTime, int>{};
-  for (int i = 0; i < 7; i++) {
-    final day = sevenDaysAgo.add(Duration(days: i));
-    dayTotals[day] = 0;
-    dayCounts[day] = 0;
-  }
-
-  for (final sale in periodSales) {
-    if (sale.status == 'CANCELLED' || sale.status == 'REFUNDED') continue;
-    final refundedCents = refundTotalsBySaleId[sale.id] ?? 0;
-    final netAmountCents =
-        (sale.totalAmount - refundedCents).clamp(0, sale.totalAmount);
-    if (netAmountCents <= 0) continue;
-
-    final localCreatedAt = sale.createdAt.toLocal();
-    final saleDay = DateTime(
-      localCreatedAt.year,
-      localCreatedAt.month,
-      localCreatedAt.day,
-    );
-
-    if (saleDay == todayStart) {
-      todayTotal += netAmountCents;
-      todayCount++;
-      if (sale.paymentMethod == 'CASH') {
-        todayCash += netAmountCents;
-      } else {
-        todayCard += netAmountCents;
-      }
-    }
-
-    if (dayTotals.containsKey(saleDay)) {
-      dayTotals[saleDay] = dayTotals[saleDay]! + netAmountCents;
-      dayCounts[saleDay] = dayCounts[saleDay]! + 1;
-    }
-  }
-
-  final trend = List.generate(7, (i) {
-    final day = sevenDaysAgo.add(Duration(days: i));
-    return DailySalesBucket(
-      date: day,
-      totalCents: dayTotals[day] ?? 0,
-      count: dayCounts[day] ?? 0,
-    );
-  });
-
-  final criticalProducts = activeProducts
-      .where((p) => p.stock <= kCriticalStockThresholdMilli)
-      .toList()
-    ..sort((a, b) => a.stock.compareTo(b.stock));
-
-  final negativeCount = activeProducts.where((p) => p.stock < 0).length;
+  final recentSales = await repo.getSalesHistory(limit: 8);
 
   return DashboardSnapshot(
-    todaySalesTotalCents: todayTotal,
-    todaySalesCount: todayCount,
-    todayCashTotalCents: todayCash,
-    todayCardTotalCents: todayCard,
-    activeProductCount: activeProducts.length,
-    criticalStockCount: criticalProducts.length,
-    negativeStockCount: negativeCount,
-    last7DaysTrend: trend,
-    recentSales: recentSales.take(8).toList(),
-    criticalProducts: criticalProducts.take(8).toList(),
+    todaySalesTotalCents: salesSummary.todaySalesTotalCents,
+    todaySalesCount: salesSummary.todaySalesCount,
+    todayCashTotalCents: salesSummary.todayCashTotalCents,
+    todayCardTotalCents: salesSummary.todayCardTotalCents,
+    activeProductCount: productSummary.activeProductCount,
+    criticalStockCount: productSummary.criticalStockCount,
+    negativeStockCount: productSummary.negativeStockCount,
+    last7DaysTrend: salesSummary.dailyTotals
+        .map((d) => DailySalesBucket(
+              date: d.date,
+              totalCents: d.totalCents,
+              count: d.count,
+            ))
+        .toList(),
+    recentSales: recentSales,
+    criticalProducts: productSummary.criticalProducts,
   );
 });

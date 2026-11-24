@@ -44,7 +44,7 @@ class RedactingLogger {
   }
 
   String redact(String raw) {
-    var sanitized = UserFriendlyErrorMapper.redactSecrets(raw);
+    var sanitized = raw;
 
     // PEM private key bloklarını temizle
     sanitized = sanitized.replaceAll(
@@ -57,14 +57,14 @@ class RedactingLogger {
     // JSON veya sorgu dizgisindeki hassas alanları maskele
     sanitized = sanitized.replaceAllMapped(
       RegExp(
-        r'("(?:pairing_secret|device_token|token|password|backupPassword|backup_password|privateKey|private_key|secret|pepper)"\s*:\s*)"[^"]*"',
+        r'("(?:auth_code|code|pairing_secret|device_token|access_token|accessToken|refresh_token|refreshToken|token|password|backupPassword|backup_password|recovery_password|recoveryPassword|privateKey|private_key|client_secret|clientSecret|admin_secret|adminSecret|live_sync_secret|dpapi_secret|signing_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|upload_id|session|signature|sig|secret|pepper)"\s*:\s*)"[^"]*"',
         caseSensitive: false,
       ),
       (m) => '${m.group(1)}"[REDACTED]"',
     );
     sanitized = sanitized.replaceAllMapped(
       RegExp(
-        r'\b(pairing_secret|device_token|password|secret|token)=([^&\s,]+)',
+        r"""\b(auth_code|code|pairing_secret|device_token|access_token|refresh_token|recovery_password|client_secret|admin_secret|live_sync_secret|dpapi_secret|signing_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|key|upload_id|session|signature|sig|password|secret|pepper|token)=([^&#\s,"'`\)\]]+)""",
         caseSensitive: false,
       ),
       (m) => '${m.group(1)}=[REDACTED]',
@@ -75,7 +75,7 @@ class RedactingLogger {
         sanitized = sanitized.replaceAll(secret, '[REDACTED]');
       }
     }
-    return sanitized;
+    return UserFriendlyErrorMapper.redactSecrets(sanitized);
   }
 
   void log(

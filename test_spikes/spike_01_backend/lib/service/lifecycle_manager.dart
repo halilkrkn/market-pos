@@ -9,6 +9,7 @@ class LifecycleManager {
   final WriteQueue writeQueue;
   final AdmissionGate admissionGate;
   final Duration drainTimeout;
+  Future<void> Function()? onBeforeDrain;
   CheckpointResult? lastCheckpointResult;
   HttpServer? _server;
   final Completer<int> _shutdownCompleter = Completer<int>();
@@ -22,6 +23,7 @@ class LifecycleManager {
     required this.writeQueue,
     AdmissionGate? admissionGate,
     this.drainTimeout = const Duration(seconds: 12),
+    this.onBeforeDrain,
   }) : admissionGate = admissionGate ?? AdmissionGate();
 
   void attachServer(HttpServer server) {
@@ -83,6 +85,18 @@ class LifecycleManager {
     _sigintSub = null;
     await _sigtermSub?.cancel();
     _sigtermSub = null;
+
+    // 1.5. Birleşik sunucu kapanış kancası (zamanlayıcılar, discovery, kooperatif yedek iptali)
+    if (onBeforeDrain != null) {
+      try {
+        final remainingBeforeDrain = getRemaining();
+        if (remainingBeforeDrain > Duration.zero) {
+          await onBeforeDrain!().timeout(remainingBeforeDrain);
+        }
+      } catch (e) {
+        stderr.writeln('[WARN] Lifecycle onBeforeDrain hatası/zaman aşımı: $e');
+      }
+    }
 
     // 2. HTTP sunucusunu zarif biçimde kapat (yeni bağlantı kabul etme, mevcuda izin ver)
     if (_server != null) {

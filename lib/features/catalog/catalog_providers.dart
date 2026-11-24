@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/utils/user_friendly_error_mapper.dart';
 import '../diagnostics/application/system_status_notifier.dart';
 import '../sync/domain/sync_coordinator_state.dart';
 import '../sync/sync_providers.dart';
@@ -44,12 +45,18 @@ final catalogProvider =
               .refreshLocalMetrics()
               .catchError((Object e, StackTrace s) {
             debugPrint(
-              '[catalog_providers] refreshLocalMetrics hatası: $e\n$s',
+              UserFriendlyErrorMapper.redactSecrets(
+                '[catalog_providers] refreshLocalMetrics hatası: $e\n$s',
+              ),
             );
           }),
         );
       } catch (e, s) {
-        debugPrint('[catalog_providers] refreshLocalMetrics erişim hatası: $e\n$s');
+        debugPrint(
+          UserFriendlyErrorMapper.redactSecrets(
+            '[catalog_providers] refreshLocalMetrics erişim hatası: $e\n$s',
+          ),
+        );
       }
       try {
         unawaited(
@@ -57,12 +64,20 @@ final catalogProvider =
               .read(backgroundSyncCoordinatorProvider.notifier)
               .triggerSync(reason: SyncTriggerReason.productCommitted)
               .catchError((Object e, StackTrace s) {
-            debugPrint('[catalog_providers] triggerSync hatası: $e\n$s');
+            debugPrint(
+              UserFriendlyErrorMapper.redactSecrets(
+                '[catalog_providers] triggerSync hatası: $e\n$s',
+              ),
+            );
             return null;
           }),
         );
       } catch (e, s) {
-        debugPrint('[catalog_providers] triggerSync erişim hatası: $e\n$s');
+        debugPrint(
+          UserFriendlyErrorMapper.redactSecrets(
+            '[catalog_providers] triggerSync erişim hatası: $e\n$s',
+          ),
+        );
       }
     },
   );

@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import '../../../core/security/tls_pinned_client_factory.dart';
+import '../../../core/security/hex_fingerprint_normalizer.dart';
 
 /// Hub eşleştirme QR kodu veya derin bağlantı içeriği.
 class PairingQrPayload {
@@ -19,7 +19,7 @@ class PairingQrPayload {
   });
 
   String? get normalizedCaSha256 =>
-      caSha256 == null ? null : PinnedTlsConfig.normalizeHex(caSha256!);
+      caSha256 == null ? null : HexFingerprintNormalizer.normalizeHex(caSha256!);
 
   static PairingQrPayload parse(String raw) {
     final trimmed = raw.trim();
@@ -90,7 +90,7 @@ class PairingQrPayload {
             rawCaSha.trim().isEmpty ||
             rawCaSha.trim().toUpperCase() == 'UNKNOWN')
         ? null
-        : PinnedTlsConfig.normalizeHex(rawCaSha);
+        : HexFingerprintNormalizer.normalizeHex(rawCaSha);
     final caSha =
         (normalizedCaSha == null || normalizedCaSha.isEmpty) ? null : normalizedCaSha;
     final caPem = pick(const ['ca_pem', 'caPem', 'ca_cert']);

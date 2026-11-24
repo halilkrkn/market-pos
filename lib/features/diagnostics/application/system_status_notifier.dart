@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_contracts/mms_contracts.dart';
 
 import '../../../core/constants/app_constants.dart';
+import '../../../core/logging/redacting_logger.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/api_response.dart';
 import '../../../core/security/security_providers.dart';
@@ -53,6 +54,7 @@ final systemStatusProvider =
   final notifier = SystemStatusNotifier(
     apiClient: apiClient,
     localDbService: localDb,
+    logger: ref.read(redactingLoggerProvider),
     initialStatus: SystemStatus.initial(
       backendUrl: initialBackendUrl,
       deviceId: apiClient.deviceId,
@@ -94,6 +96,7 @@ final outboxSummaryProvider = Provider<OutboxSummary>((ref) {
 class SystemStatusNotifier extends StateNotifier<SystemStatus> {
   final MmsApiClient apiClient;
   final LocalDatabaseService localDbService;
+  final RedactingLogger? logger;
   final FutureOr<void> Function(
     String checkedUrl,
     CentralHealthResponse health,
@@ -106,6 +109,7 @@ class SystemStatusNotifier extends StateNotifier<SystemStatus> {
     required this.apiClient,
     required this.localDbService,
     required SystemStatus initialStatus,
+    this.logger,
     this.onHealthObserved,
   }) : super(initialStatus);
 
@@ -175,7 +179,12 @@ class SystemStatusNotifier extends StateNotifier<SystemStatus> {
     if (onHealthObserved != null && checkedUrl.isNotEmpty) {
       try {
         await onHealthObserved!(checkedUrl, health);
-      } catch (_) {}
+      } catch (e) {
+        logger?.warning(
+          'diagnostics',
+          'Sağlık gözlem geri çağrımı başarısız oldu: ${e.runtimeType}',
+        );
+      }
       if (!mounted) return;
     }
 

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:drift/drift.dart' hide isNull, isNotNull;
@@ -5,6 +6,31 @@ import 'package:mms_client_storage/mms_client_storage.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqlite3/sqlite3.dart' as sql;
 import 'package:test/test.dart';
+
+class _CapturingStderr implements Stdout {
+  final List<String> lines = <String>[];
+  final StringBuffer _buffer = StringBuffer();
+
+  @override
+  void write(Object? object) => _buffer.write(object ?? '');
+
+  @override
+  void writeln([Object? object = '']) {
+    _buffer.write(object ?? '');
+    lines.add(_buffer.toString());
+    _buffer.clear();
+  }
+
+  @override
+  void writeAll(Iterable objects, [String separator = '']) =>
+      _buffer.writeAll(objects, separator);
+
+  @override
+  void writeCharCode(int charCode) => _buffer.writeCharCode(charCode);
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => null;
+}
 
 /// SEC-SAFETY — Restore öncesi alınan güvenlik kopyası (safety snapshot) diskte
 /// şifresiz kalmamalıdır.
@@ -278,6 +304,74 @@ void main() {
       expect(filesIn(safetyDir, '.db'), isEmpty);
       expect(filesIn(safetyDir, '.mmsbak'), isEmpty);
       expect((await db.select(db.localSales).get()).length, 2);
+    });
+
+    test('7. AUD-LOW-01: Rollback ikincil hatasında tam yerel yol ve sırlar maskelenir ve ilk hata rethrow edilir', () async {
+      await sell(1);
+      final backup = await takeBackup();
+      await sell(2);
+
+      final sink = _CapturingStderr();
+      const injectedErr =
+          'Rollback ikincil hata: Bearer JwtRb9 ya29.RbTok99 recovery_password=RbPass-2026! '
+          'https://hub.local/cb?code=4/0AXRbCode&upload_id=RbUpId '
+          'file:///C:/Users/halil/Github/market-pos/packages/mms_client_storage/lib/src/backup/database_backup_engine.dart:715:9';
+
+      await IOOverrides.runZoned(() async {
+        var resumeCalls = 0;
+        await expectLater(
+          DatabaseBackupEngine.restoreBackup(
+            backupId: backup.backupId,
+            liveDbFile: dbFile,
+            backupPassword: password,
+            storageProvider: storage,
+            expectedDeviceId: deviceId,
+            expectedTenantId: tenantId,
+            expectedStoreId: storeId,
+            expectedDatabaseType: DatabaseType.clientLocal,
+            currentSchemaVersion: db.schemaVersion,
+            pauseLiveDb: () async => db.close(),
+            resumeLiveDb: () async {
+              resumeCalls++;
+              if (resumeCalls == 1) {
+                throw StateError('Birincil resume hatası (rethrow edilmeli)');
+              }
+              throw FileSystemException(injectedErr, dbFile.path);
+            },
+            safetyBackupDir: safetyDir,
+          ),
+          throwsA(
+            isA<StateError>().having(
+              (e) => e.message,
+              'message',
+              'Birincil resume hatası (rethrow edilmeli)',
+            ),
+          ),
+        );
+      }, stderr: () => sink);
+
+      final joined = sink.lines.join('\n');
+      expect(
+        joined,
+        contains('[CRITICAL] Koruyucu yedekten geri alma sırasında ikincil hata:'),
+      );
+      for (final secret in [
+        tempDir.path,
+        'JwtRb9',
+        'ya29.RbTok99',
+        'RbPass-2026!',
+        '4/0AXRbCode',
+        'RbUpId',
+        'C:/Users/halil',
+      ]) {
+        expect(joined, isNot(contains(secret)));
+      }
+      expect(joined, contains('client_local.db'));
+      expect(joined, contains('database_backup_engine.dart:715:9'));
+
+      // tearDown için DB'yi temiz aç
+      db = ClientDatabase(dbFile);
+      repo = ClientStorageRepository(db);
     });
   });
 }

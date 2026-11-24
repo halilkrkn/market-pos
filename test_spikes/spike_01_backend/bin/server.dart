@@ -3,11 +3,19 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:drift/drift.dart';
+import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
+import '../lib/backup/hub_backup_oauth_service.dart';
+import '../lib/backup/hub_backup_oauth_store.dart';
+import '../lib/backup/hub_backup_orchestrator.dart';
+import '../lib/backup/hub_backup_state_store.dart';
+import '../lib/backup/hub_recovery_key_store.dart';
+import '../lib/backup/hub_restore_service.dart';
+import '../lib/backup/hub_snapshot_service.dart';
 import '../lib/db/database.dart';
 import '../lib/db/write_queue.dart';
 import '../lib/security/auth_middleware.dart';
@@ -17,6 +25,7 @@ import '../lib/security/live_drive_secret_manager.dart';
 import '../lib/security/pairing_delivery_buffer.dart';
 import '../lib/security/pairing_manager.dart';
 import '../lib/security/pepper_manager.dart';
+import '../lib/security/replay_protection_service.dart';
 import '../lib/security/secure_cors_middleware.dart';
 import '../lib/security/token_manager.dart';
 import '../lib/service/admission_gate.dart';
@@ -107,16 +116,29 @@ class SpikeServer {
   /// Zamanlayıcının "yedek zamanı geldi mi?" kontrol aralığı.
   final Duration backupCheckInterval;
 
+  /// Merkezi restore öncesi safety snapshot'ın PBKDF2 tur sayısı. Yalnızca sunucu
+  /// yapılandırmasından (testlerde hızlandırma için) gelir; istek gövdesiyle
+  /// ZAYIFLATILAMAZ.
+  final int hubRestoreSafetyKdfIterations;
+
   static const String backupScheduleStateFileName = 'backup_schedule_state.json';
 
   final bool allowAdminEnvFallback;
   final Map<String, String>? _environment;
+  final String backupOAuthClientId;
+  final String? backupOAuthClientSecret;
+  late final HubBackupOAuthService hubBackupOAuthService;
+  late final HubRecoveryKeyStore hubRecoveryKeyStore;
+  late final HubBackupStateStore hubBackupStateStore;
+  late final HubBackupOrchestrator hubBackupOrchestrator;
+  late final ReplayProtectionService replayProtectionService;
   late final Router _router;
   HttpServer? _httpServer;
   Timer? _pairingCleanupTimer;
   HubDiscoveryResponder? _discoveryResponder;
   BackupScheduler? _backupScheduler;
   BackupScheduleState? _backupScheduleState;
+  bool _resourcesStopped = false;
 
   /// Son bilinen zamanlanmış yedek durumu (izleme ve testler için).
   BackupScheduleState? get backupScheduleState => _backupScheduleState;
@@ -165,9 +187,24 @@ class SpikeServer {
     this.requireTenantStoreHeaders = false,
     this.backupSchedule,
     this.backupCheckInterval = const Duration(minutes: 5),
+    this.hubRestoreSafetyKdfIterations = MmsbakV2Crypto.defaultPbkdf2Iterations,
     this.allowAdminEnvFallback = true,
     Map<String, String>? environment,
+    String? backupOAuthClientId,
+    String? backupOAuthClientSecret,
+    HubBackupOAuthService? hubBackupOAuthService,
+    HubRecoveryKeyStore? hubRecoveryKeyStore,
+    HubBackupStateStore? hubBackupStateStore,
+    HubBackupOrchestrator? hubBackupOrchestrator,
+    ReplayProtectionService? replayProtectionService,
   })  : _environment = environment,
+        backupOAuthClientId = backupOAuthClientId ??
+            (environment ?? Platform.environment)['MMS_GDRIVE_CLIENT_ID'] ??
+            (environment ?? Platform.environment)['GOOGLE_OAUTH_CLIENT_ID'] ??
+            '',
+        backupOAuthClientSecret = backupOAuthClientSecret ??
+            (environment ?? Platform.environment)['MMS_GDRIVE_CLIENT_SECRET'] ??
+            (environment ?? Platform.environment)['GOOGLE_OAUTH_CLIENT_SECRET'],
         pepperManager = _resolvePepperManager(pepperManager),
         liveDriveSecretManager = _resolveLiveDriveSecretManager(
           liveDriveSecretManager,
@@ -185,7 +222,93 @@ class SpikeServer {
         hubId = (hubId != null && hubId.trim().isNotEmpty)
             ? hubId.trim()
             : defaultHubId {
+    final callerHook = this.lifecycle.onBeforeDrain;
+    this.lifecycle.onBeforeDrain = () async {
+      await _stopServerResources();
+      if (callerHook != null) {
+        await callerHook();
+      }
+    };
+    this.hubBackupOAuthService = hubBackupOAuthService ??
+        HubBackupOAuthService(
+          store: HubBackupOAuthStore(
+            File(p.join(_resolveSecurityDirPath(), HubBackupOAuthStore.defaultFileName)),
+          ),
+          httpClient: http.Client(),
+        );
+    this.hubRecoveryKeyStore = hubRecoveryKeyStore ??
+        HubRecoveryKeyStore(
+          File(p.join(_resolveSecurityDirPath(), HubRecoveryKeyStore.defaultFileName)),
+        );
+    this.hubBackupStateStore = hubBackupStateStore ??
+        HubBackupStateStore(
+          File(p.join(_backupTargetDir.path, HubBackupStateStore.defaultFileName)),
+        );
+    this.hubBackupOrchestrator = hubBackupOrchestrator ??
+        HubBackupOrchestrator(
+          snapshotService: HubSnapshotService(
+            readDb: () => db,
+            writeQueue: writeQueue,
+            liveDbFile: dbFile ?? File(p.join(Directory.current.path, 'market_master.db')),
+            backupDir: _backupTargetDir,
+            hubId: this.hubId,
+            tenantId: this.tenantId,
+            storeId: this.storeId,
+            appVersion: '1.0.0',
+          ),
+          stateStore: this.hubBackupStateStore,
+          recoveryKeyStore: this.hubRecoveryKeyStore,
+          oauthService: this.hubBackupOAuthService,
+          uploader: ResumableDriveUploader(
+            accessTokenProvider: ({bool forceRefresh = false}) =>
+                this.hubBackupOAuthService.getValidAccessToken(
+                      clientId: this.backupOAuthClientId,
+                      clientSecret: this.backupOAuthClientSecret,
+                      forceRefresh: forceRefresh,
+                    ),
+            httpClient: http.Client(),
+            // S5: Merkezi Hub yedekleri eski istemci yedeklerinden ayrı alt klasöre
+            // (`MARKET MMS Yedekleri/Hub`) yüklenir ve kaynak işareti taşır.
+            folderName: MmsDriveBackupFolders.rootFolderName,
+            subfolderName: MmsDriveBackupFolders.hubSubfolderName,
+            extraAppProperties: const {
+              MmsDriveBackupFolders.backupSourceProperty:
+                  MmsDriveBackupFolders.hubBackupSource,
+            },
+          ),
+          operationLock: _backupOperationLock,
+          readSchemaVersion: () => db.schemaVersion,
+          oauthClientId: this.backupOAuthClientId,
+          oauthClientSecret: this.backupOAuthClientSecret,
+        );
+    this.replayProtectionService =
+        replayProtectionService ?? ReplayProtectionService();
     _setupRoutes();
+  }
+
+  String _resolveSecurityDirPath() {
+    final pepperFile = pepperManager.file;
+    if (pepperFile.isAbsolute || pepperFile.path != 'pepper.dpapi') {
+      return pepperFile.parent.path;
+    }
+    if (dbFile != null) {
+      return dbFile!.parent.path;
+    }
+    return _backupTargetDir.path;
+  }
+
+  Future<void> _stopServerResources() async {
+    if (_resourcesStopped) return;
+    _resourcesStopped = true;
+    await Future.wait<void>([
+      hubBackupOrchestrator.shutdown(),
+      if (_backupScheduler != null) _backupScheduler!.stop(),
+    ]);
+    _backupScheduler = null;
+    _pairingCleanupTimer?.cancel();
+    _pairingCleanupTimer = null;
+    await _discoveryResponder?.stop();
+    _discoveryResponder = null;
   }
 
   static PepperManager _resolvePepperManager(PepperManager? provided) {
@@ -443,6 +566,61 @@ class SpikeServer {
     return null;
   }
 
+  /// Ürün için fiyat sürümü tarihçe kaydını (çakışma korumalı anahtar dahil) döner.
+  Future<ProductPriceHistory?> _findPriceHistoryVersionInTx({
+    required String productId,
+    required String priceVersionId,
+  }) async {
+    final scopedId = '$productId::$priceVersionId';
+    return (db.select(db.productPriceHistories)
+          ..where((h) =>
+              h.productId.equals(productId) &
+              (h.id.equals(priceVersionId) | h.id.equals(scopedId))))
+        .getSingleOrNull();
+  }
+
+  /// Fiyat sürümünü `product_price_histories` tablosuna çakışmasız olarak ekler.
+  /// Aynı `id` başka ürüne aitse (örn. varsayılan `pv_init`), `$productId::$priceVersionId`
+  /// kapsamlı anahtarı kullanılır (şema değişikliği gerektirmez).
+  Future<void> _insertPriceHistoryVersionIfAbsentInTx({
+    required String productId,
+    required String priceVersionId,
+    required int price,
+    required DateTime validFrom,
+    DateTime? validUntil,
+    required DateTime createdAt,
+  }) async {
+    final existingForProduct = await _findPriceHistoryVersionInTx(
+      productId: productId,
+      priceVersionId: priceVersionId,
+    );
+    if (existingForProduct != null) {
+      if (validUntil != null && existingForProduct.validUntil == null) {
+        await (db.update(db.productPriceHistories)
+              ..where((h) => h.id.equals(existingForProduct.id)))
+            .write(ProductPriceHistoriesCompanion(validUntil: Value(validUntil)));
+      }
+      return;
+    }
+
+    final collision = await (db.select(db.productPriceHistories)
+          ..where((h) => h.id.equals(priceVersionId)))
+        .getSingleOrNull();
+    final storageId =
+        collision == null ? priceVersionId : '$productId::$priceVersionId';
+
+    await db.into(db.productPriceHistories).insert(
+          ProductPriceHistoriesCompanion(
+            id: Value(storageId),
+            productId: Value(productId),
+            price: Value(price),
+            validFrom: Value(validFrom),
+            validUntil: Value(validUntil),
+            createdAt: Value(createdAt),
+          ),
+        );
+  }
+
   Response _evaluateExistingReceipt({
     required ProcessedOperation existingOp,
     required String operationType,
@@ -659,8 +837,9 @@ class SpikeServer {
     }
 
     if (!_constantTimeEquals(utf8.encode(providedAdminSecret), utf8.encode(effectiveAdminSecret))) {
-      return Response.forbidden(
-        jsonEncode({
+      return Response(
+        403,
+        body: jsonEncode({
           'error': 'FORBIDDEN',
           'code': 'ERR_INVALID_ADMIN_SECRET',
           'message': 'Geçersiz admin secret.',
@@ -672,38 +851,225 @@ class SpikeServer {
     return null;
   }
 
-  /// S5A-4: Merkezi DB'nin şifreli yedeği (manuel admin ucu ve zamanlayıcı ortak yolu).
-  /// VACUUM INTO tek yazıcı kuyruğundan geçer; parola verilmezse DPAPI korumalı pepper kullanılır.
+  Response? _verifyOwnerOrLoopbackAdmin(Request req, {String actionName = 'Bu işlem'}) {
+    final deviceId = req.context['authenticated_device_id'] as String?;
+    final role = (req.context['authenticated_device_role'] as String?)?.toUpperCase();
+    if (deviceId != null) {
+      if (role == 'OWNER') {
+        return null;
+      }
+      return Response(
+        403,
+        body: jsonEncode({
+          'error': 'FORBIDDEN',
+          'code': 'ERR_OWNER_ROLE_REQUIRED',
+          'message': '$actionName için OWNER rolü gereklidir.',
+          'device_id': deviceId,
+          'role': role ?? 'CASHIER',
+        }),
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    return _verifyLoopbackAndAdmin(req, actionName: actionName);
+  }
+
+  static final RegExp _safeBackupIdPattern = RegExp(r'^[A-Za-z0-9_\-]{1,128}$');
+
+  /// Merkezi restore `package_path` doğrulaması (bkz. `/api/v1/backup/restore`).
+  Response? _validateRestorePackagePath(String packagePath, {required bool isRemoteDevice}) {
+    Response deny(int status, String code, String message) => Response(
+          status,
+          body: jsonEncode({'error': 'INVALID_REQUEST', 'code': code, 'message': message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+    if (isRemoteDevice) {
+      return deny(
+        403,
+        'ERR_PACKAGE_PATH_LOOPBACK_ONLY',
+        'Dosya yolundan geri yükleme yalnızca Hub bilgisayarından yapılabilir; uzak cihazlar backup_id kullanmalıdır.',
+      );
+    }
+    final normalized = packagePath.replaceAll('/', r'\');
+    final isUncOrDevice = normalized.startsWith(r'\\');
+    if (isUncOrDevice || !p.isAbsolute(packagePath) || packagePath.contains('\x00')) {
+      return deny(
+        400,
+        'ERR_INVALID_PACKAGE_PATH',
+        'Yedek paketi yerel ve mutlak bir dosya yolu olmalıdır (ağ/UNC yolu kabul edilmez).',
+      );
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>> _decodeJsonBodyOrEmpty(Request req) async {
+    try {
+      final raw = await req.readAsString();
+      if (raw.trim().isEmpty) return const {};
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) return Map<String, dynamic>.from(decoded);
+      stderr.writeln(
+        '[WARN] JSON istek gövdesi beklenen nesne biçiminde değil (${req.requestedUri.path}): ${decoded.runtimeType}',
+      );
+    } catch (e) {
+      stderr.writeln(
+        '[WARN] JSON istek gövdesi ayrıştırılamadı (${req.requestedUri.path}): ${e.runtimeType}',
+      );
+    }
+    return const {};
+  }
+
+  Future<String> _readRestoreEpoch() async {
+    try {
+      final row = await (db.select(db.hubMetadata)
+            ..where((m) => m.key.equals('restore_epoch')))
+          .getSingleOrNull();
+      final val = row?.value.trim();
+      if (val != null && val.isNotEmpty) return val;
+    } catch (e) {
+      stderr.writeln('[WARN] restore_epoch metadata okunamadı: ${e.runtimeType}');
+    }
+    return 'epoch_0';
+  }
+
+  Future<Response?> _verifyReplayProtection(
+    Request req, {
+    required String actionName,
+  }) async {
+    final check = replayProtectionService.verifyAndConsume(
+      timestampHeader: req.headers['x-mms-timestamp'],
+      nonceHeader: req.headers['x-mms-nonce'],
+      scopeKey: req.requestedUri.path,
+    );
+    if (check.accepted) return null;
+
+    final actorId =
+        (req.context['authenticated_device_id'] as String?) ?? 'HUB_ADMIN';
+    if (!writeQueue.isDraining) {
+      await writeQueue.enqueue(() async {
+        await db.into(db.deviceAuditLogs).insert(
+              DeviceAuditLogsCompanion(
+                deviceId: Value(actorId),
+                action: const Value('REPLAY_REJECTED'),
+                details: Value('$actionName: ${check.reason}'),
+              ),
+            );
+      }).catchError((_) {});
+    }
+
+    return Response(
+      403,
+      body: jsonEncode({
+        'error': 'FORBIDDEN',
+        'code': 'ERR_REPLAY_DETECTED',
+        'message': '$actionName için replay koruması reddi: ${check.reason}',
+      }),
+      headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+    );
+  }
+
+  /// Kurtarma anahtarı tanımlı değilken parolasız eski S5A-4 yedek/restore çağrısı.
+  static const String errRecoveryKeyNotConfigured = 'ERR_RECOVERY_KEY_NOT_CONFIGURED';
+
+  /// Eski S5A-4 yedeklerinde zayıf (12 karakterden kısa) açık parola.
+  static const String errWeakRecoveryPassword = 'ERR_WEAK_RECOVERY_PASSWORD';
+
+  /// S5A-4: Merkezi DB'nin şifreli yedeği (manuel admin ucu ve eski aralıklı zamanlayıcı ortak yolu).
+  /// VACUUM INTO tek yazıcı kuyruğundan geçer.
+  ///
+  /// ADR-023 B1.7 / OV-05 / S2: Her zaman Hub üzerinde kayıtlı Portable Recovery Password
+  /// (`backup_recovery_key.dpapi`) kullanır; makineye bağlı `pepper.dpapi` veya istek içi
+  /// parola kabul edilmez. Tanımlı değilse fail-closed [errRecoveryKeyNotConfigured] fırlatır.
   Future<BackupResult> createEncryptedHubBackup({
-    String? backupPassword,
     bool isMonthlyArchive = false,
   }) {
     final targetLiveDb = dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
     return _backupOperationLock.synchronized(
       BackupOperationKind.backup,
-      () => DatabaseBackupEngine.createBackup(
-        liveDbFile: targetLiveDb,
-        executeVacuumInto: (snapPath) async {
-          await writeQueue.enqueue(() async {
-            final escaped = snapPath.replaceAll("'", "''");
-            await db.customStatement("VACUUM INTO '$escaped';");
-          });
-        },
-        deviceId: 'SERVER_HUB',
-        tenantId: tenantId,
-        storeId: storeId,
-        databaseType: DatabaseType.centralMaster,
-        schemaVersion: db.schemaVersion,
-        appVersion: '1.0.0',
-        backupPassword: backupPassword ?? pepperManager.pepper,
-        storageProvider: LocalStorageProvider(_backupTargetDir),
-        isMonthlyArchive: isMonthlyArchive,
-      ),
+      () async {
+        final password = await _resolvePortableBackupPassword(
+          null,
+          enforceMinimumLength: true,
+        );
+        return DatabaseBackupEngine.createBackup(
+          liveDbFile: targetLiveDb,
+          executeVacuumInto: (snapPath) async {
+            await writeQueue.enqueue(() async {
+              final escaped = snapPath.replaceAll("'", "''");
+              await db.customStatement("VACUUM INTO '$escaped';");
+            });
+          },
+          deviceId: 'SERVER_HUB',
+          tenantId: tenantId,
+          storeId: storeId,
+          databaseType: DatabaseType.centralMaster,
+          schemaVersion: db.schemaVersion,
+          appVersion: '1.0.0',
+          backupPassword: password,
+          storageProvider: LocalStorageProvider(_backupTargetDir),
+          isMonthlyArchive: isMonthlyArchive,
+        );
+      },
     );
   }
 
+  /// Açık parola → (yoksa) Portable Recovery Password kasası. Pepper fallback'i yoktur.
+  ///
+  /// [enforceMinimumLength] yalnızca YENİ yedek üretiminde uygulanır; eski
+  /// (12 karakterden kısa parolayla alınmış) yedeklerin geri yüklenebilirliği korunur.
+  Future<String> _resolvePortableBackupPassword(
+    String? explicitPassword, {
+    required bool enforceMinimumLength,
+  }) async {
+    if (explicitPassword != null) {
+      if (enforceMinimumLength) {
+        try {
+          MmsbakV2Crypto.validateRecoveryPassword(explicitPassword);
+        } on BackupCryptoException catch (e) {
+          throw BackupException(errWeakRecoveryPassword, e.message);
+        }
+      }
+      return explicitPassword;
+    }
+    final String? stored;
+    try {
+      stored = await hubRecoveryKeyStore.loadRecoveryPassword();
+    } on HubRecoveryKeyException catch (e) {
+      throw BackupException(e.code, e.message);
+    }
+    if (stored == null) {
+      throw const BackupException(
+        errRecoveryKeyNotConfigured,
+        'Hub Portable Recovery Password tanımlı değil. Önce POST /api/v1/backup/recovery-key '
+        'ile en az 12 karakterlik kurtarma parolası belirleyin.',
+      );
+    }
+    if (enforceMinimumLength) {
+      try {
+        MmsbakV2Crypto.validateRecoveryPassword(stored);
+      } on BackupCryptoException catch (e) {
+        throw BackupException(errWeakRecoveryPassword, e.message);
+      }
+    }
+    return stored;
+  }
+
+  /// Eski S5A-4 uçlarında [BackupException] kodunu HTTP durumuna eşler.
+  static int _legacyBackupErrorStatus(String code, {required int fallback}) {
+    if (code == BackupOperationLock.busyErrorCode) return 409;
+    if (code == errRecoveryKeyNotConfigured ||
+        code == 'ERR_RECOVERY_KEY_CORRUPTED' ||
+        code == 'ERR_CORRUPT_RECOVERY_KEY' ||
+        code == 'ERR_DPAPI_RECOVERY_KEY' ||
+        code == errWeakRecoveryPassword) {
+      return 412;
+    }
+    return fallback;
+  }
+
   /// `/health` için hassas veri (yol, hata ayrıntısı) içermeyen yedek özeti.
-  Map<String, dynamic> _publicBackupHealth() {
+  Map<String, dynamic> _publicBackupHealth({
+    bool? recoveryKeyConfigured,
+  }) {
     final policy = backupSchedule ?? BackupSchedulePolicy.disabled;
     final state = _backupScheduleState ?? BackupScheduleState.empty;
     return {
@@ -712,6 +1078,11 @@ class SpikeServer {
       'overdue': policy.isOverdue(state: state, now: DateTime.now().toUtc()),
       'consecutive_failures': state.consecutiveFailures,
       'last_error_code': state.lastErrorCode,
+      if (recoveryKeyConfigured != null)
+        'recovery_key_configured': recoveryKeyConfigured,
+      if (hubBackupOrchestrator.lastSchedulerError != null)
+        'central_scheduler_last_error_code':
+            hubBackupOrchestrator.lastSchedulerError!.code,
     };
   }
 
@@ -725,13 +1096,22 @@ class SpikeServer {
       readPolicy: () => policy,
       stateStore: store,
       createBackup: () => createEncryptedHubBackup(),
-      pruneExpired: () => _backupOperationLock.synchronized(
-        BackupOperationKind.backup,
-        () => RetentionPolicyManager(policy: policy.retention).executePruning(
-          LocalStorageProvider(_backupTargetDir),
-          databaseType: DatabaseType.centralMaster,
-        ),
-      ),
+      pruneExpired: () async {
+        try {
+          return await _backupOperationLock.synchronized(
+            BackupOperationKind.backup,
+            () => RetentionPolicyManager(policy: policy.retention).executePruning(
+              LocalStorageProvider(_backupTargetDir),
+              databaseType: DatabaseType.centralMaster,
+            ),
+          );
+        } on BackupException catch (e) {
+          if (e.code == BackupOperationLock.busyErrorCode) {
+            return const <String>[];
+          }
+          rethrow;
+        }
+      },
     );
     _backupScheduler = BackupScheduler(
       runner: runner,
@@ -740,7 +1120,7 @@ class SpikeServer {
         _backupScheduleState = await store.load();
         final outcome = record.success
             ? 'BAŞARILI (${record.backupId}, ${record.sizeBytes} bayt, temizlenen: ${record.prunedCount})'
-            : 'BAŞARISIZ [${record.errorCode}] ${record.errorMessage}';
+            : 'BAŞARISIZ [${record.errorCode}] ${redactLogText(record.errorMessage ?? '')}';
         print('[BACKUP] Zamanlanmış Hub yedeği: $outcome');
       },
     )..start();
@@ -766,13 +1146,23 @@ class SpikeServer {
 
     // 1. Health check (Sistem ve SQLite sürümü maskelenmiştir)
     _router.get('/health', (Request req) async {
+      final restoreEpoch = await _readRestoreEpoch();
+      var recoveryKeyConfigured = false;
+      try {
+        recoveryKeyConfigured = await hubRecoveryKeyStore.hasRecoveryPassword();
+      } catch (_) {
+        recoveryKeyConfigured = false;
+      }
       return Response.ok(
         jsonEncode({
           'status': 'UP',
           'timestamp': DateTime.now().toIso8601String(),
           'sqlite_version': 'masked', // Sistem sürümü sızıntısını önlemek için maskelendi
+          'restore_epoch': restoreEpoch,
           'queue_metrics': writeQueue.metrics.toJson(),
-          'backup': _publicBackupHealth(),
+          'backup': _publicBackupHealth(
+            recoveryKeyConfigured: recoveryKeyConfigured,
+          ),
         }),
         headers: {'content-type': 'application/json'},
       );
@@ -1391,7 +1781,11 @@ class SpikeServer {
       if (bodyStr.isNotEmpty) {
         try {
           body = jsonDecode(bodyStr) as Map<String, dynamic>;
-        } catch (_) {}
+        } catch (e) {
+          stderr.writeln(
+            '[WARN] İstek JSON gövdesi ayrıştırılamadı (${req.requestedUri.path}): ${e.runtimeType}',
+          );
+        }
       }
 
       final targetDeviceId = body['device_id'] as String?;
@@ -1431,6 +1825,27 @@ class SpikeServer {
         );
       }
 
+      if (device.role.toUpperCase() == 'OWNER') {
+        final activeOwners = await (db.select(db.devices)
+              ..where((d) =>
+                  d.isActive.equals(true) &
+                  d.isConfirmed.equals(true) &
+                  d.role.equals('OWNER')))
+            .get();
+        if (activeOwners.length <= 1 &&
+            activeOwners.any((o) => o.deviceId == targetDeviceId)) {
+          return Response(
+            409,
+            body: jsonEncode({
+              'error': 'CONFLICT',
+              'code': 'ERR_LAST_OWNER_PROTECTED',
+              'message': 'Son aktif OWNER cihazı iptal edilemez.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      }
+
       await writeQueue.enqueue(() async {
         await (db.update(db.devices)..where((d) => d.deviceId.equals(targetDeviceId))).write(
               const DevicesCompanion(isActive: Value(false)),
@@ -1450,6 +1865,287 @@ class SpikeServer {
           'device_id': targetDeviceId,
         }),
         headers: {'content-type': 'application/json'},
+      );
+    });
+
+    // 4.0a. OV-04: Tek Seferlik, Tekrar Kullanılamaz Hub OWNER Bootstrap (Loopback + Admin Secret)
+    _router.post('/api/v1/admin/owner/bootstrap', (Request req) async {
+      final adminDenied = _verifyLoopbackAndAdmin(
+        req,
+        actionName: 'Tek seferlik OWNER bootstrap',
+      );
+      if (adminDenied != null) return adminDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final targetDeviceId = (body['device_id'] as String?)?.trim() ?? '';
+      final registerIfMissing = (body['register_if_missing'] as bool?) ?? false;
+      final deviceName =
+          (body['name'] as String?)?.trim() ?? 'Windows Master Hub (OWNER)';
+      if (targetDeviceId.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_DEVICE_ID_REQUIRED',
+            'message': 'device_id zorunludur.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      try {
+        String? issuedToken;
+        await writeQueue.enqueue(() async {
+          await db.transaction(() async {
+            final sealed = await (db.select(db.hubMetadata)
+                  ..where((m) => m.key.equals('owner_bootstrap_completed')))
+                .getSingleOrNull();
+            if (sealed != null && sealed.value == 'true') {
+              throw _ValidationException(
+                409,
+                'ERR_OWNER_ALREADY_BOOTSTRAPPED',
+                'Tek seferlik OWNER bootstrap daha önce tamamlanmıştır; tekrar kullanılamaz.',
+              );
+            }
+
+            final existing = await (db.select(db.devices)
+                  ..where((d) => d.deviceId.equals(targetDeviceId)))
+                .getSingleOrNull();
+            if (existing != null) {
+              if (!existing.isActive) {
+                throw _ValidationException(
+                  409,
+                  'ERR_DEVICE_REVOKED',
+                  'İptal edilmiş cihaz OWNER yapılamaz.',
+                );
+              }
+              await (db.update(db.devices)
+                    ..where((d) => d.deviceId.equals(targetDeviceId)))
+                  .write(const DevicesCompanion(
+                role: Value('OWNER'),
+                isConfirmed: Value(true),
+              ));
+            } else if (registerIfMissing) {
+              final rawTok = TokenManager.generateToken();
+              final salt = TokenManager.generateSalt();
+              final tokHash = TokenManager.hashToken(
+                rawToken: rawTok,
+                salt: salt,
+                pepper: pepperManager.pepper,
+              );
+              await db.into(db.devices).insert(
+                    DevicesCompanion(
+                      deviceId: Value(targetDeviceId),
+                      name: Value(deviceName),
+                      tokenHash: Value(tokHash),
+                      salt: Value(salt),
+                      isActive: const Value(true),
+                      isConfirmed: const Value(true),
+                      role: const Value('OWNER'),
+                    ),
+                  );
+              issuedToken = rawTok;
+            } else {
+              throw _ValidationException(
+                404,
+                'ERR_DEVICE_NOT_FOUND',
+                'Bootstrap edilecek cihaz bulunamadı: $targetDeviceId',
+              );
+            }
+
+            final now = DateTime.now().toUtc();
+            await db.into(db.hubMetadata).insertOnConflictUpdate(
+                  HubMetadataCompanion(
+                    key: const Value('owner_bootstrap_completed'),
+                    value: const Value('true'),
+                    updatedAt: Value(now),
+                  ),
+                );
+            await db.into(db.hubMetadata).insertOnConflictUpdate(
+                  HubMetadataCompanion(
+                    key: const Value('owner_bootstrap_device_id'),
+                    value: Value(targetDeviceId),
+                    updatedAt: Value(now),
+                  ),
+                );
+            await db.into(db.deviceAuditLogs).insert(
+                  DeviceAuditLogsCompanion(
+                    deviceId: Value(targetDeviceId),
+                    action: const Value('OWNER_BOOTSTRAP'),
+                    details: const Value('One-time Hub OWNER bootstrap sealed'),
+                  ),
+                );
+          });
+        });
+
+        return Response.ok(
+          jsonEncode({
+            'status': 'BOOTSTRAPPED',
+            'device_id': targetDeviceId,
+            'role': 'OWNER',
+            if (issuedToken != null) 'token': issuedToken,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on _ValidationException catch (e) {
+        return Response(
+          e.statusCode,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    // 4.0b. OV-04: Cihaz Rolü Değiştirme (OWNER veya Loopback + Admin + Replay)
+    _router.post('/api/v1/devices/role', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Cihaz rolü yönetimi',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Cihaz rolü yönetimi',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final targetDeviceId = (body['device_id'] as String?)?.trim() ?? '';
+      final nextRole = (body['role'] as String?)?.trim().toUpperCase() ?? '';
+      if (targetDeviceId.isEmpty ||
+          (nextRole != 'OWNER' && nextRole != 'CASHIER')) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_INVALID_ROLE',
+            'message': 'device_id ve geçerli rol (OWNER / CASHIER) zorunludur.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      final actorId =
+          (req.context['authenticated_device_id'] as String?) ?? 'HUB_ADMIN';
+      try {
+        await writeQueue.enqueue(() async {
+          await db.transaction(() async {
+            final target = await (db.select(db.devices)
+                  ..where((d) => d.deviceId.equals(targetDeviceId)))
+                .getSingleOrNull();
+            if (target == null) {
+              throw _ValidationException(
+                404,
+                'ERR_DEVICE_NOT_FOUND',
+                'Cihaz bulunamadı: $targetDeviceId',
+              );
+            }
+            if (!target.isActive) {
+              throw _ValidationException(
+                409,
+                'ERR_DEVICE_REVOKED',
+                'İptal edilmiş cihazın rolü değiştirilemez.',
+              );
+            }
+            if (target.role.toUpperCase() == 'OWNER' && nextRole == 'CASHIER') {
+              final owners = await (db.select(db.devices)
+                    ..where((d) =>
+                        d.isActive.equals(true) &
+                        d.isConfirmed.equals(true) &
+                        d.role.equals('OWNER')))
+                  .get();
+              if (owners.length <= 1 &&
+                  owners.any((o) => o.deviceId == targetDeviceId)) {
+                throw _ValidationException(
+                  409,
+                  'ERR_LAST_OWNER_PROTECTED',
+                  'Son aktif OWNER cihaz CASHIER rolüne düşürülemez.',
+                );
+              }
+            }
+            await (db.update(db.devices)
+                  ..where((d) => d.deviceId.equals(targetDeviceId)))
+                .write(DevicesCompanion(role: Value(nextRole)));
+            await db.into(db.deviceAuditLogs).insert(
+                  DeviceAuditLogsCompanion(
+                    deviceId: Value(actorId),
+                    action: const Value('DEVICE_ROLE_CHANGE'),
+                    details: Value('target=$targetDeviceId role=$nextRole'),
+                  ),
+                );
+          });
+        });
+        return Response.ok(
+          jsonEncode({
+            'status': 'UPDATED',
+            'device_id': targetDeviceId,
+            'role': nextRole,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on _ValidationException catch (e) {
+        return Response(
+          e.statusCode,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    // 4.0c. AUD-MED-04: Doğrulanmış Cihaz Kimliği & Yetkili Rol Kaynağı (Fail-Closed)
+    _router.get('/api/v1/devices/me', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null || deviceId.isEmpty) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Cihaz rolü sorgulaması için geçerli bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      final device = await (db.select(db.devices)
+            ..where((d) => d.deviceId.equals(deviceId)))
+          .getSingleOrNull();
+      if (device == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'DEVICE_NOT_FOUND',
+            'code': 'ERR_DEVICE_NOT_FOUND',
+            'message': 'Yetkili cihaz kaydı bulunamadı.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      final bootstrapMeta = await (db.select(db.hubMetadata)
+            ..where((m) => m.key.equals('owner_bootstrap_completed')))
+          .getSingleOrNull();
+      final ownerBootstrapCompleted = bootstrapMeta?.value == 'true';
+      final restoreEpoch = await _readRestoreEpoch();
+      final canonicalRole =
+          device.role.toUpperCase() == 'OWNER' ? 'OWNER' : 'CASHIER';
+
+      return Response.ok(
+        jsonEncode({
+          'device_id': device.deviceId,
+          'name': device.name,
+          'role': canonicalRole,
+          'is_active': device.isActive,
+          'is_confirmed': device.isConfirmed,
+          'owner_bootstrap_completed': ownerBootstrapCompleted,
+          'restore_epoch': restoreEpoch,
+          'expires_at': device.expiresAt?.toUtc().toIso8601String(),
+          'tenant_id': tenantId,
+          'store_id': storeId,
+          'hub_id': hubId,
+          'server_time': DateTime.now().toUtc().toIso8601String(),
+        }),
+        headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
       );
     });
 
@@ -1493,20 +2189,47 @@ class SpikeServer {
       final now = DateTime.now();
 
       final products = await db.select(db.products).get();
-      final items = products.map((p) => {
-        'id': p.id,
-        'barcode': p.barcode,
-        'name': p.name,
-        'price': p.price,
-        'price_version_id': p.priceVersionId,
-        'stock': p.stock,
-        'stock_unit': p.stockUnit,
-        'pricing_unit': p.pricingUnit,
-        'conversion_factor_numerator': p.conversionFactorNumerator,
-        'conversion_factor_denominator': p.conversionFactorDenominator,
-        'is_active': p.isActive,
-        'barcodes': [p.barcode],
-        'updated_at': p.updatedAt.toIso8601String(),
+      final activeBarcodes = await (db.select(db.productBarcodes)
+            ..where((b) => b.isActive.equals(true))
+            ..orderBy([
+              (b) => OrderingTerm.desc(b.isPrimary),
+              (b) => OrderingTerm.asc(b.createdAt),
+            ]))
+          .get();
+      final barcodesByProductId = <String, List<String>>{};
+      for (final row in activeBarcodes) {
+        final list = barcodesByProductId.putIfAbsent(row.productId, () => <String>[]);
+        if (!list.contains(row.barcode)) {
+          list.add(row.barcode);
+        }
+      }
+
+      final items = products.map((p) {
+        final combined = <String>[
+          if (p.barcode.trim().isNotEmpty) p.barcode.trim(),
+          ...?barcodesByProductId[p.id],
+        ];
+        final deduped = <String>[];
+        for (final bc in combined) {
+          if (bc.isNotEmpty && !deduped.contains(bc)) {
+            deduped.add(bc);
+          }
+        }
+        return {
+          'id': p.id,
+          'barcode': p.barcode,
+          'name': p.name,
+          'price': p.price,
+          'price_version_id': p.priceVersionId,
+          'stock': p.stock,
+          'stock_unit': p.stockUnit,
+          'pricing_unit': p.pricingUnit,
+          'conversion_factor_numerator': p.conversionFactorNumerator,
+          'conversion_factor_denominator': p.conversionFactorDenominator,
+          'is_active': p.isActive,
+          'barcodes': deduped,
+          'updated_at': p.updatedAt.toIso8601String(),
+        };
       }).toList();
 
       String? syncSessionId;
@@ -1681,7 +2404,11 @@ class SpikeServer {
       if (bodyStr.isNotEmpty) {
         try {
           body = jsonDecode(bodyStr) as Map<String, dynamic>;
-        } catch (_) {}
+        } catch (e) {
+          stderr.writeln(
+            '[WARN] İstek JSON gövdesi ayrıştırılamadı (${req.requestedUri.path}): ${e.runtimeType}',
+          );
+        }
       }
 
       final syncSessionId = body['sync_session_id'] as String?;
@@ -1854,7 +2581,8 @@ class SpikeServer {
         );
       }
 
-      final operationId = body['operation_id'] as String? ?? 'op_prod_${prodId}_$clientSeq';
+      final operationId =
+          body['operation_id'] as String? ?? 'op_prod_${deviceId}_${prodId}_$clientSeq';
       final idempotencyKey = '$deviceId:$clientSeq';
       final incomingCanonicalHash = CanonicalPayloadHasher.computeCanonicalV2(
         operationType: 'PRODUCT_UPSERT',
@@ -1898,36 +2626,148 @@ class SpikeServer {
                 .getSingleOrNull();
 
             final now = DateTime.now();
+            final hasBarcodesField = productData.containsKey('barcodes');
+            final extraBarcodes = <String>[];
+            if (hasBarcodesField && productData['barcodes'] != null) {
+              final rawList = productData['barcodes'];
+              if (rawList is! List) {
+                throw _ValidationException(
+                  400,
+                  'ERR_INVALID_BARCODES',
+                  'barcodes alanı metin listesi olmalıdır.',
+                );
+              }
+              for (final entry in rawList) {
+                if (entry is! String) {
+                  throw _ValidationException(
+                    400,
+                    'ERR_INVALID_BARCODES',
+                    'barcodes listesindeki tüm elemanlar metin olmalıdır.',
+                  );
+                }
+                final clean = entry.trim();
+                if (clean.isNotEmpty && !extraBarcodes.contains(clean)) {
+                  extraBarcodes.add(clean);
+                }
+              }
+            }
+
+            // GAP-A01: `barcodes` alanını gönderen istemci ürünün TAM barkod kümesini
+            // bildirir. Son barkod silindiyse (barcode boş + barcodes boş) eski barkoda
+            // geri düşülmez; aksi halde silinen barkod Hub'da aktif kalır ve ürün
+            // indirmesinde istemciye geri dirilirdi. Barkodsuz yeni ürünlerle aynı
+            // `prodId` yer tutucusu kullanılır. `barcodes` alanı olmayan eski istemciler
+            // için önceki davranış korunur.
             final effectiveBarcode = barcode?.trim().isNotEmpty == true
                 ? barcode!.trim()
-                : (existingProduct?.barcode ?? prodId);
+                : (extraBarcodes.isNotEmpty
+                    ? extraBarcodes.first
+                    : (hasBarcodesField ? prodId : (existingProduct?.barcode ?? prodId)));
 
-            // Başka bir üründe bu barkod var mı?
-            final barcodeDuplicate = await (db.select(db.products)
-                  ..where((p) => p.barcode.equals(effectiveBarcode) & p.id.isNotValue(prodId)))
-                .getSingleOrNull();
-            if (barcodeDuplicate != null) {
-              throw _ValidationException(
-                409,
-                'ERR_DUPLICATE_BARCODE',
-                'Bu barkod ($effectiveBarcode) başka bir üründe kayıtlı: ${barcodeDuplicate.name}',
-              );
+            final allIncomingBarcodes = <String>[
+              effectiveBarcode,
+              for (final b in extraBarcodes)
+                if (b != effectiveBarcode) b,
+            ];
+
+            // Başka bir üründe bu barkodlardan herhangi biri var mı?
+            for (final candidateBc in allIncomingBarcodes) {
+              final barcodeDuplicate = await (db.select(db.products)
+                    ..where((p) => p.barcode.equals(candidateBc) & p.id.isNotValue(prodId)))
+                  .getSingleOrNull();
+              if (barcodeDuplicate != null) {
+                throw _ValidationException(
+                  409,
+                  'ERR_DUPLICATE_BARCODE',
+                  'Bu barkod ($candidateBc) başka bir üründe kayıtlı: ${barcodeDuplicate.name}',
+                );
+              }
+              final secondaryDuplicate = await (db.select(db.productBarcodes)
+                    ..where((b) =>
+                        b.barcode.equals(candidateBc) & b.productId.isNotValue(prodId)))
+                  .getSingleOrNull();
+              if (secondaryDuplicate != null) {
+                throw _ValidationException(
+                  409,
+                  'ERR_DUPLICATE_BARCODE',
+                  'Bu barkod ($candidateBc) başka bir ürüne (${secondaryDuplicate.productId}) atanmış.',
+                );
+              }
             }
+
+            final rawIncomingPv =
+                (productData['price_version_id'] as String?)?.trim();
+            final incomingPv =
+                (rawIncomingPv != null && rawIncomingPv.isNotEmpty)
+                    ? rawIncomingPv
+                    : null;
 
             String priceVersionId;
             if (existingProduct != null) {
-              priceVersionId = existingProduct.priceVersionId;
               if (existingProduct.price != price) {
-                priceVersionId = 'pv_${now.microsecondsSinceEpoch}';
-                await db.into(db.productPriceHistories).insert(
-                  ProductPriceHistoriesCompanion(
-                    id: Value('ph_${now.microsecondsSinceEpoch}'),
-                    productId: Value(prodId),
-                    price: Value(price),
-                    validFrom: Value(now),
-                    createdAt: Value(now),
-                  ),
+                // Önceki aktif fiyat sürümünü tarihçede güvenceye al ve geçerlilik bitişini kapat.
+                await _insertPriceHistoryVersionIfAbsentInTx(
+                  productId: prodId,
+                  priceVersionId: existingProduct.priceVersionId,
+                  price: existingProduct.price,
+                  validFrom: existingProduct.updatedAt,
+                  validUntil: now,
+                  createdAt: now,
                 );
+                await (db.update(db.productPriceHistories)
+                      ..where((h) =>
+                          h.productId.equals(prodId) & h.validUntil.isNull()))
+                    .write(
+                        ProductPriceHistoriesCompanion(validUntil: Value(now)));
+
+                if (incomingPv != null &&
+                    incomingPv != existingProduct.priceVersionId) {
+                  final existingMatch = await _findPriceHistoryVersionInTx(
+                    productId: prodId,
+                    priceVersionId: incomingPv,
+                  );
+                  if (existingMatch == null || existingMatch.price == price) {
+                    priceVersionId = incomingPv;
+                  } else {
+                    priceVersionId = 'pv_${now.microsecondsSinceEpoch}';
+                  }
+                } else {
+                  priceVersionId = 'pv_${now.microsecondsSinceEpoch}';
+                }
+
+                await _insertPriceHistoryVersionIfAbsentInTx(
+                  productId: prodId,
+                  priceVersionId: priceVersionId,
+                  price: price,
+                  validFrom: now,
+                  createdAt: now,
+                );
+              } else {
+                priceVersionId = existingProduct.priceVersionId;
+                if (incomingPv != null &&
+                    incomingPv != existingProduct.priceVersionId) {
+                  final existingMatch = await _findPriceHistoryVersionInTx(
+                    productId: prodId,
+                    priceVersionId: incomingPv,
+                  );
+                  if (existingMatch == null) {
+                    await _insertPriceHistoryVersionIfAbsentInTx(
+                      productId: prodId,
+                      priceVersionId: existingProduct.priceVersionId,
+                      price: existingProduct.price,
+                      validFrom: existingProduct.updatedAt,
+                      createdAt: now,
+                    );
+                    await _insertPriceHistoryVersionIfAbsentInTx(
+                      productId: prodId,
+                      priceVersionId: incomingPv,
+                      price: price,
+                      validFrom: now,
+                      createdAt: now,
+                    );
+                    priceVersionId = incomingPv;
+                  }
+                }
               }
 
               await (db.update(db.products)..where((p) => p.id.equals(prodId))).write(
@@ -1948,7 +2788,8 @@ class SpikeServer {
                 ),
               );
             } else {
-              priceVersionId = productData['price_version_id'] as String? ?? 'pv_init_${now.microsecondsSinceEpoch}';
+              priceVersionId =
+                  incomingPv ?? 'pv_init_${now.microsecondsSinceEpoch}';
               await db.into(db.products).insert(
                 ProductsCompanion(
                   id: Value(prodId),
@@ -1966,15 +2807,64 @@ class SpikeServer {
                 ),
               );
 
-              await db.into(db.productPriceHistories).insert(
-                ProductPriceHistoriesCompanion(
-                  id: Value('ph_${now.microsecondsSinceEpoch}'),
-                  productId: Value(prodId),
-                  price: Value(price),
-                  validFrom: Value(now),
-                  createdAt: Value(now),
-                ),
+              await _insertPriceHistoryVersionIfAbsentInTx(
+                productId: prodId,
+                priceVersionId: priceVersionId,
+                price: price,
+                validFrom: now,
+                createdAt: now,
               );
+            }
+
+            // GAP-A01: Çoklu/ikincil barkodları Hub product_barcodes tablosuna atomik işle
+            if (hasBarcodesField) {
+              final existingBcRows = await (db.select(db.productBarcodes)
+                    ..where((b) => b.productId.equals(prodId)))
+                  .get();
+              for (final oldRow in existingBcRows) {
+                if (!allIncomingBarcodes.contains(oldRow.barcode)) {
+                  await (db.update(db.productBarcodes)
+                        ..where((b) => b.id.equals(oldRow.id)))
+                      .write(const ProductBarcodesCompanion(
+                        isActive: Value(false),
+                        isPrimary: Value(false),
+                      ));
+                }
+              }
+            } else {
+              await (db.update(db.productBarcodes)
+                    ..where((b) => b.productId.equals(prodId)))
+                  .write(const ProductBarcodesCompanion(isPrimary: Value(false)));
+            }
+
+            for (var idx = 0; idx < allIncomingBarcodes.length; idx++) {
+              final bcVal = allIncomingBarcodes[idx];
+              final isPrimaryBc = bcVal == effectiveBarcode;
+              final existingBc = await (db.select(db.productBarcodes)
+                    ..where((b) => b.barcode.equals(bcVal)))
+                  .getSingleOrNull();
+              if (existingBc != null) {
+                await (db.update(db.productBarcodes)
+                      ..where((b) => b.id.equals(existingBc.id)))
+                    .write(ProductBarcodesCompanion(
+                      isPrimary: Value(isPrimaryBc),
+                      isActive: const Value(true),
+                    ));
+              } else {
+                final bcRowId = isPrimaryBc
+                    ? 'bc_${prodId}_primary_${now.microsecondsSinceEpoch}'
+                    : 'bc_${prodId}_alt_${idx}_${now.microsecondsSinceEpoch}';
+                await db.into(db.productBarcodes).insert(
+                  ProductBarcodesCompanion(
+                    id: Value(bcRowId),
+                    productId: Value(prodId),
+                    barcode: Value(bcVal),
+                    isPrimary: Value(isPrimaryBc),
+                    isActive: const Value(true),
+                    createdAt: Value(now),
+                  ),
+                );
+              }
             }
 
             final res = {
@@ -2028,12 +2918,13 @@ class SpikeServer {
           headers: {'content-type': 'application/json'},
         );
       } catch (e, stack) {
-        stderr.writeln('PRODUCT_UPSERT işlenirken beklenmeyen hata: $e\n$stack');
+        final safeErr = redactLogText('$e\n$stack');
+        stderr.writeln('PRODUCT_UPSERT işlenirken beklenmeyen hata: $safeErr');
         return Response.internalServerError(
           body: jsonEncode({
             'error': 'INTERNAL_ERROR',
             'code': 'ERR_INTERNAL_SERVER_ERROR',
-            'message': 'Ürün kaydedilirken sunucu hatası oluştu: $e',
+            'message': 'Ürün kaydedilirken sunucu hatası oluştu: ${redactLogText(e.toString())}',
           }),
           headers: {'content-type': 'application/json'},
         );
@@ -2252,7 +3143,9 @@ class SpikeServer {
       } on _ValidationException catch (e) {
         return _validationErrorResponse(e);
       } catch (e, stack) {
-        stderr.writeln('STOCK_RECEIPT işlenirken beklenmeyen hata: $e\n$stack');
+        stderr.writeln(
+          'STOCK_RECEIPT işlenirken beklenmeyen hata: ${redactLogText('$e\n$stack')}',
+        );
         return Response.internalServerError(
           body: jsonEncode({
             'error': 'INTERNAL_ERROR',
@@ -2595,12 +3488,13 @@ class SpikeServer {
         } on _ValidationException catch (e) {
           return _validationErrorResponse(e);
         } catch (e) {
-          stderr.writeln('[ERROR] Satış iptal transaction hatası: $e');
+          final safeErr = redactLogText(e.toString());
+          stderr.writeln('[ERROR] Satış iptal transaction hatası: $safeErr');
           return Response.internalServerError(
             body: jsonEncode({
               'error': 'TRANSACTION_FAILED',
               'code': 'ERR_TRANSACTION_FAILED',
-              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $e',
+              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $safeErr',
             }),
             headers: {'content-type': 'application/json'},
           );
@@ -3063,12 +3957,13 @@ class SpikeServer {
         } on _ValidationException catch (e) {
           return _validationErrorResponse(e);
         } catch (e) {
-          stderr.writeln('[ERROR] Kısmi iade transaction hatası: $e');
+          final safeErr = redactLogText(e.toString());
+          stderr.writeln('[ERROR] Kısmi iade transaction hatası: $safeErr');
           return Response.internalServerError(
             body: jsonEncode({
               'error': 'TRANSACTION_FAILED',
               'code': 'ERR_TRANSACTION_FAILED',
-              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $e',
+              'message': 'Sunucu tarafında işlem işlenirken hata oluştu: $safeErr',
             }),
             headers: {'content-type': 'application/json'},
           );
@@ -3187,9 +4082,10 @@ class SpikeServer {
                 }
               } else {
                 // Belirtilen fiyat sürümü için geçmiş fiyat defteri doğrulaması
-                final historyMatch = await (db.select(db.productPriceHistories)
-                      ..where((h) => h.id.equals(priceVersionId) & h.productId.equals(pId)))
-                    .getSingleOrNull();
+                final historyMatch = await _findPriceHistoryVersionInTx(
+                  productId: pId,
+                  priceVersionId: priceVersionId,
+                );
 
                 if (historyMatch == null) {
                   throw _ValidationException(
@@ -3211,7 +4107,7 @@ class SpikeServer {
                 // Cihazın son ürün senkronizasyon zamanı, fiyatın geçerlilik bitişinden (validUntil) sonra ise bu sürümü kullanamaz!
                 final device = await (db.select(db.devices)..where((d) => d.deviceId.equals(deviceId))).getSingleOrNull();
                 if (historyMatch.validUntil != null && device != null && device.lastProductSyncAt != null) {
-                  if (!device.lastProductSyncAt!.isBefore(historyMatch.validUntil!)) {
+                  if (device.lastProductSyncAt!.isAfter(historyMatch.validUntil!)) {
                     throw _ValidationException(
                       400,
                       'ERR_PRICE_VERSION_EXPIRED_FOR_DEVICE',
@@ -3403,7 +4299,9 @@ class SpikeServer {
           headers: {'content-type': 'application/json'},
         );
       } catch (e) {
-        stderr.writeln('[ERROR] Satış transaction hatası: ${e.runtimeType} -> $e');
+        stderr.writeln(
+          '[ERROR] Satış transaction hatası: ${e.runtimeType} -> ${redactLogText(e.toString())}',
+        );
         return Response.internalServerError(
           body: jsonEncode({
             'error': 'TRANSACTION_FAILED',
@@ -3432,13 +4330,19 @@ class SpikeServer {
 
       final snapshot = await DeviceSequenceInspector.inspectDevice(db, deviceId);
       final hwm = snapshot.hwmSummary;
+      final restoreEpoch = await _readRestoreEpoch();
+      final rawRole =
+          (req.context['authenticated_device_role'] as String?)?.toUpperCase();
+      final canonicalRole = rawRole == 'OWNER' ? 'OWNER' : 'CASHIER';
 
       return Response.ok(
         jsonEncode({
           'device_id': deviceId,
+          'role': canonicalRole,
           'tenant_id': tenantId,
           'store_id': storeId,
           'hub_id': hubId,
+          'restore_epoch': restoreEpoch,
           'high_water_mark_seq': hwm.contiguousHwm,
           'max_seen_client_seq': hwm.maxSeenClientSeq,
           'expected_next_client_seq': hwm.expectedNextClientSeq,
@@ -3668,12 +4572,14 @@ class SpikeServer {
         }
       }
 
+      final restoreEpoch = await _readRestoreEpoch();
       return Response.ok(
         jsonEncode({
           'device_id': deviceId,
           'tenant_id': tenantId,
           'store_id': storeId,
           'hub_id': hubId,
+          'restore_epoch': restoreEpoch,
           'high_water_mark_seq': hwm.contiguousHwm,
           'max_seen_client_seq': hwm.maxSeenClientSeq,
           'expected_next_client_seq': hwm.expectedNextClientSeq,
@@ -3699,7 +4605,11 @@ class SpikeServer {
       if (bodyStr.isNotEmpty) {
         try {
           body = jsonDecode(bodyStr) as Map<String, dynamic>;
-        } catch (_) {}
+        } catch (e) {
+          stderr.writeln(
+            '[WARN] İstek JSON gövdesi ayrıştırılamadı (${req.requestedUri.path}): ${e.runtimeType}',
+          );
+        }
       }
 
       // SQL Injection karakter kontrolü (Şüpheli karakterler anında 400 ile reddedilir)
@@ -3765,18 +4675,52 @@ class SpikeServer {
 
       final bodyStr = await req.readAsString();
       Map<String, dynamic> body = {};
-      if (bodyStr.isNotEmpty) {
+      if (bodyStr.trim().isNotEmpty) {
         try {
-          body = jsonDecode(bodyStr) as Map<String, dynamic>;
-        } catch (_) {}
+          final decoded = jsonDecode(bodyStr);
+          if (decoded is! Map<String, dynamic>) {
+            return Response(
+              400,
+              body: jsonEncode({
+                'error': 'BAD_REQUEST',
+                'code': 'ERR_INVALID_JSON',
+                'message': 'İstek gövdesi JSON nesnesi olmalıdır.',
+              }),
+              headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+            );
+          }
+          body = decoded;
+        } catch (_) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_JSON',
+              'message': 'Geçersiz JSON formatı.',
+            }),
+            headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+          );
+        }
       }
 
-      final backupPassword = body['backup_password'] as String? ?? pepperManager.pepper;
+      // S2: İstekle parola gönderilmesi (backup_password / recovery_password) reddedilir;
+      // şifreleme yalnızca Hub DPAPI kasasında kayıtlı Portable Recovery Password kullanır.
+      if (body.containsKey('backup_password') || body.containsKey('recovery_password')) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_BACKUP_PASSWORD_NOT_ACCEPTED',
+            'message': 'İstek gövdesinde parola kabul edilmez; Hub yalnızca kayıtlı Kurtarma Parolasını kullanır.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
       final isMonthly = body['is_monthly_archive'] as bool? ?? false;
 
       try {
         final result = await createEncryptedHubBackup(
-          backupPassword: backupPassword,
           isMonthlyArchive: isMonthly,
         );
 
@@ -3786,11 +4730,12 @@ class SpikeServer {
             'backup_id': result.backupId,
             'manifest': result.manifest.toJson(),
             'created_at': result.createdAt.toIso8601String(),
+            'recovery_key_source': 'HUB_STORED_DPAPI',
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       } on BackupException catch (e) {
-        final status = e.code == BackupOperationLock.busyErrorCode ? 409 : 500;
+        final status = _legacyBackupErrorStatus(e.code, fallback: 500);
         return Response(
           status,
           body: jsonEncode({
@@ -3798,15 +4743,17 @@ class SpikeServer {
             'code': e.code,
             'message': e.message,
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       } catch (e) {
+        stderr.writeln('[ERROR] POST /api/v1/admin/backup beklenmeyen hata: ${e.runtimeType}');
         return Response.internalServerError(
           body: jsonEncode({
             'error': 'BACKUP_FAILED',
-            'message': e.toString(),
+            'code': 'ERR_BACKUP_INTERNAL',
+            'message': 'Şifreli Hub yedeklemesi sırasında beklenmeyen bir sunucu hatası oluştu.',
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       }
     });
@@ -3831,7 +4778,9 @@ class SpikeServer {
       );
     });
 
-    // 6.3. S5A-4: Kontrollü ve Koruyucu Yedekli Geri Yükleme (Restore)
+    // 6.3. S5A-4 / AUD-MED-01: Kontrollü ve Koruyucu Yedekli Geri Yükleme (Restore)
+    // HubRestoreService ortak çekirdeği üzerinden restore_epoch artırılır ve aktif
+    // cihaz tokenları kontrollü geçersizleştirilir.
     _router.post('/api/v1/admin/restore', (Request req) async {
       // SEC: Sabit varsayılan admin secret fallback'i kaldırıldı. Yalnızca loopback + yapılandırılmış
       // ADMIN_SECRET ile erişilir; yapılandırılmamışsa fail-closed 503 döner.
@@ -3864,8 +4813,12 @@ class SpikeServer {
           headers: {'content-type': 'application/json'},
         );
       }
-      final backupId = body['backup_id'] as String?;
-      final backupPassword = body['backup_password'] as String? ?? pepperManager.pepper;
+      final backupId = (body['backup_id'] as String?)?.trim();
+      // ADR-023 B1.7: Varsayılan anahtar Portable Recovery Password'dür. Makineye bağlı
+      // pepper yalnızca AYNI makinede alınmış eski S5A-4 yedeklerini açmak için ve yalnızca
+      // açık `legacy_machine_key: true` onayıyla kullanılır (sessiz fallback yoktur).
+      final explicitPassword = body['backup_password'] as String?;
+      final useLegacyMachineKey = body['legacy_machine_key'] == true;
 
       if (backupId == null || backupId.isEmpty) {
         return Response(
@@ -3874,77 +4827,121 @@ class SpikeServer {
           headers: {'content-type': 'application/json'},
         );
       }
+      if (!_safeBackupIdPattern.hasMatch(backupId)) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_BACKUP_ID',
+            'message': 'Geçersiz yedek kimliği.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
 
       final storage = LocalStorageProvider(_backupTargetDir);
-      final safetyDir = Directory(p.join(_backupTargetDir.path, 'safety_snapshots'));
       final targetLiveDb = dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
 
       try {
         final result = await _backupOperationLock.synchronized(
           BackupOperationKind.restore,
-          () => DatabaseBackupEngine.restoreBackup(
-            backupId: backupId,
-            liveDbFile: targetLiveDb,
-            backupPassword: backupPassword,
-            storageProvider: storage,
-            expectedDeviceId: 'SERVER_HUB',
-            expectedTenantId: tenantId,
-            expectedStoreId: storeId,
-            expectedDatabaseType: DatabaseType.centralMaster,
-            currentSchemaVersion: db.schemaVersion,
-            minSupportedSchemaVersion: 1,
-            applySchemaMigration: (File stagingFile, int fromVersion, int toVersion) async {
-              final stagingDb = SpikeDatabase(stagingFile);
-              try {
-                // Drift onUpgrade / beforeOpen staging DB üzerinde çalışır ve v2'ye yükseltir.
-                await stagingDb.customSelect('SELECT COUNT(*) FROM processed_operations;').getSingle();
-                final cp = await stagingDb.checkpointWal(mode: 'TRUNCATE');
-                if (!cp.isSuccess) {
-                  throw StateError('Staging DB WAL checkpoint tamamlanamadı: $cp');
-                }
-                await stagingDb.customStatement('PRAGMA journal_mode = DELETE;');
-              } finally {
-                await stagingDb.close();
-              }
-            },
-            pauseLiveDb: () async {
-              // 1. Yeni API işlemlerini geçici olarak durdur ve devam edenlerin tamamlanmasını bekle
-              await lifecycle.admissionGate.pauseForMaintenance(allowedRemaining: 1);
-              // 2. Devam eden yazma kuyruğu işlerinin bitmesini bekle
-              await writeQueue.pauseForMaintenance();
-              // 3. SQLite WAL checkpoint yap ve bağlantıyı güvenle kapat
-              try {
-                await db.checkpointWal(mode: 'TRUNCATE');
-              } catch (_) {}
-              await db.close();
-            },
-            resumeLiveDb: () async {
-              // 4. Veritabanı bağlantısını yeniden aç
-              this.db = SpikeDatabase(targetLiveDb);
-              lifecycle.db = this.db;
-              // 5. Yazma kuyruğunu ve API kabul kapısını yeniden aç
-              writeQueue.resumeAfterMaintenance();
-              lifecycle.admissionGate.resumeAfterMaintenance();
-            },
-            safetyBackupDir: safetyDir,
-          ),
-        );
+          () async {
+            final effectivePassword = (explicitPassword == null && useLegacyMachineKey)
+                ? pepperManager.pepper
+                : await _resolvePortableBackupPassword(
+                    explicitPassword,
+                    enforceMinimumLength: false,
+                  );
 
-        await _verifyOrInitializeHubIdentity();
+            File? packageFile;
+            final hubCandidate =
+                File(p.join(_backupTargetDir.path, 'hub_backup_$backupId.mmsbak'));
+            if (await hubCandidate.exists()) {
+              packageFile = hubCandidate;
+            } else {
+              final legacyCandidate = await storage.getBackupFile(backupId);
+              if (await legacyCandidate.exists()) {
+                packageFile = legacyCandidate;
+              }
+            }
+            if (packageFile == null || !(await packageFile.exists())) {
+              throw BackupException(
+                'ERR_BACKUP_NOT_FOUND',
+                'Yedek dosyası bulunamadı: $backupId',
+              );
+            }
+
+            return HubRestoreService.restoreFromEncryptedPackage(
+              packageFile: packageFile,
+              recoveryPassword: effectivePassword,
+              safetyBackupPassword: effectivePassword,
+              liveDbFile: targetLiveDb,
+              backupDir: _backupTargetDir,
+              lock: _backupOperationLock,
+              acquireLock: false,
+              expectedTenantId: tenantId,
+              expectedStoreId: storeId,
+              expectedHubId: hubId,
+              minSupportedSchemaVersion: 1,
+              maxSupportedSchemaVersion: max(4, db.schemaVersion),
+              kdfIterations: hubRestoreSafetyKdfIterations,
+              pauseAndCloseLiveDb: () async {
+                await lifecycle.admissionGate.pauseForMaintenance(allowedRemaining: 1);
+                await writeQueue.pauseForMaintenance();
+                try {
+                  await db.checkpointWal(mode: 'TRUNCATE');
+                } catch (e) {
+                  stderr.writeln(
+                    '[WARN] Admin restore öncesi WAL checkpoint uyarısı: ${e.runtimeType}',
+                  );
+                }
+                await db.close();
+              },
+              reopenLiveDb: (File dbPath) async {
+                final reopened = SpikeDatabase(dbPath);
+                this.db = reopened;
+                lifecycle.db = reopened;
+                return reopened;
+              },
+              onDbReopened: (_, __) async {
+                writeQueue.resumeAfterMaintenance();
+                lifecycle.admissionGate.resumeAfterMaintenance();
+                await _verifyOrInitializeHubIdentity();
+              },
+            );
+          },
+        );
 
         return Response.ok(
           jsonEncode({
             'status': 'RESTORED',
             'backup_id': result.backupId,
             'safety_backup_path': result.safetyBackupPath,
-            // SEC-SAFETY: true → güvenlik kopyası DPAPI pepper ile şifreli .mmsbak.
             'safety_backup_encrypted': result.safetyBackupEncrypted,
-            'restored_at': result.restoredAt.toIso8601String(),
+            'restored_at': result.restoredAtUtc.toIso8601String(),
+            'restored_at_utc': result.restoredAtUtc.toIso8601String(),
+            'restore_epoch': result.restoreEpoch,
+            'invalidated_active_device_count': result.invalidatedActiveDeviceCount,
+            'preserved_revoked_device_count': result.preservedRevokedDeviceCount,
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on BackupCryptoException catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'RESTORE_FAILED',
+            'code': 'ERR_DECRYPTION_FAILED',
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       } on BackupException catch (e) {
-        final status = e.code == BackupOperationLock.busyErrorCode ? 409 : 400;
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        final status = _legacyBackupErrorStatus(e.code, fallback: 400);
         return Response(
           status,
           body: jsonEncode({
@@ -3952,15 +4949,17 @@ class SpikeServer {
             'code': e.code,
             'message': e.message,
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       } catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
         return Response.internalServerError(
           body: jsonEncode({
             'error': 'INTERNAL_ERROR',
             'message': e.toString(),
           }),
-          headers: {'content-type': 'application/json'},
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
         );
       }
     });
@@ -4018,6 +5017,653 @@ class SpikeServer {
           }),
           headers: {'content-type': 'application/json'},
         );
+      }
+    });
+
+    // 6.5. Faz B-2: Hub Google Drive Backup OAuth PKCE Handoff ve Durumu (OV-01 & OV-02)
+    _router.post('/api/v1/backup/oauth/connect', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub Google Drive OAuth bağlantısı',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub Google Drive OAuth bağlantısı',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      Map<String, dynamic> body;
+      try {
+        final raw = await req.readAsString();
+        final decoded = raw.trim().isEmpty ? <String, dynamic>{} : jsonDecode(raw);
+        if (decoded is! Map) {
+          throw const FormatException('JSON nesnesi bekleniyor');
+        }
+        body = Map<String, dynamic>.from(decoded);
+      } catch (_) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'Geçersiz JSON gövdesi.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      final authCode = (body['auth_code'] as String?) ?? (body['code'] as String?) ?? '';
+      final codeVerifier = (body['code_verifier'] as String?) ?? '';
+      final redirectUri = (body['redirect_uri'] as String?) ?? '';
+      final clientId = (body['client_id'] as String?) ?? '';
+      final clientSecret = body['client_secret'] as String?;
+      final accountEmail = body['account_email'] as String?;
+      final folderId = body['folder_id'] as String?;
+
+      try {
+        final status = await hubBackupOAuthService.connectWithPkce(
+          authCode: authCode,
+          codeVerifier: codeVerifier,
+          redirectUri: redirectUri,
+          clientId: clientId,
+          clientSecret: clientSecret,
+          accountEmail: accountEmail,
+          folderId: folderId,
+        );
+        final actorId =
+            (req.context['authenticated_device_id'] as String?) ?? 'HUB_ADMIN';
+        await writeQueue.enqueue(() async {
+          await db.into(db.deviceAuditLogs).insert(
+                DeviceAuditLogsCompanion(
+                  deviceId: Value(actorId),
+                  action: const Value('BACKUP_OAUTH_CONNECT'),
+                  details: Value(
+                    'Hub backup Drive OAuth connected (scope=${status.scope})',
+                  ),
+                ),
+              );
+        });
+        return Response.ok(
+          jsonEncode(status.toJson()),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubBackupOAuthException catch (e) {
+        final statusCode = e.code == 'ERR_INVALID_PKCE_HANDOFF' ? 400 : 502;
+        return Response(
+          statusCode,
+          body: jsonEncode({
+            'error': 'OAUTH_CONNECT_FAILED',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    _router.get('/api/v1/backup/oauth/status', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub Google Drive OAuth durumu',
+      );
+      if (denied != null) return denied;
+
+      try {
+        final status = await hubBackupOAuthService.getStatus();
+        return Response.ok(
+          jsonEncode(status.toJson()),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubBackupOAuthException catch (e) {
+        return Response(
+          500,
+          body: jsonEncode({
+            'error': 'OAUTH_STORE_ERROR',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    _router.post('/api/v1/backup/oauth/disconnect', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub Google Drive OAuth bağlantısını kesme',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub Google Drive OAuth bağlantısını kesme',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      await hubBackupOAuthService.disconnect();
+      final actorId =
+          (req.context['authenticated_device_id'] as String?) ?? 'HUB_ADMIN';
+      await writeQueue.enqueue(() async {
+        await db.into(db.deviceAuditLogs).insert(
+              DeviceAuditLogsCompanion(
+                deviceId: Value(actorId),
+                action: const Value('BACKUP_OAUTH_DISCONNECT'),
+                details: const Value('Hub backup Drive OAuth disconnected'),
+              ),
+            );
+      });
+      return Response.ok(
+        jsonEncode(HubBackupOAuthStatus.disconnected.toJson()),
+        headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+      );
+    });
+
+    // 6.6. Faz B-3: Hub Merkezi Yedekleme 12-Durum Orkestrasyon Uçları
+    _router.get('/api/v1/backup/status', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub merkezi yedekleme durumu',
+      );
+      if (denied != null) return denied;
+
+      final oauthStatus = await hubBackupOAuthService.getStatus();
+      final hasRecoveryKey = await hubRecoveryKeyStore.hasRecoveryPassword();
+      final jobsSnap = await hubBackupOrchestrator.getStatusSnapshot();
+
+      return Response.ok(
+        jsonEncode({
+          'oauth': oauthStatus.toJson(),
+          'has_recovery_key': hasRecoveryKey,
+          'schedule': jobsSnap.schedule.toJson(),
+          'last_completed_date_local': jobsSnap.lastCompletedDateLocal,
+          'last_completed_at_utc': jobsSnap.lastCompletedAtUtc?.toUtc().toIso8601String(),
+          'latest_job': jobsSnap.latestJob?.toJson(),
+          'jobs': jobsSnap.jobs.take(20).map((j) => j.toJson()).toList(),
+          // S1: Son başarısız zamanlayıcı turu (yoksa null). Parola/token içermez.
+          'scheduler_last_error': hubBackupOrchestrator.lastSchedulerError?.toJson(),
+        }),
+        headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+      );
+    });
+
+    _router.get('/api/v1/backup/list', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub merkezi yedek listesi',
+      );
+      if (denied != null) return denied;
+
+      final jobsSnap = await hubBackupOrchestrator.getStatusSnapshot();
+      return Response.ok(
+        jsonEncode({
+          'jobs': jobsSnap.jobs.map((j) => j.toJson()).toList(),
+        }),
+        headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+      );
+    });
+
+    // AUD-CRIT-03: Google Drive `MARKET MMS Yedekleri/Hub` merkezi yedeklerini listeler
+    _router.get('/api/v1/backup/drive/list', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Google Drive merkezi Hub yedek listesi',
+      );
+      if (denied != null) return denied;
+
+      try {
+        final backups = await hubBackupOrchestrator.listDriveBackups();
+        return Response.ok(
+          jsonEncode({
+            'backups': backups.map((b) => b.toJson()).toList(),
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on DriveResumableUploadException catch (e) {
+        final status = e.kind == DriveUploadFailureKind.authFailure ? 401 : 502;
+        return Response(
+          status,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubBackupOAuthException catch (e) {
+        final status = e.code == 'FAILED_AUTH' ? 401 : 502;
+        return Response(
+          status,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    _router.post('/api/v1/backup/recovery-key', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub katılımsız kurtarma anahtarı tanımlama',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub katılımsız kurtarma anahtarı tanımlama',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final password = (body['recovery_password'] as String?) ?? '';
+      try {
+        await hubRecoveryKeyStore.saveRecoveryPassword(password);
+        hubBackupOrchestrator.clearTickErrorIfCodes(const {
+          'ERR_RECOVERY_KEY_NOT_CONFIGURED',
+          'ERR_RECOVERY_KEY_REQUIRED',
+          'ERR_RECOVERY_KEY_CORRUPTED',
+        });
+        final actorId =
+            (req.context['authenticated_device_id'] as String?) ?? 'HUB_ADMIN';
+        await writeQueue.enqueue(() async {
+          await db.into(db.deviceAuditLogs).insert(
+                DeviceAuditLogsCompanion(
+                  deviceId: Value(actorId),
+                  action: const Value('BACKUP_RECOVERY_KEY_SET'),
+                  details: const Value('Unattended Hub backup recovery key stored in DPAPI'),
+                ),
+              );
+        });
+        return Response.ok(
+          jsonEncode({'has_recovery_key': true}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubRecoveryKeyException catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_RECOVERY_KEY',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    _router.post('/api/v1/backup/schedule', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub merkezi yedekleme zamanlaması',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub merkezi yedekleme zamanlaması',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final enabled = (body['enabled'] as bool?) ?? false;
+      final dailyHour = (body['daily_hour_local'] as num?)?.toInt() ?? 0;
+      final dailyMinute = (body['daily_minute_local'] as num?)?.toInt() ?? 0;
+      final uploadToDrive = (body['upload_to_drive'] as bool?) ?? true;
+      final recoveryPassword = body['recovery_password'] as String?;
+      final triggerInitial = (body['trigger_initial_if_due'] as bool?) ?? true;
+
+      try {
+        final next = await hubBackupOrchestrator.configureSchedule(
+          enabled: enabled,
+          dailyHourLocal: dailyHour,
+          dailyMinuteLocal: dailyMinute,
+          uploadToDrive: uploadToDrive,
+          unattendedRecoveryPassword: recoveryPassword,
+          triggerInitialIfDue: triggerInitial,
+        );
+        return Response.ok(
+          jsonEncode({
+            'schedule': next.schedule.toJson(),
+            'latest_job': next.latestJob?.toJson(),
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubRecoveryKeyException catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_SCHEDULE_CONFIG',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on ArgumentError catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_SCHEDULE_CONFIG',
+            'code': 'ERR_INVALID_SCHEDULE',
+            'message': e.message?.toString() ?? 'Geçersiz zamanlama parametresi.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    _router.post('/api/v1/backup/run', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub merkezi yedekleme başlatma',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub merkezi yedekleme başlatma',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      // S2: Manuel yedek YALNIZCA Hub'da kayıtlı Portable Recovery Password ile
+      // şifrelenir. İstekle parola gönderilmesi (yerel veya uzak OWNER) reddedilir;
+      // böylece kullanıcının hatırlayamayacağı kaydedilmemiş bir parolayla Drive
+      // yedeği oluşturulamaz. Parola önce POST /api/v1/backup/recovery-key ile kaydedilir.
+      if (body.containsKey('recovery_password')) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_RECOVERY_PASSWORD_NOT_ACCEPTED',
+            'message': 'Manuel yedek istekte gönderilen parolayı kullanmaz. Önce kurtarma '
+                'parolasını kaydedin (POST /api/v1/backup/recovery-key); yedek kayıtlı '
+                'parolayla şifrelenir.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      try {
+        final job = await hubBackupOrchestrator.triggerBackup(
+          trigger: HubBackupTrigger.manual,
+        );
+        return Response.ok(
+          jsonEncode({
+            ...job.toJson(),
+            // S2: Paketin hangi parolayla şifrelendiği açıkça belirtilir.
+            'recovery_key_source': 'HUB_STORED_DPAPI',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on BackupException catch (e) {
+        final code = e.code == BackupOperationLock.busyErrorCode ? 409 : 400;
+        return Response(
+          code,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on BackupCryptoException catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_RECOVERY_PASSWORD',
+            'code': 'ERR_WEAK_RECOVERY_PASSWORD',
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubRecoveryKeyException catch (e) {
+        return Response(
+          400,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    // 6.7. Faz B-4 & AUD-CRIT-03: Taşınabilir MMSBAK02/01 Paketinden (Yerel veya Google Drive)
+    // Hub Geri Yükleme + restore_epoch + Token Geçersizleştirme
+    _router.post('/api/v1/backup/restore', (Request req) async {
+      final denied = _verifyOwnerOrLoopbackAdmin(
+        req,
+        actionName: 'Hub merkezi yedekten geri yükleme',
+      );
+      if (denied != null) return denied;
+      final replayDenied = await _verifyReplayProtection(
+        req,
+        actionName: 'Hub merkezi yedekten geri yükleme',
+      );
+      if (replayDenied != null) return replayDenied;
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final backupId = (body['backup_id'] as String?)?.trim() ?? '';
+      final driveFileId = (body['drive_file_id'] as String?)?.trim() ?? '';
+      final packagePath = (body['package_path'] as String?)?.trim() ?? '';
+      final recoveryPassword = (body['recovery_password'] as String?) ?? '';
+
+      if (recoveryPassword.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_RECOVERY_PASSWORD_REQUIRED',
+            'message': 'Kurtarma parolası zorunludur.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      // GÜVENLİK: Keyfi dosya yolu yalnızca Hub bilgisayarındaki loopback + admin
+      // secret çağrısında (Windows UI, USB içe aktarma) kabul edilir. Uzak OWNER cihazı
+      // yalnızca Hub yedek dizinindeki/Drive'daki `backup_id` veya `drive_file_id` seçebilir.
+      // UNC / ağ yolları (`\\sunucu\paylaşım`) her durumda reddedilir.
+      final isRemoteDevice = req.context['authenticated_device_id'] != null;
+      if (packagePath.isNotEmpty) {
+        final pathDenied = _validateRestorePackagePath(
+          packagePath,
+          isRemoteDevice: isRemoteDevice,
+        );
+        if (pathDenied != null) return pathDenied;
+      }
+      if (packagePath.isEmpty && backupId.isNotEmpty && !_safeBackupIdPattern.hasMatch(backupId)) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_INVALID_BACKUP_ID',
+            'message': 'Geçersiz yedek kimliği.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+      if (driveFileId.isNotEmpty &&
+          !ResumableDriveUploader.isValidDriveFileId(driveFileId)) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_INVALID_DRIVE_FILE_ID',
+            'message': 'Geçersiz Google Drive dosya kimliği.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+      if (packagePath.isEmpty && backupId.isEmpty && driveFileId.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_BACKUP_SELECTOR_REQUIRED',
+            'message': 'Geri yükleme için backup_id, drive_file_id veya package_path gereklidir.',
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+
+      final targetLiveDb =
+          dbFile ?? File(p.join(Directory.current.path, 'market_master.db'));
+      // `kdf_iterations` istek gövdesinden ALINMAZ (uzak çağıran safety snapshot
+      // şifrelemesini zayıflatamaz); yalnızca sunucu yapılandırması kullanılır.
+      final kdfIters = hubRestoreSafetyKdfIterations;
+      Directory? tempDriveDownloadDir;
+      try {
+        final result = await _backupOperationLock.synchronized(
+          BackupOperationKind.restore,
+          () async {
+            File? packageFile;
+            if (packagePath.isNotEmpty) {
+              final f = File(packagePath);
+              if (await f.exists() && f.path.toLowerCase().endsWith('.mmsbak')) {
+                packageFile = f;
+              }
+            } else {
+              if (backupId.isNotEmpty) {
+                final candidate = File(
+                  p.join(_backupTargetDir.path, 'hub_backup_$backupId.mmsbak'),
+                );
+                if (await candidate.exists()) {
+                  packageFile = candidate;
+                } else {
+                  try {
+                    final legacyFile = await LocalStorageProvider(_backupTargetDir)
+                        .getBackupFile(backupId);
+                    if (await legacyFile.exists()) {
+                      packageFile = legacyFile;
+                    }
+                  } catch (e) {
+                    stderr.writeln(
+                      '[WARN] Legacy yedek dosyası arama atlandı (backupId=$backupId): ${e.runtimeType}',
+                    );
+                  }
+                }
+              }
+
+              // Yerel önbellekte yoksa (7+ gün temizliği veya yeni PC felaket kurtarma):
+              // Google Drive'dan akışlı indir, boyut + SHA-256 + MMSBAK yapısı doğrula.
+              if ((packageFile == null || !(await packageFile.exists())) &&
+                  (driveFileId.isNotEmpty || backupId.isNotEmpty)) {
+                tempDriveDownloadDir = await Directory.systemTemp.createTemp(
+                  'mms_hub_drive_dl_',
+                );
+                final downloaded =
+                    await hubBackupOrchestrator.downloadBackupFromDrive(
+                  backupId: backupId.isEmpty ? null : backupId,
+                  driveFileId: driveFileId.isEmpty ? null : driveFileId,
+                  targetDir: tempDriveDownloadDir!,
+                );
+                packageFile = downloaded.file;
+              }
+            }
+
+            if (packageFile == null || !(await packageFile.exists())) {
+              throw const BackupException(
+                'ERR_BACKUP_NOT_FOUND',
+                'Geri yüklenecek yedek paketi bulunamadı.',
+              );
+            }
+
+            return HubRestoreService.restoreFromEncryptedPackage(
+              packageFile: packageFile,
+              recoveryPassword: recoveryPassword,
+              liveDbFile: targetLiveDb,
+              backupDir: _backupTargetDir,
+              lock: _backupOperationLock,
+              acquireLock: false,
+              expectedTenantId: tenantId,
+              expectedStoreId: storeId,
+              expectedHubId: hubId,
+              maxSupportedSchemaVersion: max(4, db.schemaVersion),
+              kdfIterations: kdfIters,
+              pauseAndCloseLiveDb: () async {
+                await lifecycle.admissionGate.pauseForMaintenance(allowedRemaining: 1);
+                await writeQueue.pauseForMaintenance();
+                try {
+                  await db.checkpointWal(mode: 'TRUNCATE');
+                } catch (e) {
+                  stderr.writeln(
+                    '[WARN] Admin restore öncesi WAL checkpoint uyarısı: ${e.runtimeType}',
+                  );
+                }
+                await db.close();
+              },
+              reopenLiveDb: (File dbPath) async {
+                final reopened = SpikeDatabase(dbPath);
+                this.db = reopened;
+                lifecycle.db = reopened;
+                return reopened;
+              },
+              onDbReopened: (_, __) async {
+                writeQueue.resumeAfterMaintenance();
+                lifecycle.admissionGate.resumeAfterMaintenance();
+                await _verifyOrInitializeHubIdentity();
+              },
+            );
+          },
+        );
+
+        return Response.ok(
+          jsonEncode(result.toJson(maskPaths: isRemoteDevice)),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on DriveResumableUploadException catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        final int status;
+        if (e.code == 'ERR_BACKUP_NOT_FOUND' || e.statusCode == 404) {
+          status = 404;
+        } else if (e.kind == DriveUploadFailureKind.authFailure) {
+          status = 401;
+        } else if (e.kind == DriveUploadFailureKind.integrityVerificationFailed ||
+            e.kind == DriveUploadFailureKind.invalidInput) {
+          status = 400;
+        } else {
+          status = 502;
+        }
+        return Response(
+          status,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on HubBackupOAuthException catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        final status = e.code == 'FAILED_AUTH' ? 401 : 502;
+        return Response(
+          status,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on BackupCryptoException catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'RESTORE_DECRYPT_FAILED',
+            'code': 'ERR_RESTORE_DECRYPT_FAILED',
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } on BackupException catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        final status = e.code == BackupOperationLock.busyErrorCode
+            ? 409
+            : (e.code == 'ERR_BACKUP_NOT_FOUND' ? 404 : 400);
+        return Response(
+          status,
+          body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } catch (e) {
+        writeQueue.resumeAfterMaintenance();
+        lifecycle.admissionGate.resumeAfterMaintenance();
+        return Response.internalServerError(
+          body: jsonEncode({'error': 'RESTORE_FAILED', 'message': e.toString()}),
+          headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      } finally {
+        if (tempDriveDownloadDir != null && await tempDriveDownloadDir!.exists()) {
+          try {
+            await tempDriveDownloadDir!.delete(recursive: true);
+          } catch (e) {
+            stderr.writeln(
+              '[WARN] Geçici Drive indirme dizini silinemedi (${p.basename(tempDriveDownloadDir!.path)}): ${e.runtimeType}',
+            );
+          }
+        }
       }
     });
 
@@ -4138,6 +5784,7 @@ class SpikeServer {
             '/api/v1/admin/backup/prune',
             '/api/v1/admin/backup/status',
             '/api/v1/admin/live-drive-secret/rotate',
+            '/api/v1/admin/owner/bootstrap',
             '/api/v1/devices/revoke',
             '/api/v1/pairing/session',
             '/api/v1/pairing/requests',
@@ -4149,6 +5796,19 @@ class SpikeServer {
             '/api/v1/pairing/poll',
             '/api/v1/pairing/ack-challenge',
             '/api/v1/pairing/ack',
+          ],
+          bearerOrAdminPaths: const [
+            '/api/v1/devices/role',
+            '/api/v1/backup/oauth/connect',
+            '/api/v1/backup/oauth/disconnect',
+            '/api/v1/backup/oauth/status',
+            '/api/v1/backup/status',
+            '/api/v1/backup/list',
+            '/api/v1/backup/drive/list',
+            '/api/v1/backup/recovery-key',
+            '/api/v1/backup/schedule',
+            '/api/v1/backup/run',
+            '/api/v1/backup/restore',
           ],
         ))
         .addHandler(_router.call);
@@ -4169,7 +5829,7 @@ class SpikeServer {
       if (!certFile.existsSync()) {
         throw HubStartupArgException(
           78,
-          'ERR_SERVER_CERT_NOT_FOUND: TLS sertifikası bulunamadı: $serverCertPath',
+          'ERR_SERVER_CERT_NOT_FOUND: TLS sertifikası bulunamadı (${p.basename(serverCertPath!)}).',
         );
       }
       final Set<String> sanIps;
@@ -4192,6 +5852,7 @@ class SpikeServer {
       }
     }
 
+    _resourcesStopped = false;
     // BK-02.1: Pilot tek-tenant / tek-store kimlik doğrulaması ve başlangıç mührü
     await _verifyOrInitializeHubIdentity();
 
@@ -4218,10 +5879,14 @@ class SpikeServer {
         );
         await _discoveryResponder!.start();
       } catch (e) {
-        print('[WARN] UDP Discovery başlatılamadı: $e');
+        print('[WARN] UDP Discovery başlatılamadı: ${redactLogText(e.toString())}');
       }
     }
 
+    // S1: Önce merkezi Drive yedekleme açılış kurtarması ve dakikalık zamanlayıcı başlatılır;
+    // ardından eski 24 saatlik yerel zamanlayıcı başlar (açılış kilidi yarışı önlenir).
+    await hubBackupOrchestrator.runGuardedTick(startup: true);
+    hubBackupOrchestrator.start();
     // Faz 3: Zamanlanmış şifreli Hub yedeği (yedek hatası servisi durdurmaz)
     await _startBackupScheduler();
 
@@ -4236,20 +5901,107 @@ class SpikeServer {
           );
         }
       } catch (e) {
-        print('[WARN] Pairing delivery cleanup error: $e');
+        print(
+          '[WARN] Pairing delivery cleanup error: ${redactLogText(e.toString())}',
+        );
       }
     });
   }
 
+  static String _redactFilesystemPath(String rawPath) {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) return '[REDACTED_PATH]';
+    final sepIndex = normalized.lastIndexOf(RegExp(r'[/\\]'));
+    if (sepIndex < 0 || sepIndex == normalized.length - 1) {
+      return '[REDACTED_PATH]';
+    }
+    final basename = normalized.substring(sepIndex + 1);
+    return basename.isEmpty ? '[REDACTED_PATH]' : '[REDACTED_PATH]/$basename';
+  }
+
+  /// Loglarda tam yerel dosya yolu, OAuth token, URL gizlileri ve admin sırlarını maskeler.
+  static String redactLogText(String raw) {
+    var text = raw;
+    text = text.replaceAll(
+      RegExp(
+        r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----',
+      ),
+      '[REDACTED_PRIVATE_KEY]',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r'("(?:auth_code|code|pairing_secret|device_token|access_token|accessToken|refresh_token|refreshToken|token|password|backupPassword|backup_password|recovery_password|recoveryPassword|privateKey|private_key|client_secret|clientSecret|admin_secret|adminSecret|live_sync_secret|dpapi_secret|signing_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|upload_id|session|signature|sig|secret|pepper)"\s*:\s*)"[^"]*"',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}"[REDACTED]"',
+    );
+    text = text.replaceAll(
+      RegExp(r'Bearer\s+[A-Za-z0-9_\-\.]+', caseSensitive: false),
+      'Bearer [REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'mms_dt_[A-Za-z0-9_\-]+'),
+      'mms_dt_[REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'\bya29\.[A-Za-z0-9_\-\.]+'),
+      'ya29.[REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'\b1//[A-Za-z0-9_\-\.]+'),
+      '1//[REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'\bGOCSPX-[A-Za-z0-9_\-]+'),
+      'GOCSPX-[REDACTED]',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""([?&])(code|auth_code|access_token|refresh_token|device_token|token|client_secret|admin_secret|live_sync_secret|dpapi_secret|signing_key|recovery_password|pairing_secret|private_key|code_verifier|api_key|key|upload_id|session|signature|sig|pepper|password|secret)=([^&#\s"'`\)\]]*)""",
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}${m.group(2)}=[REDACTED]',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""\b(access_token|refresh_token|device_token|token|client_secret|admin_secret|live_sync_secret|dpapi_secret|signing_key|recovery_password|pairing_secret|private_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|auth_code|upload_id|pepper|secret|password)\s*([:=])\s*(?!\[REDACTED\])([^\s,&;"'`\)\]]+)""",
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}${m.group(2)} [REDACTED]',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""file:///(?:[A-Za-z]:[\\/][^\s"'`\)\]\r\n]+|(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/[^\s"'`\)\]\r\n]+)""",
+      ),
+      (m) => 'file:///${_redactFilesystemPath(m.group(0)!.substring(8))}',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r'"((?:(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|\\\\|/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/)[^"\r\n]+)"',
+      ),
+      (m) => '"${_redactFilesystemPath(m.group(1)!)}"',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"'((?:(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|\\\\|/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/)[^'\r\n]+)'",
+      ),
+      (m) => "'${_redactFilesystemPath(m.group(1)!)}'",
+    );
+    text = text.replaceAllMapped(
+      RegExp(r"""(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|\\\\)[^\s"'`\)\]\r\n,;]+"""),
+      (m) => _redactFilesystemPath(m.group(0)!),
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""(?<![A-Za-z0-9:/\.\[])/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/[^\s"'`\)\]\r\n,;]+""",
+      ),
+      (m) => _redactFilesystemPath(m.group(0)!),
+    );
+    return text;
+  }
+
   Future<void> stop() async {
-    _pairingCleanupTimer?.cancel();
-    _pairingCleanupTimer = null;
-    // Devam eden zamanlanmış yedek bitmeden DB kapatılmaz.
-    await _backupScheduler?.stop();
-    _backupScheduler = null;
-    await _discoveryResponder?.stop();
-    _discoveryResponder = null;
-    await lifecycle.shutdown();
+    await lifecycle.shutdown(reason: 'SpikeServer.stop', exitProcess: false);
   }
 }
 
@@ -4519,7 +6271,7 @@ Future<SpikeServer> startHubFromArgs(
   if (startup.enableDiscovery) {
     stdout.writeln('UDP Discovery dinleniyor: UDP 0.0.0.0:${startup.discoveryPort}');
   }
-  stdout.writeln('Veritabanı: ${startup.dbPath}');
+  stdout.writeln('Veritabanı: ${p.basename(startup.dbPath)}');
 
   return server;
 }
@@ -4534,7 +6286,7 @@ void main(List<String> args) async {
   }
 
   await server.lifecycle.onShutdown;
-  server.stop();
+  await server.stop();
   stdout.writeln('MARKET MMS SPIKE-01 Backend güvenle kapatıldı.');
   exit(server.lifecycle.exitCode);
 }

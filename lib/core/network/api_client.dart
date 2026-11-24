@@ -313,7 +313,11 @@ class MmsApiClient {
       if (decoded is Map<String, dynamic>) {
         errorData = _sanitizeResponseData(decoded);
       }
-    } catch (_) {}
+    } catch (e) {
+      stderr.writeln(
+        '[MmsApiClient] Hata yanıtı JSON ayrıştırılamadı (HTTP ${response.statusCode}): ${e.runtimeType}',
+      );
+    }
 
     throw ServerResponseException(
       'Sunucu hatası: HTTP ${response.statusCode}',
@@ -358,7 +362,11 @@ class MmsApiClient {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      stderr.writeln(
+        '[MmsApiClient] Yetki hata kodu ayrıştırılamadı: ${e.runtimeType}',
+      );
+    }
     return null;
   }
 

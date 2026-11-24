@@ -125,7 +125,9 @@ class _MobileScannerScreenState extends State<MobileScannerScreen> {
       if (mounted) {
         setState(() => _torchEnabled = !_torchEnabled);
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MobileScannerScreen] Fener değiştirilemedi: ${e.runtimeType}');
+    }
   }
 
   Future<void> _switchCamera() async {
@@ -133,7 +135,9 @@ class _MobileScannerScreenState extends State<MobileScannerScreen> {
     if (controller == null) return;
     try {
       await controller.switchCamera();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[MobileScannerScreen] Kamera değiştirilemedi: ${e.runtimeType}');
+    }
   }
 
   @override

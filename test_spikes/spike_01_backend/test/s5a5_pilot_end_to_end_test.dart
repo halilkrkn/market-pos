@@ -301,16 +301,17 @@ void main() {
     });
 
     test('2. Canlı Çalışma Sırasında Backup, Restore, 503 Engellemesi ve Kurtarma Doğrulaması', () async {
-      // 1. Canlı sunucudan şifreli merkezi yedek al
+      // 1. Canlı sunucudan kayıtlı kurtarma parolasıyla şifreli merkezi yedek al (S2)
+      await server.hubRecoveryKeyStore.saveRecoveryPassword(
+        'Mms_Pilot_Backup_Secret_2026!',
+      );
       final backupResp = await http.post(
         Uri.parse('$baseUrl/api/v1/admin/backup'),
         headers: {
           'x-mms-admin-secret': adminSecret,
           'content-type': 'application/json',
         },
-        body: jsonEncode({
-          'backup_password': 'Mms_Pilot_Backup_Secret_2026!',
-        }),
+        body: jsonEncode(const <String, dynamic>{}),
       );
       expect(backupResp.statusCode, equals(200));
       final backupJson = jsonDecode(backupResp.body) as Map<String, dynamic>;

@@ -52,6 +52,35 @@ class PairingSessionInfo {
   String toString() => 'PairingSessionInfo(sessionId: $sessionId, expiresAt: $expiresAt)';
 }
 
+class OwnerBootstrapResult {
+  final String deviceId;
+  final String role;
+  final String? token;
+
+  const OwnerBootstrapResult({
+    required this.deviceId,
+    required this.role,
+    this.token,
+  });
+
+  @override
+  String toString() => 'OwnerBootstrapResult(deviceId: $deviceId, role: $role)';
+}
+
+class HubReadinessSummary {
+  final String status;
+  final String? restoreEpoch;
+  final bool recoveryKeyConfigured;
+  final String? schedulerLastErrorCode;
+
+  const HubReadinessSummary({
+    required this.status,
+    this.restoreEpoch,
+    required this.recoveryKeyConfigured,
+    this.schedulerLastErrorCode,
+  });
+}
+
 /// Faz 7B — Windows Owner için Hub eşleştirme yönetimi (oturum aç, bekleyenleri listele,
 /// onayla, reddet). Hub bu uçları yalnızca loopback + admin secret ile kabul eder;
 /// admin secret çağrı başına verilir ve kalıcı olarak saklanmaz.
@@ -147,6 +176,46 @@ class HubPairingAdminClient {
       sessionId: sessionId,
       qrPayload: jsonEncode(body),
       expiresAt: expires is int ? DateTime.fromMillisecondsSinceEpoch(expires * 1000) : null,
+    );
+  }
+
+  /// OV-04: Mevcut `POST /api/v1/admin/owner/bootstrap` tek seferlik OWNER kurulum ucunu çağırır.
+  Future<OwnerBootstrapResult> bootstrapOwner({
+    required String adminSecret,
+    required String deviceId,
+    String deviceName = 'Windows Master Hub (OWNER)',
+    bool registerIfMissing = true,
+  }) async {
+    final headers = _headers(adminSecret);
+    final body = await _send(
+      () => httpClient.post(
+        _uri('/api/v1/admin/owner/bootstrap'),
+        headers: headers,
+        body: jsonEncode({
+          'device_id': deviceId.trim(),
+          'name': deviceName.trim(),
+          'register_if_missing': registerIfMissing,
+        }),
+      ),
+    );
+    return OwnerBootstrapResult(
+      deviceId: (body['device_id'] as String?) ?? deviceId.trim(),
+      role: (body['role'] as String?) ?? 'OWNER',
+      token: body['token'] as String?,
+    );
+  }
+
+  /// Hub `/health` üzerinden kurtarma anahtarı yapılandırma durumu vb. ön koşulları okur.
+  Future<HubReadinessSummary> fetchHubReadiness() async {
+    final body = await _send(() => httpClient.get(_uri('/health')));
+    final backup = body['backup'] is Map
+        ? Map<String, dynamic>.from(body['backup'] as Map)
+        : const <String, dynamic>{};
+    return HubReadinessSummary(
+      status: (body['status'] as String?) ?? 'UNKNOWN',
+      restoreEpoch: body['restore_epoch'] as String?,
+      recoveryKeyConfigured: (backup['recovery_key_configured'] as bool?) ?? false,
+      schedulerLastErrorCode: backup['central_scheduler_last_error_code'] as String?,
     );
   }
 }

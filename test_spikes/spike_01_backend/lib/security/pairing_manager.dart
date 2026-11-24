@@ -310,6 +310,7 @@ class PairingManager {
             salt: Value(salt),
             isActive: const Value(true),
             isConfirmed: const Value(false),
+            role: const Value('CASHIER'), // OV-04: Tüm eşleştirilen cihazlar varsayılan CASHIER olur
           ),
         );
 

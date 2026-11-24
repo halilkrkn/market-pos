@@ -393,9 +393,17 @@ void main() {
       final op3 = await (db.select(db.outboxOperations)..where((o) => o.operationId.equals(sale3.operationId))).getSingle();
       expect(op3.status, equals('PENDING')); // Seq 3 gönderilmedi, bekliyor
 
-      // 4. Hata Kurtarma: Kalıcı hata incelendi ve düzeltildi (ör. sunucu sorunu giderildi veya işlem PENDING'e alındı)
+      // 4. Hata Kurtarma: Protokol/idempotency uyuşmazlığında varsayılan yeniden deneme engellenir;
+      // yalnızca açık operatör geçersiz kılması (veya uzlaştırma) ile PENDING'e alınır
       transport.scriptedResponses.remove(sale2.clientSeq); // Hata çözüldü
-      await repo.retryFailedPermanentOperation(sale2.operationId);
+      await expectLater(
+        repo.retryFailedPermanentOperation(sale2.operationId),
+        throwsA(isA<StateError>()),
+      );
+      await repo.retryFailedPermanentOperation(
+        sale2.operationId,
+        allowProtocolConflictOverride: true,
+      );
 
       final op2Recovered = await (db.select(db.outboxOperations)..where((o) => o.operationId.equals(sale2.operationId))).getSingle();
       expect(op2Recovered.status, equals('PENDING'));

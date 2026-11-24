@@ -1,5 +1,8 @@
 # MARKET MMS — Son Tamamlama, Üretim Hazırlığı ve Saha Kabulü Raporu
 
+> [!NOTE]
+> **Bu rapor 21 Kasım 2026 tarihli tarihsel kayıttır.** Güncel durum (Hat A + Hat B / ADR-023, 23 Kasım 2026, gerçek test sonuçları) için: [`FINAL_PILOT_READINESS_REPORT.md`](./FINAL_PILOT_READINESS_REPORT.md).
+
 *Tarih: 21 Kasım 2026 (3. oturum) · Hazırlayan: Claude Code (Opus 5.5)*
 *Kapsam: "Son Tamamlama, Üretim Hazırlığı ve Saha Kabulü Ana Talimatı" §1–§23*
 *Okuyucu: Proje Sahibi (Owner) ve projeyi devralacak geliştiriciler*

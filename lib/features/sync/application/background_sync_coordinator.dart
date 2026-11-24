@@ -4,6 +4,7 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
 
+import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../domain/sync_coordinator_state.dart';
 
 /// ClientSyncService üretici factory tipi (testlerde mock veya custom parametre enjeksiyonu için)
@@ -48,7 +49,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
   final bool isDriveFallbackStandby;
   final FutureOr<void> Function(SyncBatchResult? result)? onSyncCompleted;
   final FutureOr<void> Function(String failedUrl, String? errorMessage)?
-      onHubNetworkUnreachable;
+  onHubNetworkUnreachable;
   final Duration periodicInterval;
   final bool autoStartTimer;
   final bool enableLifecycleListener;
@@ -90,11 +91,13 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
     this.autoStartTimer = true,
     this.enableLifecycleListener = true,
     @visibleForTesting this.onCycleStart,
-  }) : super(SyncCoordinatorState.initial().copyWith(
-          driveSyncUiStatus: isDriveFallbackStandby
-              ? HybridDriveSyncUiStatus.driveStandby
-              : HybridDriveSyncUiStatus.hubPrimary,
-        )) {
+  }) : super(
+         SyncCoordinatorState.initial().copyWith(
+           driveSyncUiStatus: isDriveFallbackStandby
+               ? HybridDriveSyncUiStatus.driveStandby
+               : HybridDriveSyncUiStatus.hubPrimary,
+         ),
+       ) {
     _initPeriodicTimer();
     _initLifecycleListener();
   }
@@ -233,8 +236,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         isSyncing: isCurrentlySyncing,
         hasPendingTrailingSync: false,
         lastTriggerReason: reason,
-        errorMessage:
-            'Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş. Senkronizasyon için geçerli token gereklidir.',
+        errorMessage: 'Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş. Senkronizasyon için geçerli token gereklidir.',
       );
 
       // Bekleyen ardıl istek varsa token olmadığı için güvenle iptal et
@@ -270,32 +272,45 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
     final syncFuture = completer.future;
     _activeSyncFuture = syncFuture;
 
-    unawaited(_executeSyncCycle(token, reason, completer).catchError((Object error, StackTrace stack) {
-      debugPrint('[BackgroundSyncCoordinator] _executeSyncCycle unhandled error: $error\n$stack');
-      if (!_isDisposed) {
-        try {
-          state = state.copyWith(
-            status: SyncCoordinatorStatus.error,
-            isSyncing: false,
-            errorMessage: 'Senkronizasyon döngüsünde kritik hata: $error',
-            hasPendingTrailingSync: false,
-          );
-        } catch (_) {}
-      }
-      if (!completer.isCompleted) {
-        completer.complete(null);
-      }
-      if (_trailingCompleter != null && !_trailingCompleter!.isCompleted) {
-        _trailingCompleter!.complete(null);
-      }
-      _trailingCompleter = null;
-      _trailingSyncRequested = false;
-      _trailingReason = null;
-      if (_activeCompleter == completer) {
-        _activeCompleter = null;
-        _activeSyncFuture = null;
-      }
-    }));
+    unawaited(
+      _executeSyncCycle(token, reason, completer).catchError((
+        Object error,
+        StackTrace stack,
+      ) {
+        final safeErr = UserFriendlyErrorMapper.redactSecrets(error.toString());
+        final safeStack = UserFriendlyErrorMapper.redactSecrets(stack.toString());
+        debugPrint(
+          '[BackgroundSyncCoordinator] _executeSyncCycle unhandled error: $safeErr\n$safeStack',
+        );
+        if (!_isDisposed) {
+          try {
+            state = state.copyWith(
+              status: SyncCoordinatorStatus.error,
+              isSyncing: false,
+              errorMessage: 'Senkronizasyon döngüsünde kritik hata: $safeErr',
+              hasPendingTrailingSync: false,
+            );
+          } catch (stateErr) {
+            debugPrint(
+              '[BackgroundSyncCoordinator] Hata durumu yazılamadı: ${stateErr.runtimeType}',
+            );
+          }
+        }
+        if (!completer.isCompleted) {
+          completer.complete(null);
+        }
+        if (_trailingCompleter != null && !_trailingCompleter!.isCompleted) {
+          _trailingCompleter!.complete(null);
+        }
+        _trailingCompleter = null;
+        _trailingSyncRequested = false;
+        _trailingReason = null;
+        if (_activeCompleter == completer) {
+          _activeCompleter = null;
+          _activeSyncFuture = null;
+        }
+      }),
+    );
 
     return syncFuture;
   }
@@ -342,8 +357,7 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         if (cycleHubCheck.notReady ||
             cycleHubCheck.readError != null ||
             effectiveHubUrl == null) {
-          executionError = cycleHubCheck.readError ??
-              'Hub adresi henüz yapılandırılmadı veya platform politikasınca engellendi.';
+          executionError = cycleHubCheck.readError ?? 'Hub adresi henüz yapılandırılmadı veya platform politikasınca engellendi.';
         } else {
           attemptedHubUrl = effectiveHubUrl;
           // 1. Service factory veya constructor oluşturulması try-catch kapsamında
@@ -368,31 +382,49 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
             );
           }
 
-        result = await service.syncPendingOutbox();
+          result = await service.syncPendingOutbox();
 
-        // Faz 7A: Downlink hataları sessizce yutulmaz; durumda raporlanır.
-        final downlinkErrors = <String>[];
-        downlinkAttempted = true;
-        // Merkezi ürün kataloğu snapshot'ını çek ve güncelle
-        try {
-          pulledProductsCount = await service.syncProducts();
-        } catch (prodSyncErr) {
-          debugPrint('[BackgroundSyncCoordinator] Ürün kataloğu senkronizasyonu uyarısı: $prodSyncErr');
-          downlinkErrors.add('Ürün kataloğu indirilemedi: $prodSyncErr');
-        }
+          // Faz 7A: Downlink hataları sessizce yutulmaz; durumda raporlanır.
+          final downlinkErrors = <String>[];
+          downlinkAttempted = true;
+          // Merkezi ürün kataloğu snapshot'ını çek ve güncelle
+          try {
+            pulledProductsCount = await service.syncProducts();
+          } catch (prodSyncErr) {
+            final safeProdErr = UserFriendlyErrorMapper.redactSecrets(
+              prodSyncErr.toString(),
+            );
+            debugPrint(
+              '[BackgroundSyncCoordinator] Ürün kataloğu senkronizasyonu uyarısı: $safeProdErr',
+            );
+            downlinkErrors.add('Ürün kataloğu indirilemedi: $safeProdErr');
+          }
 
-        // Satışların çoklu cihaz senkronizasyonu (downlink) çek ve güncelle
-        try {
-          pulledSalesCount = await service.syncSales();
-        } catch (salesSyncErr) {
-          debugPrint('[BackgroundSyncCoordinator] Satış senkronizasyonu uyarısı: $salesSyncErr');
-          downlinkErrors.add('Satış geçmişi indirilemedi: $salesSyncErr');
-        }
-        downlinkError = downlinkErrors.isEmpty ? null : downlinkErrors.join(' | ');
+          // Satışların çoklu cihaz senkronizasyonu (downlink) çek ve güncelle
+          try {
+            pulledSalesCount = await service.syncSales();
+          } catch (salesSyncErr) {
+            final safeSalesErr = UserFriendlyErrorMapper.redactSecrets(
+              salesSyncErr.toString(),
+            );
+            debugPrint(
+              '[BackgroundSyncCoordinator] Satış senkronizasyonu uyarısı: $safeSalesErr',
+            );
+            downlinkErrors.add('Satış geçmişi indirilemedi: $safeSalesErr');
+          }
+          downlinkError = downlinkErrors.isEmpty
+              ? null
+              : downlinkErrors.join(' | ');
         }
       } catch (e, stack) {
-        debugPrint('[BackgroundSyncCoordinator] Senkronizasyon yürütme hatası: $e\n$stack');
-        executionError = e.toString();
+        final safeExecErr = UserFriendlyErrorMapper.redactSecrets(e.toString());
+        final safeExecStack = UserFriendlyErrorMapper.redactSecrets(
+          stack.toString(),
+        );
+        debugPrint(
+          '[BackgroundSyncCoordinator] Senkronizasyon yürütme hatası: $safeExecErr\n$safeExecStack',
+        );
+        executionError = safeExecErr;
       }
 
       // EĞER DISPOSE EDİLDİYSE: Arka plandaki işlem asla state değiştirmemeli ve completer'ları tekrar tamamlamamalıdır
@@ -555,7 +587,9 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
                 nextLastDriveSyncTime = now;
               }
             } catch (e) {
-              debugPrint('[BackgroundSyncCoordinator] Drive fallback hatası: $e');
+              debugPrint(
+                '[BackgroundSyncCoordinator] Drive fallback hatası: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}',
+              );
               nextDriveUiStatus = HybridDriveSyncUiStatus.driveOfflineError;
             }
           }
@@ -572,14 +606,15 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
       state = state.copyWith(
         status: newStatus,
         isSyncing: false,
-        lastSyncTime:
-            (result != null && result.syncedCount > 0) ? now : state.lastSyncTime,
+        lastSyncTime: (result != null && result.syncedCount > 0)
+            ? now
+            : state.lastSyncTime,
         lastResult: result,
         errorMessage: hasTokenReadError
             ? 'Cihaz yetkilendirme anahtarı okunurken hata oluştu: ${tokenCheck.readError}'
             : (isTokenMissing
-                ? 'Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş.'
-                : (executionError ?? result?.lastError)),
+                  ? 'Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş.'
+                  : (executionError ?? result?.lastError)),
         hasPendingTrailingSync:
             _trailingSyncRequested && !isTokenMissing && !hasTokenReadError,
         downlinkError: downlinkAttempted ? downlinkError : state.downlinkError,
@@ -611,7 +646,8 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
 
       // 4. Ardıl (Trailing) senkronizasyon kontrolü
       final postCycleHubCheck = _safeResolveHubUrl();
-      final isHubMissingOrUnready = postCycleHubCheck.notReady ||
+      final isHubMissingOrUnready =
+          postCycleHubCheck.notReady ||
           postCycleHubCheck.readError != null ||
           postCycleHubCheck.url == null;
 
@@ -693,8 +729,14 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
         _trailingCompleter = null;
       }
     } catch (unexpectedError, unexpectedStack) {
+      final safeUnexpected = UserFriendlyErrorMapper.redactSecrets(
+        unexpectedError.toString(),
+      );
+      final safeUnexpectedStack = UserFriendlyErrorMapper.redactSecrets(
+        unexpectedStack.toString(),
+      );
       debugPrint(
-        '[BackgroundSyncCoordinator] Senkronizasyon döngüsünde kritik beklenmeyen hata: $unexpectedError\n$unexpectedStack',
+        '[BackgroundSyncCoordinator] Senkronizasyon döngüsünde kritik beklenmeyen hata: $safeUnexpected\n$safeUnexpectedStack',
       );
       if (!_isDisposed) {
         try {
@@ -702,10 +744,14 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
             status: SyncCoordinatorStatus.error,
             isSyncing: false,
             errorMessage:
-                'Senkronizasyon döngüsünde beklenmeyen hata: $unexpectedError',
+                'Senkronizasyon döngüsünde beklenmeyen hata: $safeUnexpected',
             hasPendingTrailingSync: false,
           );
-        } catch (_) {}
+        } catch (stateErr) {
+          debugPrint(
+            '[BackgroundSyncCoordinator] Beklenmeyen hata durumu yazılamadı: ${stateErr.runtimeType}',
+          );
+        }
       }
       if (!currentCompleter.isCompleted) {
         currentCompleter.complete(result);
@@ -732,13 +778,13 @@ class BackgroundSyncCoordinator extends StateNotifier<SyncCoordinatorState> {
       if (callbackResult is Future) {
         callbackResult.catchError((Object error, StackTrace stack) {
           debugPrint(
-            '[BackgroundSyncCoordinator] $callbackName asenkron hata: $error\n$stack',
+            '[BackgroundSyncCoordinator] $callbackName asenkron hata: ${UserFriendlyErrorMapper.redactSecrets(error.toString())}\n${UserFriendlyErrorMapper.redactSecrets(stack.toString())}',
           );
         });
       }
     } catch (e, stack) {
       debugPrint(
-        '[BackgroundSyncCoordinator] $callbackName senkron hata: $e\n$stack',
+        '[BackgroundSyncCoordinator] $callbackName senkron hata: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}\n${UserFriendlyErrorMapper.redactSecrets(stack.toString())}',
       );
     }
   }

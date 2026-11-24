@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:mms_client_storage/mms_client_storage.dart';
 
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/platform/mms_ui_profile.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/theme/theme_provider.dart';
+import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../backup/presentation/widgets/backup_management_card.dart';
+import '../../../backup/presentation/widgets/hub_central_backup_card.dart';
 import '../../../security/presentation/widgets/device_security_card.dart';
 import '../../../security/presentation/widgets/pairing_approval_panel.dart';
 import '../../../setup/presentation/widgets/store_setup_card.dart';
@@ -15,7 +16,9 @@ import '../../../sync/domain/hub_connection_state.dart';
 import '../../../sync/domain/sync_coordinator_state.dart';
 import '../../../sync/sync_providers.dart';
 import '../../../updates/presentation/widgets/app_update_card.dart';
+import '../../application/failed_outbox_controller.dart';
 import '../../application/system_status_notifier.dart';
+import '../../domain/failed_outbox_item.dart';
 import '../../domain/system_status.dart';
 import '../widgets/diagnostics_card_helpers.dart';
 import '../widgets/diagnostics_export_card.dart';
@@ -59,54 +62,58 @@ class DiagnosticsView extends ConsumerWidget {
                 ),
               ],
             ),
-          const SizedBox(height: MmsSpacing.lg),
+            const SizedBox(height: MmsSpacing.lg),
 
-          // 1. Kart: Görünüm ve Tema Ayarları (Light / Dark / System)
-          _buildAppearanceCard(context, ref, themeMode),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 2. Kart: Merkezi Shelf Backend (Hub) Durumu
-          _buildHubCard(context, status, hubConnection),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 3. Kart: Arka Plan Senkronizasyon Koordinatörü
-          _buildSyncCoordinatorCard(context, ref, syncState, status),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 4. Kart: İstemci Yerel Veritabanı (client_local.db) Durumu
-          _buildLocalStorageCard(context, status),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 5. Kart: Mağaza, Şube ve Cihaz Kurulumu
-          const StoreSetupCard(),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 6. Kart: Şifreli Yedekleme ve Kurtarma (S5A-4)
-          const BackupManagementCard(),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 7. Kart: Cihaz Güvenliği, TLS Pinning (B-2) & Token Deposu (B-3)
-          const DeviceSecurityCard(),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 7.1 Kart (yalnızca Windows/Hub bilgisayarı): Owner eşleştirme onay/red
-          if (ref.watch(mmsUiProfileProvider).isDesktop) ...[
-            const PairingApprovalPanel(),
+            // 1. Kart: Görünüm ve Tema Ayarları (Light / Dark / System)
+            _buildAppearanceCard(context, ref, themeMode),
             const SizedBox(height: MmsSpacing.md),
+
+            // 2. Kart: Merkezi Shelf Backend (Hub) Durumu
+            _buildHubCard(context, status, hubConnection),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 3. Kart: Arka Plan Senkronizasyon Koordinatörü
+            _buildSyncCoordinatorCard(context, ref, syncState, status),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 4. Kart: İstemci Yerel Veritabanı (client_local.db) Durumu
+            _buildLocalStorageCard(context, status),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 5. Kart: Mağaza, Şube ve Cihaz Kurulumu
+            const StoreSetupCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 6. Kart: Merkezi Hub Yedekleme (Google Drive - Ana Pilot Yedeği)
+            const HubCentralBackupCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 6.1. Kart: Legacy Yerel Cihaz Yedeği (S5A-4)
+            const BackupManagementCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 7. Kart: Cihaz Güvenliği, TLS Pinning (B-2) & Token Deposu (B-3)
+            const DeviceSecurityCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 7.1 Kart (yalnızca Windows/Hub bilgisayarı): Owner eşleştirme onay/red
+            if (ref.watch(mmsUiProfileProvider).isDesktop) ...[
+              const PairingApprovalPanel(),
+              const SizedBox(height: MmsSpacing.md),
+            ],
+
+            // 8. Kart: Uygulama Sürümü ve Güncelleme Kontrolü
+            const AppUpdateCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 9. Kart: Maskeli Tanı ve Destek Dışa Aktarımı
+            const DiagnosticsExportCard(),
+            const SizedBox(height: MmsSpacing.md),
+
+            // 10. Kart: Mimari Güvenlik ve Uyumluluk Notları
+            _buildArchitectureSafetyCard(context),
           ],
-
-          // 8. Kart: Uygulama Sürümü ve Güncelleme Kontrolü
-          const AppUpdateCard(),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 9. Kart: Maskeli Tanı ve Destek Dışa Aktarımı
-          const DiagnosticsExportCard(),
-          const SizedBox(height: MmsSpacing.md),
-
-          // 10. Kart: Mimari Güvenlik ve Uyumluluk Notları
-          _buildArchitectureSafetyCard(context),
-        ],
-      ),
+        ),
       ),
     );
   }
@@ -265,8 +272,10 @@ class DiagnosticsView extends ConsumerWidget {
     final displayedUrl = rawUrl.trim().isNotEmpty
         ? rawUrl
         : 'Henüz yapılandırılmadı';
-    final (String phaseLabel, AppBadgeTone phaseTone) =
-        switch (hubConnection.phase) {
+    final (
+      String phaseLabel,
+      AppBadgeTone phaseTone,
+    ) = switch (hubConnection.phase) {
       HubConnectionPhase.unconfigured => (
         'Yapılandırılmadı',
         AppBadgeTone.neutral,
@@ -286,14 +295,7 @@ class DiagnosticsView extends ConsumerWidget {
         AppBadgeTone.warning,
       ),
     };
-    final String? sourceLabel = switch (hubConnection.source) {
-      HubUrlSource.discovered => 'Otomatik Keşif',
-      HubUrlSource.lastVerified => 'Son Doğrulanan',
-      HubUrlSource.manual => 'Manuel',
-      HubUrlSource.configured => 'Yapılandırma',
-      HubUrlSource.localhostFallback => 'Yerel Masaüstü',
-      null => null,
-    };
+    final String? sourceLabel = hubConnection.sourceDisplayLabel;
 
     return AppCard(
       elevated: true,
@@ -423,8 +425,7 @@ class DiagnosticsView extends ConsumerWidget {
     WidgetRef ref,
     SyncCoordinatorState syncState,
     SystemStatus status,
-  ) =>
-      _buildSyncCoordinatorCard(context, ref, syncState, status);
+  ) => _buildSyncCoordinatorCard(context, ref, syncState, status);
 
   Widget _buildSyncCoordinatorCard(
     BuildContext context,
@@ -600,6 +601,13 @@ class DiagnosticsView extends ConsumerWidget {
               message:
                   '${syncState.driveConflictCount} adet Drive ürün/fiyat çakışması tespit edildi; Master Hub bağlantısı bekleniyor.',
               inline: true,
+            ),
+          ],
+          if (status.outboxSummary.failedPermanent > 0) ...[
+            const SizedBox(height: MmsSpacing.sm),
+            _FailedPermanentOutboxSection(
+              deviceId: status.deviceId,
+              revision: status.localMetricsRevision,
             ),
           ],
         ],
@@ -796,6 +804,165 @@ class DiagnosticsView extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+class _FailedPermanentOutboxSection extends ConsumerStatefulWidget {
+  final String deviceId;
+  final int revision;
+
+  const _FailedPermanentOutboxSection({
+    required this.deviceId,
+    required this.revision,
+  });
+
+  @override
+  ConsumerState<_FailedPermanentOutboxSection> createState() =>
+      _FailedPermanentOutboxSectionState();
+}
+
+class _FailedPermanentOutboxSectionState
+    extends ConsumerState<_FailedPermanentOutboxSection> {
+  Future<List<FailedOutboxItem>?>? _opsFuture;
+  bool _retrying = false;
+
+  void _reload() {
+    if (widget.deviceId.trim().isEmpty) {
+      _opsFuture = null;
+      return;
+    }
+    _opsFuture = ref
+        .read(failedOutboxServiceProvider)
+        .loadFailedOperations(widget.deviceId);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _reload();
+  }
+
+  @override
+  void didUpdateWidget(covariant _FailedPermanentOutboxSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.deviceId != widget.deviceId ||
+        oldWidget.revision != widget.revision) {
+      _reload();
+    }
+  }
+
+  Future<void> _retryOperation(String operationId) async {
+    setState(() => _retrying = true);
+    try {
+      await ref.read(failedOutboxServiceProvider).retryOperation(operationId);
+      if (mounted) {
+        setState(() {
+          _reload();
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnackbar.show(
+          context,
+          message: UserFriendlyErrorMapper.map(
+            e,
+            fallback: 'Bu kalıcı hata doğrudan yeniden denenemez.',
+          ),
+          tone: AppBadgeTone.danger,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _retrying = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mmsColors;
+    final future = _opsFuture;
+    if (future == null) {
+      return const AppErrorState(
+        key: Key('diagnostics_failed_permanent_list'),
+        message: 'Kalıcı senkronizasyon hatası bulunan işlemler var; katalog veya satış detayından düzeltip yeniden deneyin.',
+        inline: true,
+      );
+    }
+
+    return FutureBuilder<List<FailedOutboxItem>?>(
+      future: future,
+      builder: (context, snapshot) {
+        final ops = snapshot.data;
+        if (snapshot.connectionState == ConnectionState.waiting &&
+            (ops == null || ops.isEmpty)) {
+          return const SizedBox.shrink();
+        }
+        if (ops == null || ops.isEmpty) {
+          return const AppErrorState(
+            key: Key('diagnostics_failed_permanent_list'),
+            message: 'Kalıcı hata (FAILED_PERMANENT) durumunda bekleyen Outbox kaydı bulundu.',
+            inline: true,
+          );
+        }
+
+        return Container(
+          key: const Key('diagnostics_failed_permanent_list'),
+          padding: const EdgeInsets.all(MmsSpacing.sm),
+          decoration: BoxDecoration(
+            color: colors.dangerBg,
+            borderRadius: BorderRadius.circular(MmsRadius.md),
+            border: Border.all(
+              color: colors.dangerText.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Kalıcı Hatalı Kuyruk İşlemleri (${ops.length})',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: colors.dangerText,
+                ),
+              ),
+              const SizedBox(height: MmsSpacing.xs),
+              for (final op in ops) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: MmsSpacing.xs),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          '${op.operationType} #${op.clientSeq}: ${UserFriendlyErrorMapper.map(op.lastError ?? "Kalıcı senkronizasyon hatası")}',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: colors.textPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: MmsSpacing.xs),
+                      SizedBox(
+                        height: 36,
+                        child: OutlinedButton(
+                          key: Key('retry_failed_op_${op.operationId}'),
+                          onPressed:
+                              (_retrying || op.isProtocolConflictNonRetryable)
+                              ? null
+                              : () => _retryOperation(op.operationId),
+                          child: const Text('Yeniden Dene'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

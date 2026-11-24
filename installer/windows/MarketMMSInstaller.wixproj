@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix_obj\</BaseIntermediateOutputPath>
+    <BaseOutputPath>$(MSBuildThisFileDirectory)..\..\build\wix_bin\</BaseOutputPath>
+  </PropertyGroup>
+  <Import Project="Sdk.props" Sdk="WixToolset.Sdk" Version="5.0.2" />
+  <PropertyGroup>
+    <OutputType>Package</OutputType>
+    <InstallerPlatform>x64</InstallerPlatform>
+    <OutputName>MarketMMS-Setup-$(MmsVersion)-x64</OutputName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <MmsVersion Condition="'$(MmsVersion)' == ''">1.0.0</MmsVersion>
+    <MmsStagingDir Condition="'$(MmsStagingDir)' == ''">$(MSBuildThisFileDirectory)..\..\build\installer_staging</MmsStagingDir>
+    <DefineConstants>$(DefineConstants);MmsVersion=$(MmsVersion);MmsStagingDir=$(MmsStagingDir)</DefineConstants>
+    <SuppressIces>ICE43;ICE57</SuppressIces>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Package.wxs" />
+    <Compile Include="$(GeneratedPayloadWxs)" Condition="'$(GeneratedPayloadWxs)' != '' And Exists('$(GeneratedPayloadWxs)')" />
+  </ItemGroup>
+  <Import Project="Sdk.targets" Sdk="WixToolset.Sdk" Version="5.0.2" />
+</Project>

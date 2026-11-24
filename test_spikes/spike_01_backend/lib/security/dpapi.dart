@@ -88,7 +88,8 @@ class WindowsDpapi {
   }
 
   /// Verilen byte dizisini DPAPI LocalMachine kapsamı ile şifreler.
-  static Uint8List protect(List<int> plainBytes) {
+  /// İsteğe bağlı [entropy] verildiğinde `pOptionalEntropy` bağlaması uygulanır (`OV-01`).
+  static Uint8List protect(List<int> plainBytes, {List<int>? entropy}) {
     _init();
 
     final inBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
@@ -99,13 +100,25 @@ class WindowsDpapi {
     inBlob.ref.cbData = plainBytes.length;
     inBlob.ref.pbData = inData;
 
+    Pointer<DataBlob> entropyBlob = nullptr;
+    Pointer<Uint8> entropyData = nullptr;
+    if (entropy != null && entropy.isNotEmpty) {
+      entropyBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
+      entropyData = _localAlloc!(allocFlags, entropy.length).cast<Uint8>();
+      for (var i = 0; i < entropy.length; i++) {
+        entropyData[i] = entropy[i];
+      }
+      entropyBlob.ref.cbData = entropy.length;
+      entropyBlob.ref.pbData = entropyData;
+    }
+
     final outBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
 
     try {
       final success = _protect!(
         inBlob,
         nullptr,
-        nullptr,
+        entropyBlob,
         nullptr,
         nullptr,
         cryptProtectLocalMachine | cryptProtectUiForbidden,
@@ -121,6 +134,12 @@ class WindowsDpapi {
     } finally {
       _localFree!(inData.cast<Void>());
       _localFree!(inBlob.cast<Void>());
+      if (entropyData != nullptr) {
+        _localFree!(entropyData.cast<Void>());
+      }
+      if (entropyBlob != nullptr) {
+        _localFree!(entropyBlob.cast<Void>());
+      }
       if (outBlob.ref.pbData != nullptr) {
         _localFree!(outBlob.ref.pbData.cast<Void>());
       }
@@ -129,7 +148,8 @@ class WindowsDpapi {
   }
 
   /// DPAPI ile şifrelenmiş byte dizisini çözer.
-  static Uint8List unprotect(List<int> cipherBytes) {
+  /// Şifreleme sırasında [entropy] kullanıldıysa aynı [entropy] verilmelidir.
+  static Uint8List unprotect(List<int> cipherBytes, {List<int>? entropy}) {
     _init();
 
     final cipherBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
@@ -140,13 +160,25 @@ class WindowsDpapi {
     cipherBlob.ref.cbData = cipherBytes.length;
     cipherBlob.ref.pbData = cipherData;
 
+    Pointer<DataBlob> entropyBlob = nullptr;
+    Pointer<Uint8> entropyData = nullptr;
+    if (entropy != null && entropy.isNotEmpty) {
+      entropyBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
+      entropyData = _localAlloc!(allocFlags, entropy.length).cast<Uint8>();
+      for (var i = 0; i < entropy.length; i++) {
+        entropyData[i] = entropy[i];
+      }
+      entropyBlob.ref.cbData = entropy.length;
+      entropyBlob.ref.pbData = entropyData;
+    }
+
     final plainBlob = _localAlloc!(allocFlags, sizeOf<DataBlob>()).cast<DataBlob>();
 
     try {
       final success = _unprotect!(
         cipherBlob,
         nullptr,
-        nullptr,
+        entropyBlob,
         nullptr,
         nullptr,
         cryptProtectUiForbidden,
@@ -154,7 +186,7 @@ class WindowsDpapi {
       );
 
       if (success == 0) {
-        throw StateError('DPAPI CryptUnprotectData başarısız oldu. Veri bozuk veya yetki yetersiz.');
+        throw StateError('DPAPI CryptUnprotectData başarısız oldu. Veri bozuk, entropy yanlış veya yetki yetersiz.');
       }
 
       final result = plainBlob.ref.pbData.asTypedList(plainBlob.ref.cbData).sublist(0);
@@ -162,6 +194,12 @@ class WindowsDpapi {
     } finally {
       _localFree!(cipherData.cast<Void>());
       _localFree!(cipherBlob.cast<Void>());
+      if (entropyData != nullptr) {
+        _localFree!(entropyData.cast<Void>());
+      }
+      if (entropyBlob != nullptr) {
+        _localFree!(entropyBlob.cast<Void>());
+      }
       if (plainBlob.ref.pbData != nullptr) {
         _localFree!(plainBlob.ref.pbData.cast<Void>());
       }
@@ -170,9 +208,11 @@ class WindowsDpapi {
   }
 
   /// String şifreleme yardımcısı
-  static Uint8List protectString(String plainText) => protect(utf8.encode(plainText));
+  static Uint8List protectString(String plainText, {List<int>? entropy}) =>
+      protect(utf8.encode(plainText), entropy: entropy);
 
   /// String çözme yardımcısı
-  static String unprotectString(List<int> cipherBytes) => utf8.decode(unprotect(cipherBytes));
+  static String unprotectString(List<int> cipherBytes, {List<int>? entropy}) =>
+      utf8.decode(unprotect(cipherBytes, entropy: entropy));
 }
 

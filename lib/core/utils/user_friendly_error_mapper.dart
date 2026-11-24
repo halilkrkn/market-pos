@@ -1,10 +1,36 @@
 /// Teknik istisna, ağ ve SQLite hata mesajlarını sade, anlaşılır Türkçe
-/// kullanıcı mesajlarına dönüştüren ve gizli anahtar/token bilgilerini
+/// kullanıcı mesajlarına dönüştüren ve gizli anahtar/token/dosya yolu bilgilerini
 /// maskeleyen saf Dart yardımcı sınıf.
 abstract final class UserFriendlyErrorMapper {
-  /// Ham hata metnindeki gizli kimlik doğrulama ve sır bilgilerini maskeler.
+  static String _redactFilesystemPath(String rawPath) {
+    final normalized = rawPath.trim();
+    if (normalized.isEmpty) return '[REDACTED_PATH]';
+    final sepIndex = normalized.lastIndexOf(RegExp(r'[/\\]'));
+    if (sepIndex < 0 || sepIndex == normalized.length - 1) {
+      return '[REDACTED_PATH]';
+    }
+    final basename = normalized.substring(sepIndex + 1);
+    return basename.isEmpty ? '[REDACTED_PATH]' : '[REDACTED_PATH]/$basename';
+  }
+
+  /// Ham hata metnindeki gizli kimlik doğrulama, sır ve tam dosya yolu bilgilerini maskeler.
   static String redactSecrets(String raw) {
     var text = raw;
+    // PEM ozel anahtar bloklarini temizle
+    text = text.replaceAll(
+      RegExp(
+        r'-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----',
+      ),
+      '[REDACTED_PRIVATE_KEY]',
+    );
+    // JSON tirnakli gizli alanlari maskele
+    text = text.replaceAllMapped(
+      RegExp(
+        r'("(?:auth_code|code|pairing_secret|device_token|access_token|accessToken|refresh_token|refreshToken|token|password|backupPassword|backup_password|recovery_password|recoveryPassword|privateKey|private_key|client_secret|clientSecret|admin_secret|adminSecret|live_sync_secret|dpapi_secret|signing_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|upload_id|session|signature|sig|secret|pepper)"\s*:\s*)"[^"]*"',
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}"[REDACTED]"',
+    );
     text = text.replaceAll(
       RegExp(r'Bearer\s+[A-Za-z0-9_\-\.]+', caseSensitive: false),
       'Bearer [REDACTED]',
@@ -13,12 +39,65 @@ abstract final class UserFriendlyErrorMapper {
       RegExp(r'mms_dt_[A-Za-z0-9_\-]+'),
       'mms_dt_[REDACTED]',
     );
+    // Google OAuth access token, refresh token ve client secret kaliplari
     text = text.replaceAll(
+      RegExp(r'\bya29\.[A-Za-z0-9_\-\.]+'),
+      'ya29.[REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'\b1//[A-Za-z0-9_\-\.]+'),
+      '1//[REDACTED]',
+    );
+    text = text.replaceAll(
+      RegExp(r'\bGOCSPX-[A-Za-z0-9_\-]+'),
+      'GOCSPX-[REDACTED]',
+    );
+    // URL sorgu parametrelerindeki hassas oauth/drive/admin parametrelerini maskele
+    text = text.replaceAllMapped(
       RegExp(
-        r'(token|secret|password|pairing_secret|private_key)\s*[:=]\s*[^\s,;]+',
+        r"""([?&])(code|auth_code|access_token|refresh_token|device_token|token|client_secret|admin_secret|live_sync_secret|dpapi_secret|signing_key|recovery_password|pairing_secret|private_key|code_verifier|api_key|key|upload_id|session|signature|sig|pepper|password|secret)=([^&#\s"'`\)\]]*)""",
         caseSensitive: false,
       ),
-      r'$1: [REDACTED]',
+      (m) => '${m.group(1)}${m.group(2)}=[REDACTED]',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""\b(access_token|refresh_token|device_token|token|client_secret|admin_secret|live_sync_secret|dpapi_secret|signing_key|recovery_password|pairing_secret|private_key|code_verifier|x-mms-admin-secret|x-admin-secret|api_key|auth_code|upload_id|pepper|secret|password)\s*([:=])\s*(?!\[REDACTED\])([^\s,&;"'`\)\]]+)""",
+        caseSensitive: false,
+      ),
+      (m) => '${m.group(1)}${m.group(2)} [REDACTED]',
+    );
+    // Stack trace ve file:/// URI icindeki tam yerel yollar
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""file:///(?:[A-Za-z]:[\\/][^\s"'`\)\]\r\n]+|(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/[^\s"'`\)\]\r\n]+)""",
+      ),
+      (m) => 'file:///${_redactFilesystemPath(m.group(0)!.substring(8))}',
+    );
+    // Cift veya tek tirnakli (bosluk icerebilen) Windows/POSIX dosya yollari
+    text = text.replaceAllMapped(
+      RegExp(
+        r'"((?:(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|\\\\|/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/)[^"\r\n]+)"',
+      ),
+      (m) => '"${_redactFilesystemPath(m.group(1)!)}"',
+    );
+    text = text.replaceAllMapped(
+      RegExp(
+        r"'((?:(?<![A-Za-z0-9_])[A-Za-z]:[\\/]|\\\\|/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/)[^'\r\n]+)'",
+      ),
+      (m) => "'${_redactFilesystemPath(m.group(1)!)}'",
+    );
+    // Tirnaksiz Windows surucu (C:\ veya C:/) ve UNC yollari
+    text = text.replaceAllMapped(
+      RegExp(r"""(?<![A-Za-z0-9_])(?:[A-Za-z]:[\\/]|\\\\)[^\s"'`\)\]\r\n,;]+"""),
+      (m) => _redactFilesystemPath(m.group(0)!),
+    );
+    // Tirnaksiz Android / macOS / POSIX yerel kok dosya yollari (URL disinda)
+    text = text.replaceAllMapped(
+      RegExp(
+        r"""(?<![A-Za-z0-9:/\.\[])/(?:data|Users|home|var|private|tmp|opt|etc|root|storage|mnt|sdcard|Library|Volumes|proc)/[^\s"'`\)\]\r\n,;]+""",
+      ),
+      (m) => _redactFilesystemPath(m.group(0)!),
     );
     return text;
   }

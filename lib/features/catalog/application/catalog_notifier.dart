@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:mms_client_storage/mms_client_storage.dart';
+
 import '../../../core/utils/user_friendly_error_mapper.dart';
-import '../data/catalog_repository.dart';
+import '../domain/catalog_repository.dart';
 import 'catalog_state.dart';
+import 'product_barcode_details.dart';
 
 class CatalogNotifier extends StateNotifier<CatalogState> {
   final CatalogRepository _repository;
@@ -10,19 +12,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   final void Function()? onProductChanged;
   int _loadEpoch = 0;
 
-  CatalogNotifier(
-    this._repository,
-    this._deviceId, {
-    this.onProductChanged,
-  }) : super(const CatalogState()) {
+  CatalogNotifier(this._repository, this._deviceId, {this.onProductChanged})
+    : super(const CatalogState()) {
     init();
   }
 
   Future<void> init() async {
-    await Future.wait([
-      loadCategories(),
-      loadProducts(),
-    ]);
+    await Future.wait([loadCategories(), loadProducts()]);
   }
 
   Future<void> loadCategories() async {
@@ -53,8 +49,13 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         categoryId: state.selectedCategoryId,
         isActive: state.filterIsActive,
       );
+      final syncStatus = await _loadCatalogSyncStatusSafely();
       if (!mounted || requestEpoch != _loadEpoch) return;
-      state = state.copyWith(isLoading: false, products: products);
+      state = state.copyWith(
+        isLoading: false,
+        products: products,
+        catalogSyncStatus: syncStatus,
+      );
     } catch (e) {
       if (!mounted || requestEpoch != _loadEpoch) return;
       state = state.copyWith(
@@ -207,6 +208,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     int? price,
     String? categoryId,
     String? barcode,
+    bool clearBarcode = false,
     String? stockUnit,
     String? pricingUnit,
     int? vatRate,
@@ -221,6 +223,7 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         price: price,
         categoryId: categoryId,
         barcode: barcode,
+        clearBarcode: clearBarcode,
         stockUnit: stockUnit,
         pricingUnit: pricingUnit,
         vatRate: vatRate,
@@ -269,15 +272,126 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
     }
   }
 
+  Future<Map<String, ProductCatalogSyncStatus>>
+  _loadCatalogSyncStatusSafely() async {
+    try {
+      return await _repository.getCatalogSyncStatusByProduct();
+    } catch (_) {
+      // Rozet bilgisi yüklenemezse ürün listesi yine gösterilir.
+      return const {};
+    }
+  }
+
+  /// Ürün barkod yönetimi için güncel yerel durumu yükler (birincil + ikincil barkodlar
+  /// ve ürün bazlı Hub gönderim durumu). Ürün bulunamazsa `null` döner.
+  Future<ProductBarcodeDetails?> loadBarcodeDetails(String productId) async {
+    final product = await _repository.getProductById(productId);
+    if (product == null) return null;
+    final barcodes = await _repository.getBarcodesForProduct(productId);
+    final syncStatus = await _repository.getProductCatalogSyncStatus(productId);
+    final primary =
+        (product.barcode != null && product.barcode!.trim().isNotEmpty)
+        ? product.barcode!.trim()
+        : null;
+    final secondary =
+        barcodes.where((b) => !b.isPrimary && b.barcode != primary).toList()
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+    return ProductBarcodeDetails(
+      product: product,
+      primaryBarcode: primary,
+      secondaryBarcodes: secondary,
+      syncStatus: syncStatus,
+    );
+  }
+
+  /// İkincil barkod ekler (yerel SQLite + PRODUCT_UPSERT Outbox, tek transaction).
+  ///
+  /// İş kuralları (BR-PROD-02) depo katmanında da zorlanır; burada kullanıcıya anlaşılır
+  /// mesaj vermek için ön kontrol yapılır.
+  Future<BarcodeMutationResult> addProductBarcode({
+    required String productId,
+    required String barcode,
+  }) async {
+    final trimmed = barcode.trim();
+    if (trimmed.isEmpty) {
+      return const BarcodeMutationResult.failure('Barkod boş olamaz.');
+    }
+    try {
+      final product = await _repository.getProductById(productId);
+      if (product == null) {
+        return const BarcodeMutationResult.failure('Ürün bulunamadı.');
+      }
+      if (product.barcode?.trim() == trimmed) {
+        return BarcodeMutationResult.failure(
+          '$trimmed bu ürünün birincil barkodudur; ikincil barkod olarak eklenemez.',
+        );
+      }
+      final owner = await _repository.getProductByBarcode(trimmed);
+      if (owner != null && owner.id == productId) {
+        return BarcodeMutationResult.failure('$trimmed bu ürüne zaten ekli.');
+      }
+      if (owner != null) {
+        return BarcodeMutationResult.failure(
+          '$trimmed başka bir ürüne kayıtlı: "${owner.name}". Aynı barkod iki ürüne atanamaz.',
+        );
+      }
+
+      await _repository.addProductBarcode(
+        productId: productId,
+        barcode: trimmed,
+        isPrimary: false,
+        deviceId: _deviceId,
+      );
+      await loadProducts(silent: true);
+      if (!mounted) {
+        return const BarcodeMutationResult.success('Barkod ürüne eklendi.');
+      }
+      onProductChanged?.call();
+      const message =
+          'Barkod ürüne eklendi. Değişiklik bu cihazda hemen geçerlidir; '
+          "Hub'a gönderim kuyruğa alındı.";
+      state = state.copyWith(successMessage: message);
+      return const BarcodeMutationResult.success(message);
+    } catch (e) {
+      final message = UserFriendlyErrorMapper.map(
+        e,
+        fallback: 'Barkod eklenemedi.',
+      );
+      if (mounted) state = state.copyWith(errorMessage: message);
+      return BarcodeMutationResult.failure(message);
+    }
+  }
+
+  /// İkincil barkodu pasife alır (BR-PROD-15: geçmiş korunur) ve PRODUCT_UPSERT kuyruğa alır.
+  Future<BarcodeMutationResult> removeProductBarcode(String barcodeId) async {
+    try {
+      await _repository.removeProductBarcode(barcodeId, deviceId: _deviceId);
+      await loadProducts(silent: true);
+      if (!mounted) {
+        return const BarcodeMutationResult.success('Barkod kaldırıldı.');
+      }
+      onProductChanged?.call();
+      const message =
+          'Barkod kaldırıldı. Değişiklik bu cihazda hemen geçerlidir; '
+          "Hub'a gönderim kuyruğa alındı.";
+      state = state.copyWith(successMessage: message);
+      return const BarcodeMutationResult.success(message);
+    } catch (e) {
+      final message = UserFriendlyErrorMapper.map(
+        e,
+        fallback: 'Barkod kaldırılamadı.',
+      );
+      if (mounted) state = state.copyWith(errorMessage: message);
+      return BarcodeMutationResult.failure(message);
+    }
+  }
+
   /// Merkezi Hub ile manuel katalog senkronizasyonu
   Future<void> syncCatalogWithHub(Future<void> Function() syncAction) async {
     state = state.copyWith(isLoading: true, clearMessages: true);
     try {
       await syncAction();
-      await Future.wait([
-        loadCategories(),
-        loadProducts(),
-      ]);
+      await Future.wait([loadCategories(), loadProducts()]);
       if (!mounted) return;
       state = state.copyWith(
         isLoading: false,

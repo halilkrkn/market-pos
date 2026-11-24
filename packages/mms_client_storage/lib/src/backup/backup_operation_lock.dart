@@ -358,15 +358,22 @@ class BackupOperationLock {
     File recoveryFile,
     String expectedToken,
   ) async {
-    try {
-      if (!await recoveryFile.exists()) return;
-      final raw = await recoveryFile.readAsString();
-      final decoded = jsonDecode(raw);
-      if (decoded is Map<String, dynamic> && decoded['token'] == expectedToken) {
-        await recoveryFile.delete();
+    for (var attempt = 0; attempt < 8; attempt++) {
+      try {
+        if (!await recoveryFile.exists()) return;
+        final raw = await recoveryFile.readAsString();
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic> && decoded['token'] == expectedToken) {
+          await recoveryFile.delete();
+        }
+        return;
+      } on FileSystemException {
+        if (attempt == 7) return;
+        await Future<void>.delayed(Duration(milliseconds: 10 * (attempt + 1)));
+      } catch (_) {
+        // Yoksa veya başkasına geçtiyse dokunma.
+        return;
       }
-    } catch (_) {
-      // Yoksa veya başkasına geçtiyse dokunma.
     }
   }
 

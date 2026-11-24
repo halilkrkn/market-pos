@@ -1,9 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../../features/setup/setup_providers.dart';
+import '../../features/sync/application/hub_connection_notifier.dart';
 import '../constants/app_constants.dart';
 import '../logging/redacting_logger.dart';
+import 'device_role_resolver.dart';
 import 'secure_token_store.dart';
+import 'tls_pinned_client_factory.dart';
 
 /// B-3 Güvenli token saklama sağlayıcısı.
 ///
@@ -165,4 +169,50 @@ final deviceAuthProvider =
 /// API istemcisi ve SyncCoordinator için aktif cihaz token'ını döner.
 final effectiveDeviceTokenProvider = Provider<String?>((ref) {
   return ref.watch(deviceAuthProvider).effectiveToken;
+});
+
+/// Rol ve yedekleme yönetimi için TLS sertifika sabitlemeli Hub HTTP istemcisi.
+final deviceRoleHttpClientProvider = Provider<http.Client>((ref) {
+  final pinnedTls = ref.watch(pinnedTlsConfigProvider);
+  final client = pinnedTls != null
+      ? MmsPinnedTlsClientFactory.createClient(pinnedTls)
+      : http.Client();
+  ref.onDispose(client.close);
+  return client;
+});
+
+/// Rol önbellek süresi ve token son kullanma denetimi için UTC saat sağlayıcısı.
+final deviceRoleClockProvider = Provider<DateTime Function()>((ref) {
+  return () => DateTime.now().toUtc();
+});
+
+/// Hub `/api/v1/devices/me` üzerinden fail-closed cihaz rolü doğrulama sağlayıcısı.
+final deviceRoleProvider =
+    StateNotifierProvider<DeviceRoleNotifier, DeviceRoleState>((ref) {
+  final auth = ref.watch(deviceAuthProvider);
+  final setup = ref.watch(setupConfigProvider);
+  final activeHubUrl =
+      ref.watch(hubConnectionProvider.select((s) => s.activeHubUrl));
+  final httpClient = ref.watch(deviceRoleHttpClientProvider);
+  final logger = ref.watch(redactingLoggerProvider);
+  final clock = ref.watch(deviceRoleClockProvider);
+
+  return DeviceRoleNotifier(
+    httpClient: httpClient,
+    logger: logger,
+    readHubUrl: () => activeHubUrl,
+    readDeviceToken: () => auth.effectiveToken,
+    deviceId: setup.deviceId,
+    tenantId: setup.tenantId,
+    storeId: setup.storeId,
+    hasStorageError: auth.storageError != null,
+    clock: clock,
+  );
+});
+
+/// Doğrulanmış efektif cihaz rolü (`OWNER` veya fail-closed `CASHIER`).
+final effectiveDeviceRoleProvider = Provider<String>((ref) {
+  final roleState = ref.watch(deviceRoleProvider);
+  final clock = ref.watch(deviceRoleClockProvider);
+  return roleState.effectiveRoleAt(clock());
 });

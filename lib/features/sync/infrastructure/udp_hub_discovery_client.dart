@@ -84,7 +84,11 @@ class UdpHubDiscoveryClient implements HubDiscoveryClient {
           }
         }
       }
-    } catch (_) {}
+    } catch (e) {
+      stderr.writeln(
+        '[UdpHubDiscovery] Ağ arayüzleri listelenemedi: ${e.runtimeType}',
+      );
+    }
 
     addTarget(InternetAddress('255.255.255.255'));
     return targets;
@@ -124,7 +128,9 @@ class UdpHubDiscoveryClient implements HubDiscoveryClient {
 
     void finishDiscovery() {
       if (!completer.isCompleted) {
-        completer.complete(List<DiscoveredHubCandidate>.unmodifiable(candidates));
+        completer.complete(
+          List<DiscoveredHubCandidate>.unmodifiable(candidates),
+        );
       }
     }
 

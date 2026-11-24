@@ -2,15 +2,22 @@
 
 *Tarih: 22 Kasım 2026 (Commit 1 `ebf726a` + Commit 2 `3ebeda9` + Commit 3 `6c88c60` + Commit 4 Gerçek Market Kalite/Reaktivite Kapanışı) · Kaynaklar: [`docs/PILOT_1_0_FINAL_VERIFICATION_REPORT.md`](docs/PILOT_1_0_FINAL_VERIFICATION_REPORT.md), [`docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md`](docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md), [`docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`](docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md), [`docs/LIVE_PROJECT_STATUS.md`](docs/LIVE_PROJECT_STATUS.md)*
 
-Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam temizliği ve fiziksel kabul testi gerektiren maddeleriniz yer alır. Pilot 1.0 yazılım geliştirme kapsamı (`P-BLOCK-1..3`, `WP-1`, `A7` QR, `K-05` Hub provizyonu, `ADR-020` [`JOB_ID = 70201`], `Faz C` Drive Restore, `ADR-021` hibrit canlı senkronizasyon, **`ADR-022` Android OAuth `google_sign_in: ^7.2.0`** ve tüm Pilot dağıtım/çalışma-zamanı düzeltmeleri) tümüyle tamamlanmış; **4/4 pakette `0` analyzer sorunu**, **806/806 otomatik test**, **Windows Pilot Release paketi (`dist\windows_release\`, `26/26` SHA-256 doğrulamalı)**, **Canlı Derlenmiş AOT `mms_backend.exe` duman testi (`7/7`)**, **Android Debug APK (`189.29 MB`)**, **Android Release fail-closed kontrolü** ve **7/7 PowerShell betiği sözdizimi/BOM doğrulaması** geçmiştir. Ancak fiziksel kabul testleri (**`PAT-01…PAT-18`**), üretim Android imza anahtarı (**`B1`**), üretim Hub TLS sertifikaları (**`B2`**), Google Cloud OAuth kurulumu (**`C1/C2`**), ortam temizliği (**`D1–D4`**) ve resmî faz kabulleri (**`E2`**) dış donanım/hesap gerektirdiği için sahada henüz yürütülmemiştir (**`ALL SOFTWARE DELIVERED & VALIDATED (806/806, 0 ANALYZER ISSUES) — PAT-01…18 BLOCKED`**).
+Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam temizliği ve fiziksel kabul testi gerektiren maddeleriniz yer alır. Pilot 1.0 yazılım geliştirme kapsamı (`P-BLOCK-1..3`, `WP-1`, `A7` QR, `K-05` Hub provizyonu, `ADR-020` [`JOB_ID = 70201`], `Faz C` Drive Restore, `ADR-021` hibrit canlı senkronizasyon, **`ADR-022` Android OAuth `google_sign_in: ^7.2.0`** ve tüm Pilot dağıtım/çalışma-zamanı düzeltmeleri) yazılım olarak kodlanmıştır. **Güncel ve tek doğruluk kaynağı test/analiz/derleme sonuçları:** [`docs/FINAL_PILOT_READINESS_REPORT.md`](docs/FINAL_PILOT_READINESS_REPORT.md) §E–§F (23 Kasım 2026 (2. tur) sıralı koşum: 898 test geçti (248 + 7 + 292 + 351), 0 atlanan, 4 projede 0 analiz sorunu; 1 bilinen kararsız kilit testi — ayrıntı raporda). *(Bu satırda daha önce yazan "806/806" sayısı 22 Kasım'a aitti ve artık geçerli değildir; `dist\windows_release\` paketi, AOT duman testi ve `189.29 MB` APK ölçümü de 22 Kasım koşumlarıdır, bu turda yeniden üretilmedi.)* Fiziksel kabul testleri (**`PAT-01…PAT-20`** ve Hat B **`BK-PAT-01…BK-PAT-18`**), üretim Android imza anahtarı (**`B1`**), üretim Hub TLS sertifikaları (**`B2`**), **`B3` Portable Recovery Password**, Google Cloud OAuth kurulumu (**`C1/C2`**), ortam temizliği (**`D1–D4`**) ve resmî faz kabulleri (**`E2`**) sahada henüz yürütülmemiştir (**`BLOCKED`**). Proje **pilot kabulüne hazır değildir**.
 
 > **Bu belgede hiçbir gerçek parola, token, sertifika veya özel anahtar yoktur; eklemeyin.**
 
+> [!IMPORTANT]
+> **23 Kasım 2026 (2. tur) — Commit öncesi bağımsız inceleme düzeltme turu (S1–S6 + ikincil barkod arayüzü):** Hub zamanlayıcısının süreci çökertebilmesi (S1), manuel yedeğin kaydedilmemiş parola kullanabilmesi (S2), durum dosyası yazma yarışı (S3), legacy restore koruyucu kopyası dokümantasyonu (S4), Hub/istemci Drive klasör ayrımı (S5), E2E testinin üretim Hub'a yazabilmesi (S6) ve **ikincil barkod arayüzünün hiç olmaması** düzeltildi (`IMP-08…IMP-15`). Değişiklikler **commit edilmedi** (`A2`). Sizden beklenen yeni kararlar ve adımlar: `A2` (commit), `PAT-19` (yeni barkod ekranıyla), `PAT-20` (yeni `MMS_E2E_HUB_ALLOWLIST` / `MMS_E2E_EXPECTED_HUB_ID` ile), PHASE C kapsam taslağı onayı ([`docs/phases/PHASE_C_WINDOWS_INSTALLER_SCOPE_DRAFT.md`](docs/phases/PHASE_C_WINDOWS_INSTALLER_SCOPE_DRAFT.md)).
+>
+> **23 Kasım 2026 — Hat A + Hat B (ADR-023 Merkezi Hub Google Drive Yedekleme) devralma ve tamamlama turu:** Yazılım tarafı tamamlandı ve gerçek test çıktılarıyla doğrulandı; ayrıntılar ve gerçek test sayıları [`docs/FINAL_PILOT_READINESS_REPORT.md`](docs/FINAL_PILOT_READINESS_REPORT.md). Bu turda değişiklikler **commit edilmedi** (`A2`). Sizden beklenen **yeni** adımlar: **`B3` Portable Recovery Password**, Hat B fiziksel testleri **`BK-PAT-01…18`**, yeni Hat A saha testleri **`PAT-19`** (ikincil barkod) ve **`PAT-20`** (izole TEST Hub E2E). Bunlar yapılmadan proje **pilot kabulüne hazır ilan edilmez**.
+
 **Sizin İçin Sıradaki Uygulama Sırası:**
+0. **Commit kararı (`A2`)** — 23 Kasım turundaki çalışma ağacı değişiklikleri (31 değiştirilmiş + yeni dosyalar) commit edilmemiştir; gözden geçirip commit/push kararını siz verin.
 1. Temizlik (**`D1–D4`**) — `MarketMmsSpike01` kaldırılması (`D1`), eski test token/DB temizliği (`D2–D4`).
 2. Üretim anahtarları ve sertifikalar (**`B2`** + **`B1`**) — OpenSSL ile Hub `ca.crt`/`server.crt` (`IP:127.0.0.1` + sabit LAN IP SAN) ve `keytool` ile Android upload keystore + `android/key.properties` (`SHA-1`/`SHA-256` kaydedin).
-3. Google Cloud OAuth (**`C1/C2`**) — Drive API açma, OAuth izin ekranını `"In production"` yapma; aynı projede Desktop + Android (`SHA-1`) + Web (`serverClientId`) Client ID üretip `package_windows_release.ps1` (`-GoogleDriveClientId`) / `package_android_release.ps1` (`-GoogleDriveWebClientId`) parametreleriyle derleme (`K-05` canlı senkron sırrı zaten Hub üzerinden otomatizedir).
-4. Pilot donanımı, fiziksel kabul testleri (**`PAT-01…PAT-18`**) ve resmî faz kabulleri (**`E2`**).
+3. **Hub Portable Recovery Password (`B3`)** — yeni Hub sürümünü kurduktan hemen sonra tanımlayın; tanımlanmadan **hiçbir Hub yedeği alınmaz**.
+4. Google Cloud OAuth (**`C1/C2`**) — Drive API açma, OAuth izin ekranını `"In production"` yapma; aynı projede Desktop + Android (`SHA-1`) + Web (`serverClientId`) Client ID üretip `package_windows_release.ps1` (`-GoogleDriveClientId`) / `package_android_release.ps1` (`-GoogleDriveWebClientId`) parametreleriyle derleme (`K-05` canlı senkron sırrı zaten Hub üzerinden otomatizedir). Merkezi Hub yedeği için ayrıca Windows Hub ekranından **Google Drive'a Bağlan** (PKCE) adımı yapılır (`BK-PAT-01`).
+5. Pilot donanımı, fiziksel kabul testleri (**`PAT-01…PAT-20`** ve **`BK-PAT-01…BK-PAT-18`**) ve resmî faz kabulleri (**`E2`**).
 
 ---
 
@@ -18,7 +25,7 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 
 | # | Madde | Tür | Durum / Engellediği iş | Öncelik |
 |---|---|---|---|---|
-| A1 | ADR-015…022 kararları | **Teknik Tamam (Yazılım)** | `ADR-015, 016, 018, 020, 021, 022` tamamı kodlandı ve otomatik testlerden geçti (`PAT-01…18` saha doğrulaması **BLOCKED**); `ADR-017` `PAT-12` sonrası kesin onay, `ADR-019` pilot sonrası (`v1.1`) | **Saha Testi (`PAT-01…18`)** |
+| A1 | ADR-015…023 kararları | **Teknik Tamam (Yazılım)** | `ADR-015, 016, 018, 020, 021, 022, 023` kodlandı ve otomatik testlerden geçti (saha doğrulaması `PAT-01…20`, `BK-PAT-01…18` **BLOCKED**); `ADR-017` `PAT-12` sonrası kesin onay, `ADR-019` pilot sonrası (`v1.1`) | **Saha Testi (`PAT-01…20`, `BK-PAT-01…18`)** |
 | A2 | Git commit ve sürüm takibi | **Commit 1 (`ebf726a`) + Commit 2 (`3ebeda9`) + Commit 3 (`6c88c60`) + Commit 4 Tamamlandı** | WP-1/`A7`/`K-05`/Docs (`ebf726a`), WP-3/WP-4 (`3ebeda9`), Pilot dağıtım/analiz (`6c88c60`) ve gerçek market çalışma-zamanı kapanışı Commit 4 `origin/main`'e kaydedilmiştir; 4 yerel dosya (`.vscode/settings.json`, `*.bat`) commit dışı korundu | Tamamlandı |
 | A3 | Kategori/KDV senkronu (ADR-019) | **DEFERRED_POST_PILOT (`v1.1`)** | Pilotta 7 geçici %20 KDV kısıtıyla kabul; pilot sonrası (`v1.1`) migrasyon | Orta (pilot sonrası) |
 | A4 | Discovery TLS (ADR-018 §2.2) & `P-BLOCK-1..3` | **IMPLEMENTED (Otomatik Testli)** | `DEC-REV-1..5` + `WP-1` (`networkError` DHCP/Wi-Fi reconnect) kodlandı; fiziksel doğrulama **`PAT-03` & `PAT-12`** bekleniyor (**BLOCKED**) | **Saha Testi (`PAT-03`, `PAT-12`)** |
@@ -28,23 +35,25 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 | A8 | Güncelleme paketi imzalama ve merkezi hata izleme | İsteğe bağlı (`v1.1` / Operasyon) | Şu an SHA-256 manifest doğrulaması ve maskeli tanı dışa aktarımı aktif; kod imzalama sertifikası / merkezi tanı ucu için karar | Düşük / İsteğe bağlı |
 | B1 | Android üretim imza anahtarı | Gizli anahtar | Release APK (`pubspec.yaml` `1.0.0+1`, `PAT-11`) | **Engelleyici** |
 | B2 | Hub TLS sertifikaları (CA + `IP:127.0.0.1` & LAN IP SAN'lı sunucu) | Sertifika | Üretim Hub'ı startup (`exit 78` koruması), eşleştirme (`PAT-03`, `PAT-12`) | **Engelleyici** |
+| B3 | Hub Portable Recovery Password (ADR-023 `B1.7` / `OV-05`, min. 12 karakter) | Gizli parola (yalnız Owner bilir) | Tüm Hub yedekleri (eski 24 saatlik yerel + yeni Drive yedeği), yeni PC'ye restore (`BK-PAT-02…17`) | **Engelleyici** |
+| BK | Hat B fiziksel testleri `BK-PAT-01…18` | Saha testi | Merkezi Google Drive yedek/restore pilot kabulü | **Engelleyici (Hat B)** |
 | C1 | Google Cloud projesi | Hesap | Drive uzak yedeği (`PAT-13`, `PAT-17`) ve hibrit Drive canlı senkron (`PAT-18`) | Pilot kapsamına bağlı |
 | C2 | Google OAuth yapılandırması (Desktop + karar verilirse Android) | Hesap | Drive yetkilendirmesi (`PAT-13`, `PAT-17`, `PAT-18`) | Pilot kapsamına bağlı |
 | D1 | `MarketMmsSpike01` servisinin kaldırılması | Temizlik | Port/çakışma riski (`PAT-08` ön koşulu) | Orta |
 | D2 | Manuel test token'larının iptali/rotasyonu | Güvenlik | Bilinen token ile erişim | **Yüksek** |
 | D3 | Şifresiz test DB kopyalarının kaldırılması | Güvenlik | Veri sızıntısı | Yüksek |
 | D4 | Eski şifresiz restore koruyucu kopyaları | Güvenlik | Veri sızıntısı | Orta |
-| E1 | Pilot ortamı ve donanım | Donanım | Tüm fiziksel kabul testleri (`PAT-01…PAT-18` **BLOCKED**) | **Engelleyici** |
+| E1 | Pilot ortamı ve donanım | Donanım | Tüm fiziksel kabul testleri (`PAT-01…PAT-20`, `BK-PAT-01…18` **BLOCKED**) | **Engelleyici** |
 | E2 | Faz kabulleri | Karar | "Kullanıma hazır" kararı (`docs/MASTER_ROADMAP.md`) | Son adım |
 
 ---
 
 ## A. Kararlar
 
-### A1. ADR-015…ADR-022 Kararları
+### A1. ADR-015…ADR-023 Kararları
 - **Neden gerekli?**
-  - `ADR-015`, `016`, `018`, `020` ve `021` teknik olarak kodlandı ve otomatik testlerden geçti; ancak fiziksel saha doğrulamaları (`PAT-01…PAT-18`) henüz yürütülmediği için üretime kabul edilmedi.
-  - `ADR-017` TLS sınıflandırması `PAT-12` sonrası kesin onay bekliyor; `ADR-019` pilot sonrasına ertelenmiş durumda; **`ADR-022` (Android Google Drive OAuth Tasarımı)** için Owner **Seçenek A (`google_sign_in`)** ve pilot kapsamına dahil edilmesi kararını vermiştir (**`DESIGN APPROVED — PENDING PHASE 2 IMPLEMENTATION`**, henüz kodlanmamıştır).
+  - `ADR-015`, `016`, `018`, `020`, `021`, `022` ve `023` teknik olarak kodlandı ve otomatik testlerden geçti; ancak fiziksel saha doğrulamaları (`PAT-01…PAT-20`, `BK-PAT-01…18`) henüz yürütülmediği için üretime kabul edilmedi.
+  - `ADR-017` TLS sınıflandırması `PAT-12` sonrası kesin onay bekliyor; `ADR-019` pilot sonrasına ertelenmiş durumda; **`ADR-022` (Android Google Drive OAuth Tasarımı)** için Owner **Seçenek A (`google_sign_in`)** kararını vermiş ve bu karar **kodlanmıştır** (aşağıdaki tabloya bakın; *önceki "henüz kodlanmamıştır" ifadesi bayattı*).
 - **Mevcut ADR Durum Tablosu:**
 
   | ADR | Konu | Kodda / Belgede Durum | Sizden İstenen |
@@ -57,17 +66,19 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
   | 020 | Android kapalıyken arka plan yedekleme (saf SDK `JobScheduler`, **`JOB_ID = 70201`** + headless `FlutterEngine` + Keystore) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (`PAT-16` **BLOCKED**) | Fiziksel Android cihazda uygulama kapalıyken yedek + reboot doğrulaması (`PAT-15`, `PAT-16`) |
   | 021 | Hub öncelikli, Google Drive destekli hibrit canlı senkronizasyon (`MMSENV01`, klasör: `MARKET MMS LiveSync`, non-LWW, **`K-05` Hub provizyonu**) | **CONFIRMED — TECHNICALLY IMPLEMENTED** (26 motor senaryosu + `K-05` Hub/istemci provizyon testleri geçti; `PAT-18` **BLOCKED**) | `C1/C2` kurulumu sonrası 2 cihaz saha doğrulaması (`PAT-18`) |
   | 022 | Android Google Drive OAuth Tasarımı (**Seçenek A — `google_sign_in: ^7.2.0`**) | **`CONFIRMED — TECHNICALLY IMPLEMENTED`** (`AndroidGoogleSignInTokenProvider` + `drive_auth_providers` + 9 otomatik test & Android Debug APK geçti; `C1/C2` & `PAT-13/17/18` **BLOCKED**) | `B1` Release keystore sonrasında `C1/C2` (Web `serverClientId` + Android SHA-1 + "In production") yapılandırıp `--dart-define=MMS_GDRIVE_WEB_CLIENT_ID=...` ile APK derleyin |
+  | 023 | Merkezi Hub Google Drive Yedekleme & Geri Yükleme (`MMSBAK02`, Portable Recovery Password, 12 durum, 00:00, RBAC; 23 Kasım 2. tur: S1–S5 düzeltmeleri `IMP-08…13`) | **`CONFIRMED — TECHNICALLY IMPLEMENTED`** (otomatik testli; `BK-PAT-01…18` **BLOCKED**) | `B3` kurtarma parolası + `C1/C2` + Windows Hub ekranından Drive bağlantısı, ardından `BK-PAT-01…18` |
 
 - **Etkilenen dosyalar:** `docs/decisions/015…022-*.md`, `docs/decisions/README.md`, `docs/RELEASE_1_0_FINAL_DELIVERY_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_VERIFICATION_REPORT.md`, `docs/RELEASE_1_0_PHASE_1_1_FINALIZATION_REPORT.md`, `docs/RELEASE_1_0_PHASE_2_DELIVERY_REPORT.md`, `docs/LIVE_PROJECT_STATUS.md`.
-- **Tamamlandığında yapılacak test:** Fiziksel kabul testleri **`PAT-01…PAT-18`** (şu an tamamı **BLOCKED**).
+- **Tamamlandığında yapılacak test:** Fiziksel kabul testleri **`PAT-01…PAT-20`** ve **`BK-PAT-01…18`** (şu an tamamı **BLOCKED**).
 
 ### A2. Değişikliklerin commit edilmesi ve sürüm takibi
 - **Mevcut Durum:**
-  - Release 1.0 (`a02a3c6`), Phase 1.1 (`a118434`), Commit 1 (`ebf726a`), Commit 2 (`3ebeda9`), Commit 3 (`6c88c60`) ve **Commit 4 (Pilot 1.0 gerçek market çalışma zamanı, çapraz ekran reaktivitesi ve canlı AOT kapanışı)** `origin/main`'e commit edilerek çalışma ağacı yalnızca 4 korunan yerel dosyayla temizlenmiştir.
+  - Release 1.0 (`a02a3c6`), Phase 1.1 (`a118434`), Commit 1 (`ebf726a`), Commit 2 (`3ebeda9`), Commit 3 (`6c88c60`) ve Commit 4 (`817f881`) `origin/main`'dedir.
+  - **23 Kasım 2026 (2. tur) itibarıyla çalışma ağacı TEMİZ DEĞİLDİR:** 23 Kasım 2026 1. tur (Hat A + Hat B / ADR-023) ve 2. tur (S1–S6 + ikincil barkod UI) değişikliklerinin değişiklikleri **commit edilmemiştir**. Önerilen mantıksal commit grupları: [`docs/FINAL_PILOT_READINESS_REPORT.md`](docs/FINAL_PILOT_READINESS_REPORT.md) §I. Commit kararı sizindir.
   - Bilinçli olarak commit dışı bırakılan 4 korunan yerel dosya (`.vscode/settings.json`, `run_windows_client.bat`, `start_master_hub.bat`, `stop_master_hub.bat`) ve çalışma zamanı verileri/servisleri dokunulmadan korunur.
 - **Güvenlik kontrolü:**
   - `git status --ignored` / `git diff --cached` içinde şu dosyalar **asla bulunmaz**: `manual_test_env/`, `*.db`, `*.key`, `pepper.dpapi`, `live_drive_sync_secret.dpapi`, `android/key.properties`, `*.jks`, `dist/`.
-- **Tamamlandığında yapılacak test:** Dört test süitinin (**`806/806`**), statik analizlerin (`4/4` pakette `0` sorun), `dist\windows_release\` paketinin (`26/26` SHA-256), canlı derlenmiş AOT `mms_backend.exe` duman testinin (`7/7`), Windows Release + Android Debug (`189.29 MB`) + Android Release fail-closed kontrolünün ve `7/7` `.ps1` sözdizimi/BOM kontrolünün tam yeşil olduğu doğrulanmıştır.
+- **Tamamlandığında yapılacak test:** Commit öncesi dört test takımı ve statik analiz yeniden çalıştırılmalıdır. 23 Kasım 2026 (2. tur) gerçek sonuçları: 898 test geçti (248 + 7 + 292 + 351), 0 atlanan, 4 projede 0 analiz sorunu; 1 bilinen kararsız kilit testi — ayrıntı raporda ([`FINAL_PILOT_READINESS_REPORT.md`](docs/FINAL_PILOT_READINESS_REPORT.md) §E). *(Önceki "806/806", `26/26` paket, AOT `7/7` ve `189.29 MB` değerleri 22 Kasım koşumlarına aittir.)*
 
 ### A3. Kategori / KDV senkronizasyonu kararı (SYNC-CAT, ADR-019 — **DEFERRED_POST_PILOT**)
 - **Karar Durumu:** Owner kararıyla pilot sonrasına **ertelendi**. Şema v3 → v4, `CATEGORY_UPSERT`, `PRODUCT_UPSERT` değişiklikleri ve kısmi KDV senkronizasyonu pilotta uygulanmayacaktır.
@@ -149,6 +160,16 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
   - `pwsh scripts/package_android_release.ps1` (`flutter build apk --release --build-name=1.0.0 --build-number=1`) başarılı olmalı.
   - Birleşik manifestte `usesCleartextTraffic="false"` ve `allowBackup="false"` olmalı.
   - Ardından `PAT-11` ve `PAT-16`.
+
+### B3. Hub Portable Recovery Password (ADR-023 — 23 Kasım 2026 eklendi)
+- **Neden gerekli?** Hub yedekleri artık makineye bağlı `pepper.dpapi` ile değil, sizin belirlediğiniz taşınabilir kurtarma parolasıyla şifrelenir. Böylece Hub bilgisayarı bozulursa yedek **yeni bir bilgisayarda** açılabilir. Parola tanımlanmazsa otomatik yedek **alınmaz**; `/health` → `backup.overdue = true` ve hata kodu `ERR_RECOVERY_KEY_NOT_CONFIGURED` görünür.
+- **Adımlar:**
+  1. Yeni Hub sürümünü kurun (`install_mms_service.ps1`) ve servisin çalıştığını doğrulayın.
+  2. Hub bilgisayarında Windows uygulaması → Tanılama → **Merkezi Hub Yedekleme (Google Drive)** → **Kurtarma Parolası** alanına en az **12 karakterlik** bir parola cümlesi girin (ör. 4–5 kelimelik cümle).
+  3. Parolayı **kağıda yazın** ve Hub bilgisayarından ayrı, güvenli bir yerde saklayın. Parola Hub'da yalnızca LocalMachine DPAPI ile şifreli `backup_recovery_key.dpapi` dosyasında durur; Google Drive'a, loga veya ekrana yazılmaz. **Unutulursa yedekler açılamaz.**
+  4. Kontrol: Bir sonraki yedekten sonra `/health` → `backup.last_success_at` doluyor ve `overdue = false` olmalı.
+- **Eski yedekler:** 23 Kasım 2026 öncesi sürümün parolasız aldığı Hub yedekleri yalnızca **aynı bilgisayarda** ve `POST /api/v1/admin/restore` gövdesine `"legacy_machine_key": true` eklenerek açılabilir. Yeni sürüme geçtikten sonra yeni bir yedek alın ve eski yedeklerin yeni PC'ye taşınamayacağını unutmayın.
+- **Doğrulama testi:** `BK-PAT-02`, `BK-PAT-12`, `BK-PAT-13`.
 
 ### B2. Windows Hub TLS sertifikaları (kök CA + sunucu)
 - **Neden gerekli?**
@@ -261,7 +282,7 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 ## E. Pilot Ortamı, Fiziksel Testler ve Kabul
 
 ### E1. Pilot ortamı ve gerekli donanım
-- **Neden gerekli?** Fiziksel kabul testlerinin **hiçbiri** yapılmadı. Liste: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](PHYSICAL_ACCEPTANCE_TEST_PLAN.md), **`PAT-01…PAT-18`**.
+- **Neden gerekli?** Fiziksel kabul testlerinin **hiçbiri** yapılmadı. Liste: [`PHYSICAL_ACCEPTANCE_TEST_PLAN.md`](PHYSICAL_ACCEPTANCE_TEST_PLAN.md), **`PAT-01…PAT-20`** ve Hat B **`BK-PAT-01…BK-PAT-18`** (eşleştirme: [`docs/testing/BK_TEST_ID_TRACEABILITY.md`](docs/testing/BK_TEST_ID_TRACEABILITY.md)).
 - **Gerekli donanım:**
   - **Hub:** Windows 10/11 bilgisayar. Yönetici hesabı ve sabit LAN IP gerekli.
   - **Kasa:** En az bir Windows kasa bilgisayarı ve USB HID barkod okuyucu.
@@ -273,7 +294,7 @@ Bu listede **sizin** donanım, gizli anahtar, dış Google Cloud kurulumu, ortam
 - **Ne yapmalısınız?**
   1. B1 ve B2'yi tamamlayın.
   2. Hub'ı temiz DB ile kurun.
-  3. `PAT-01…PAT-18`'i sırayla uygulayın ve her test için kanıtı kaydedin.
+  3. `PAT-01…PAT-20` ve `BK-PAT-01…18`'i sırayla uygulayın ve her test için kanıtı kaydedin.
 - **Güvenlik uyarısı:** Pilotu gerçek satış verisiyle değil, test ürünleriyle başlatın. Restore ve çökme testlerinden önce şifreli yedek alın.
 
 ### E2. Faz kabulleri

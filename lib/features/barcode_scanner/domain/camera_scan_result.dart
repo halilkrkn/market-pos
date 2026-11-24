@@ -1,5 +1,3 @@
-import 'package:flutter/foundation.dart';
-
 /// Kamera barkod tarama işleminin sonuç durumları (`Faz 3` & `Faz 4`).
 enum CameraScanStatus {
   scanned,
@@ -10,7 +8,6 @@ enum CameraScanStatus {
 }
 
 /// Paylaşımlı kamera barkod tarama akışının çıktı nesnesi.
-@immutable
 class CameraScanResult {
   final CameraScanStatus status;
   final String? barcode;

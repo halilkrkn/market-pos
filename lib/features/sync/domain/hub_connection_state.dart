@@ -61,6 +61,15 @@ class HubConnectionState {
   bool get hasActiveHubUrl =>
       activeHubUrl != null && activeHubUrl!.trim().isNotEmpty;
 
+  String? get sourceDisplayLabel => switch (source) {
+        HubUrlSource.discovered => 'Otomatik Keşif',
+        HubUrlSource.lastVerified => 'Son Doğrulanan',
+        HubUrlSource.manual => 'Manuel',
+        HubUrlSource.configured => 'Yapılandırma',
+        HubUrlSource.localhostFallback => 'Yerel Masaüstü',
+        null => null,
+      };
+
   HubConnectionState copyWith({
     HubConnectionPhase? phase,
     String? activeHubUrl,

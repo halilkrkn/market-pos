@@ -86,6 +86,7 @@ void main() {
     server = SpikeServer(
       db: db,
       writeQueue: writeQueue,
+      backupDirectory: p.join(tempDir.path, 'backups'),
       pepperManager: pepperManager,
       adminSecret: _spikeAdminSecret, // SEC-SNAP: şifresiz snapshot yalnızca admin + loopback
     );

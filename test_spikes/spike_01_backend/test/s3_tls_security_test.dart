@@ -227,6 +227,7 @@ void main() {
       final expServer = SpikeServer(
         db: expDb,
         writeQueue: expQueue,
+        backupDirectory: p.join(tempDir.path, 'backups_exp'),
         pepperManager: pepperManager,
         securityContext: expContext,
         requireTls: true,
@@ -270,6 +271,7 @@ void main() {
       final rServer = SpikeServer(
         db: rDb,
         writeQueue: rQueue,
+        backupDirectory: p.join(tempDir.path, 'backups_rogue'),
         pepperManager: pepperManager,
         securityContext: rogueContext,
         requireTls: true,
@@ -385,6 +387,7 @@ void main() {
       final rotServer = SpikeServer(
         db: rotDb,
         writeQueue: rotQueue,
+        backupDirectory: p.join(tempDir.path, 'backups_rot'),
         pepperManager: pepperManager,
         securityContext: rotContext,
         requireTls: true,

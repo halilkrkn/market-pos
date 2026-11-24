@@ -526,6 +526,6 @@ Aşağıdaki tablo, [`PHASE_0_BUSINESS_DISCOVERY.md`](file:///c:/Users/halil/Git
 
 ## 13. Mevcut Kabul Durumu ve Sonraki Adımlar
 
-- Bu şartname [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) (**v1.4**) ve [`PHASE_0_BUSINESS_DISCOVERY.md`](./PHASE_0_BUSINESS_DISCOVERY.md) (**v1.3**) ile tam tutarlıdır.
-- İş kuralları şartnamesi **v1.6** düzeyinde güncellenmiştir (`OD-01`..`OD-04`, `'CASH'`/`'CARD'` `PaymentMethod` sözleşmesi ve Legacy Outbox Recovery `b069d5b` uyumlu).
-- **Faz 0, Faz 1.1, DT-01.1..DT-01.4, UI/UX Tasarım Teslimatı (Proje Sahibi Onaylı) ve `PaymentMethod` + Legacy Outbox Recovery (`b069d5b`) tamamlanmıştır.** **Faz 1.2 (Kasa Satış Ekranı & Sepet Yönetimi) POS geliştirmesi henüz başlamamıştır**; uygulama kodlamasına geçmeden önce Proje Sahibinin açık başlatma onayı alınacaktır.
+- Bu şartname [`MARKET_POS_AI_STUDIO_BUILD_PLANI.md`](../../MARKET_POS_AI_STUDIO_BUILD_PLANI.md) (**v1.4**) ve [`PHASE_0_BUSINESS_DISCOVERY.md`](./PHASE_0_BUSINESS_DISCOVERY.md) (**v1.3**) ile uyumludur.
+- İş kuralları şartnamesi **v1.7** (22 Kasım 2026) düzeyinde güncellenmiştir: `OD-01` (Half-Up kuruş yuvarlama), `OD-02` (`OUT_OF_SCOPE` Parked Carts), `OD-03` (22 Kasım 2026 güncel Owner kararı: çevrimdışı ürün oluşturma + `PRODUCT_UPSERT` FIFO Outbox serbest, ürün kartsız muhtelif satış yasak), `OD-04` (opsiyonel sanal numpad), `'CASH'`/`'CARD'` `PaymentMethod` sözleşmesi ve **ADR-023** Hub-Centric Google Drive Backup & Restore (`OV-01…OV-05`, `GAP-A01`, `GAP-A03`) kararları bağlayıcıdır.
+- Canlı geliştirme, otomatik doğrulama ve kalan saha kabul sınırları [`docs/LIVE_PROJECT_STATUS.md`](../LIVE_PROJECT_STATUS.md) ile [`docs/IMPLEMENTATION/MASTER_IMPLEMENTATION_DECISIONS.md`](../IMPLEMENTATION/MASTER_IMPLEMENTATION_DECISIONS.md) üzerinden izlenir. Hiçbir faz Proje Sahibinin açık saha kabulü olmadan nihai kabul edilmiş sayılmaz.

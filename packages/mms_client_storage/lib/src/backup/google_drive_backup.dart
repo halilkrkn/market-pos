@@ -12,6 +12,7 @@ import 'backup_crypto.dart';
 import 'backup_file_transfer.dart';
 import 'backup_manifest.dart';
 import 'database_backup_engine.dart';
+import 'resumable_drive_uploader.dart' show MmsDriveBackupFolders;
 
 /// Faz 7D — Google Drive şifreli yedek (canlı senkronizasyon DEĞİL; ADR-011 `drive.file`).
 ///
@@ -300,7 +301,7 @@ class DriveUploadLedger {
     } on FormatException catch (e) {
       final quarantine = '${file.path}.corrupt_${DateTime.now().millisecondsSinceEpoch}';
       await file.rename(quarantine);
-      stderr.writeln('[DriveLedger] Kayıt dosyası bozuk (${e.message}); $quarantine olarak saklandı.');
+      stderr.writeln('[DriveLedger] Kayıt dosyası bozuk (${e.message}); ${p.basename(quarantine)} olarak saklandı.');
     }
     return const DriveUploadLedgerState();
   }
@@ -322,7 +323,7 @@ class DriveUploadRecord {
 
 /// Drive v3 REST üzerinden şifreli yedek yükleyici (resumable upload).
 class GoogleDriveBackupUploader {
-  static const String folderName = 'MARKET MMS Yedekleri';
+  static const String folderName = MmsDriveBackupFolders.rootFolderName;
   static const String _folderMime = 'application/vnd.google-apps.folder';
 
   final DriveAccessTokenProvider tokenProvider;
@@ -594,6 +595,9 @@ class GoogleDriveBackupUploader {
         if (raw is! Map) continue;
         final info = DriveRemoteBackupInfo.tryParse(Map<String, dynamic>.from(raw));
         if (info == null) continue;
+        // S5: Eski istemci (ADR-016/021) geri yükleme listesi merkezi Hub yedeklerini
+        // (ADR-023) asla göstermez; geçiş öncesi kök klasörde kalmış Hub dosyaları dahil.
+        if (info.isHubCentralBackup) continue;
         if (tenantId != null && info.tenantId != null && info.tenantId != tenantId) {
           continue;
         }
@@ -741,7 +745,11 @@ class GoogleDriveBackupUploader {
       if (await partFile.exists()) {
         try {
           await partFile.delete();
-        } catch (_) {}
+        } catch (delErr) {
+          stderr.writeln(
+            '[GoogleDriveBackup] Bozuk .part dosyası silinemedi (${p.basename(partFile.path)}): ${delErr.runtimeType}',
+          );
+        }
       }
       rethrow;
     }
@@ -781,6 +789,10 @@ class DriveRemoteBackupInfo {
   final int? schemaVersion;
   final String? sha256Checksum;
 
+  /// S5: Merkezi Hub yedeği mi (`appProperties.mms_backup_source = HUB_CENTRAL` veya
+  /// `hub_backup_` dosya adı öneki)? Eski istemci listeleri bunları dışlar.
+  final bool isHubCentralBackup;
+
   const DriveRemoteBackupInfo({
     required this.fileId,
     required this.fileName,
@@ -793,6 +805,7 @@ class DriveRemoteBackupInfo {
     this.databaseType,
     this.schemaVersion,
     this.sha256Checksum,
+    this.isHubCentralBackup = false,
   });
 
   static DriveRemoteBackupInfo? tryParse(Map<String, dynamic> json) {
@@ -820,7 +833,11 @@ class DriveRemoteBackupInfo {
     if (rawDbType != null && rawDbType.isNotEmpty) {
       try {
         dbType = DatabaseType.fromString(rawDbType);
-      } catch (_) {}
+      } catch (e) {
+        stderr.writeln(
+          '[GoogleDriveBackup] Geçersiz mms_database_type metadata ($rawDbType): ${e.runtimeType}',
+        );
+      }
     }
 
     String? backupId = props['mms_backup_id'] as String?;
@@ -845,6 +862,9 @@ class DriveRemoteBackupInfo {
       databaseType: dbType,
       schemaVersion: int.tryParse(props['mms_schema_version']?.toString() ?? ''),
       sha256Checksum: props['mms_sha256'] as String?,
+      isHubCentralBackup:
+          props[MmsDriveBackupFolders.backupSourceProperty] == MmsDriveBackupFolders.hubBackupSource ||
+              name.startsWith(MmsDriveBackupFolders.hubBackupFilePrefix),
     );
   }
 }

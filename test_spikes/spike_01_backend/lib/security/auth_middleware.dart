@@ -17,6 +17,7 @@ Middleware createAuthMiddleware({
   String expectedStoreId = 'default-store',
   bool requireTenantStoreHeaders = false,
   List<String> strictTenantStorePaths = const [
+    '/api/v1/devices/me',
     '/api/v1/sync/device-state',
     '/api/v1/sync/receipts',
     '/api/v1/sync/live-drive-config',
@@ -28,6 +29,7 @@ Middleware createAuthMiddleware({
     '/api/v1/stock/',
   ],
   List<String> publicPaths = const ['/health'],
+  List<String> bearerOrAdminPaths = const [],
 }) {
   if (db == null && dbProvider == null) {
     throw ArgumentError('createAuthMiddleware için db veya dbProvider zorunludur.');
@@ -67,8 +69,16 @@ Middleware createAuthMiddleware({
         );
       }
 
-      // 3. Authorization Header kontrolü
+      // 3. Authorization Header kontrolü (veya bearerOrAdminPaths üzerinde admin secret devri)
       final authHeader = request.headers['authorization'];
+      final hasAdminHeader = (request.headers['x-admin-secret']?.trim().isNotEmpty ?? false) ||
+          (request.headers['x-mms-admin-secret']?.trim().isNotEmpty ?? false);
+      if ((bearerOrAdminPaths.contains(reqPath) ||
+              bearerOrAdminPaths.contains(normalizedPath)) &&
+          hasAdminHeader &&
+          (authHeader == null || !authHeader.startsWith('Bearer '))) {
+        return innerHandler(request);
+      }
       if (authHeader == null || !authHeader.startsWith('Bearer ')) {
         return Response(
           401,

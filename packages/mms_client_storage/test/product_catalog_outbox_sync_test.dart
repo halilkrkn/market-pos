@@ -330,6 +330,12 @@ void main() {
       final prods = await db.select(db.localProducts).get();
       final prodId = prods.first.id;
 
+      // Ürün Hub'a gönderilmiş (SYNCED) kabul edilir; aksi halde bekleyen PRODUCT_UPSERT
+      // yerel ad/fiyat alanlarını Hub güncellemesine karşı korur (Bölüm 3.5).
+      await db.update(db.outboxOperations).write(
+            const OutboxOperationsCompanion(status: Value('SYNCED')),
+          );
+
       // Aynı ürün için upsertProducts çağrısı (Örn: Hub senkronizasyonu fiyat güncellemesi)
       await repo.upsertProducts(
         [

@@ -289,15 +289,19 @@ void main() {
           await db.close();
         }
 
-        // v1 -> v2 -> v3 zinciri: user_version = 3 ve v3 stok hareketi sütunları eklenmiş olmalı
+        // v1 -> v2 -> v3 -> v4 zinciri: user_version = 4, v3 sütunları ve v4 product_barcodes eklenmiş olmalı
         final rawCheck = sqlite.sqlite3.open(dbFile.path);
         try {
-          expect(rawCheck.select('PRAGMA user_version;').first.values.first, equals(3));
+          expect(rawCheck.select('PRAGMA user_version;').first.values.first, equals(4));
           final movementCols = rawCheck
               .select("PRAGMA table_info('stock_movements');")
               .map((r) => r['name'])
               .toSet();
           expect(movementCols, containsAll(['purchase_price', 'note']));
+          final pbTables = rawCheck.select(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='product_barcodes';",
+          );
+          expect(pbTables.length, equals(1));
         } finally {
           rawCheck.close();
         }
@@ -490,14 +494,45 @@ void main() {
           }),
         );
         expect(restoreRes.statusCode, equals(200), reason: restoreRes.body);
+        final restoreBody = jsonDecode(restoreRes.body) as Map<String, dynamic>;
+        expect(restoreBody['restore_epoch'], isNotNull);
+        expect(restoreBody['restore_epoch'], isNot(equals('epoch_0')));
 
-        // Geri yüklenen canlı DB artık v2 şemasında ve HWM=1 olmalı
-        final stateRes = await http.get(
+        // AUD-MED-01: Restore sonrası eski cihaz tokenı geçersizleştirilir (401)
+        final oldTokenStateRes = await http.get(
           Uri.parse('http://127.0.0.1:8961/api/v1/sync/device-state'),
           headers: authTenantHeaders(rawTok),
         );
+        expect(oldTokenStateRes.statusCode, equals(401));
+
+        // Cihaz kontrollü re-pair / yeni token ile yeniden onaylandığında v2 şemasında HWM=1 döner
+        const renewedTok = 'tok_v1_restore_renewed_456';
+        final newSalt = TokenManager.generateSalt();
+        final newHash = TokenManager.hashToken(
+          rawToken: renewedTok,
+          salt: newSalt,
+          pepper: pepper.pepper,
+        );
+        await server.writeQueue.enqueue(() async {
+          await (server.db.update(server.db.devices)
+                ..where((d) => d.deviceId.equals(devId)))
+              .write(
+            DevicesCompanion(
+              tokenHash: Value(newHash),
+              salt: Value(newSalt),
+              isConfirmed: const Value(true),
+              isActive: const Value(true),
+            ),
+          );
+        });
+
+        final stateRes = await http.get(
+          Uri.parse('http://127.0.0.1:8961/api/v1/sync/device-state'),
+          headers: authTenantHeaders(renewedTok),
+        );
         expect(stateRes.statusCode, equals(200), reason: stateRes.body);
         final stateJson = jsonDecode(stateRes.body) as Map<String, dynamic>;
+        expect(stateJson['restore_epoch'], equals(restoreBody['restore_epoch']));
         expect(stateJson['high_water_mark_seq'], equals(1));
         expect(stateJson['max_seen_client_seq'], equals(1));
         expect(stateJson['expected_next_client_seq'], equals(2));
@@ -533,6 +568,7 @@ void main() {
         db: db,
         dbFile: dbFile,
         writeQueue: writeQueue,
+        backupDirectory: p.join(tempDir.path, 'backups'),
         pepperManager: pepperManager,
       );
       await server.start(address: InternetAddress.loopbackIPv4, port: port);
@@ -845,6 +881,7 @@ void main() {
           db: db,
           dbFile: dbFile,
           writeQueue: WriteQueue(),
+          backupDirectory: p.join(tempDir.path, 'backups'),
           pepperManager: pepper,
         );
         await server.start(address: InternetAddress.loopbackIPv4, port: 8963);
@@ -1160,6 +1197,7 @@ void main() {
         final wrongIdentityServer = SpikeServer(
           db: db,
           writeQueue: WriteQueue(),
+          backupDirectory: p.join(tempDir.path, 'backups_wrong_id'),
           pepperManager: pepper,
           tenantId: 'tenant-baska',
           storeId: SpikeServer.defaultStoreId,
@@ -1188,6 +1226,7 @@ void main() {
         final strictServer = SpikeServer(
           db: strictDb,
           writeQueue: WriteQueue(),
+          backupDirectory: p.join(strictDir.path, 'backups'),
           pepperManager: strictPep,
           requireTenantStoreHeaders: true,
         );

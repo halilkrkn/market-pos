@@ -217,6 +217,9 @@ void main() {
         );
         addTearDown(container.dispose);
 
+        container.read(systemStatusProvider);
+        await container.read(systemStatusProvider.notifier).refreshStatus();
+
         final snapshot = await container.read(dashboardSnapshotProvider.future);
         expect(snapshot.todaySalesTotalCents, equals(12500)); // 50.00 + 75.00 TL
         expect(snapshot.todayCashTotalCents, equals(5000));

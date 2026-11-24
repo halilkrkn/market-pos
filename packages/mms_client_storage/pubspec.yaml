@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   crypto: ^3.0.3
+  cryptography: ^2.7.0
   drift: ^2.32.0
   http: ^1.2.2
   meta: ^1.11.0

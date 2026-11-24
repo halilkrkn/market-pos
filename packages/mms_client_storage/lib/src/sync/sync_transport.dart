@@ -54,7 +54,25 @@ abstract class SyncTransport {
   void close();
 }
 
-class HttpSyncTransport implements SyncTransport {
+/// `OV-03`: Hub `restore_epoch` ve işlem makbuzlarını sorgulamak için opsiyonel
+/// taşıma arayüzü (mevcut `SyncTransport` test sahtelerini kırmaz).
+abstract interface class PostRestoreSyncTransport {
+  Future<SyncResponse> getDeviceState({
+    required String hubUrl,
+    required String token,
+    Duration timeout = const Duration(seconds: 10),
+  });
+
+  Future<SyncResponse> postSyncReceipts({
+    required String hubUrl,
+    required String token,
+    required String deviceId,
+    required List<int> clientSeqs,
+    Duration timeout = const Duration(seconds: 10),
+  });
+}
+
+class HttpSyncTransport implements SyncTransport, PostRestoreSyncTransport {
   final http.Client _client;
 
   /// Pilot tek-tenant/tek-store kimliği. Hub, mağaza verisi rotalarında
@@ -196,6 +214,30 @@ class HttpSyncTransport implements SyncTransport {
     Duration timeout = const Duration(seconds: 10),
   }) =>
       _get(hubUrl, '/api/v1/sales?cursor=$cursor&limit=$limit', token, timeout);
+
+  @override
+  Future<SyncResponse> getDeviceState({
+    required String hubUrl,
+    required String token,
+    Duration timeout = const Duration(seconds: 10),
+  }) =>
+      _get(hubUrl, '/api/v1/sync/device-state', token, timeout);
+
+  @override
+  Future<SyncResponse> postSyncReceipts({
+    required String hubUrl,
+    required String token,
+    required String deviceId,
+    required List<int> clientSeqs,
+    Duration timeout = const Duration(seconds: 10),
+  }) =>
+      _postJson(
+        hubUrl,
+        '/api/v1/sync/receipts',
+        token,
+        jsonEncode({'device_id': deviceId, 'client_seqs': clientSeqs}),
+        timeout,
+      );
 
   @override
   void close() {

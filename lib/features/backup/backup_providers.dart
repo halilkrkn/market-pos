@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 import 'package:mms_client_storage/mms_client_storage.dart';
@@ -14,10 +13,13 @@ import '../diagnostics/application/system_status_notifier.dart';
 import '../sales/sales_providers.dart';
 import '../setup/setup_providers.dart';
 import '../stock/stock_providers.dart';
+import '../sync/application/hub_connection_notifier.dart';
 import '../sync/sync_providers.dart';
 import 'application/background_backup_scheduler.dart';
 import 'application/backup_schedule_controller.dart';
 import 'application/client_backup_service.dart';
+import 'application/hub_backup_oauth_handoff_service.dart';
+import 'data/hub_backup_client.dart';
 import 'drive_auth_providers.dart';
 
 export 'drive_auth_providers.dart';
@@ -109,27 +111,60 @@ final backupScheduleControllerProvider =
       File(p.join(dbService.dataDirectoryPath, 'backup_schedule_state.json')),
     ),
     backgroundScheduler: ref.watch(backgroundBackupSchedulerProvider),
-    afterSuccess: (_) async {
-      final uploader = ref.read(googleDriveUploaderProvider);
-      if (uploader == null) return;
-      try {
-        if (!await ref.read(googleDriveConnectServiceProvider).isConnected()) {
-          return;
-        }
-        final local = await backupService.listBackups();
-        await uploader.uploadPending([
-          for (final b in local.take(3)) (file: b.file, manifest: b.manifest),
-        ]);
-      } catch (e) {
-        // ADR-022 fail-safe: arka plan yerel yedekleme başarısı Drive/OAuth
-        // hatasından etkilenmez; bir sonraki ön plan açılışında tekrar denenir.
-        final redacted = ref.read(redactingLoggerProvider).redact(e.toString());
-        debugPrint('[BackupSchedule] Drive yüklemesi atlandı (yerel yedek korundu): $redacted');
-      }
-    },
   );
   if (dbService.databasePath != ':memory:') {
     controller.initialize();
   }
   return controller;
+});
+
+/// `OV-04`: Cihazın Master Hub üzerinden doğrulanmış rolü (`OWNER` veya `CASHIER`).
+/// Token yoksa, süresi dolmuşsa veya Hub doğrulanamazsa fail-closed `CASHIER` döner.
+final hubBackupDeviceRoleProvider = Provider<String>((ref) {
+  return ref.watch(effectiveDeviceRoleProvider);
+});
+
+final hubBackupHttpClientProvider = Provider<http.Client>((ref) {
+  return ref.watch(deviceRoleHttpClientProvider);
+});
+
+/// Merkezi Hub yedekleme HTTP istemcisi (`X-MMS-Timestamp` + `X-MMS-Nonce` replay korumalı).
+final hubBackupClientProvider = Provider<HubBackupClient>((ref) {
+  final setup = ref.watch(setupConfigProvider);
+  final httpClient = ref.watch(hubBackupHttpClientProvider);
+  return HubBackupClient(
+    httpClient: httpClient,
+    readHubUrl: () => ref.read(hubConnectionProvider).activeHubUrl ?? '',
+    readDeviceToken: () => ref.read(effectiveDeviceTokenProvider),
+    tenantId: setup.tenantId,
+    storeId: setup.storeId,
+  );
+});
+
+/// Windows masaüstü PKCE -> Hub DPAPI devir istemcisi (`OV-01`, `OV-02`).
+final hubBackupOAuthHandoffServiceProvider =
+    Provider<HubBackupOAuthHandoffService>((ref) {
+  final client = ref.watch(hubBackupHttpClientProvider);
+  final backupClient = ref.watch(hubBackupClientProvider);
+  final isAndroid = ref.watch(driveIsAndroidPlatformProvider);
+  final clientId = ref.watch(googleDriveClientIdProvider);
+  final clientSecret = ref.watch(googleDriveClientSecretProvider);
+
+  return HubBackupOAuthHandoffService(
+    clientId: clientId,
+    clientSecret: clientSecret.isEmpty ? null : clientSecret,
+    readHubUrl: () => ref.read(hubConnectionProvider).activeHubUrl ?? '',
+    buildAuthHeaders: () {
+      final token = ref.read(effectiveDeviceTokenProvider);
+      final setup = ref.read(setupConfigProvider);
+      return {
+        if (token != null && token.isNotEmpty) 'authorization': 'Bearer $token',
+        'x-mms-tenant-id': setup.tenantId,
+        'x-mms-store-id': setup.storeId,
+        ...backupClient.buildReplayHeaders(),
+      };
+    },
+    httpClient: client,
+    isWindowsOverride: Platform.isWindows && !isAndroid,
+  );
 });

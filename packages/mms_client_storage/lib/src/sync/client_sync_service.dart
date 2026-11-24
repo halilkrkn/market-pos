@@ -22,6 +22,12 @@ class SyncBatchResult {
   /// başarısız olduğu için tur durdu.
   final bool tlsCertError;
 
+  /// `OV-03`: Hub geri yükleme sonrası kayıp yerel Outbox geçmişi nedeniyle fail-closed durdu.
+  final bool postRestoreHistoryMissing;
+
+  /// `OV-03`: Geri yükleme uzlaştırması ile yeniden kuyruğa alınan `SYNCED` işlem sayısı.
+  final int postRestoreRequeuedCount;
+
   const SyncBatchResult({
     required this.syncedCount,
     required this.retriedCount,
@@ -30,9 +36,30 @@ class SyncBatchResult {
     this.lastError,
     this.tlsPinMismatch = false,
     this.tlsCertError = false,
+    this.postRestoreHistoryMissing = false,
+    this.postRestoreRequeuedCount = 0,
   });
 
-  bool get isCleanSuccess => retriedCount == 0 && permanentFailedCount == 0;
+  bool get isCleanSuccess =>
+      retriedCount == 0 &&
+      permanentFailedCount == 0 &&
+      !postRestoreHistoryMissing;
+}
+
+class PostRestoreReconcileOutcome {
+  final bool reconcileRequired;
+  final bool historyMissing;
+  final int requeuedCount;
+  final String? targetEpoch;
+  final String? error;
+
+  const PostRestoreReconcileOutcome({
+    required this.reconcileRequired,
+    this.historyMissing = false,
+    this.requeuedCount = 0,
+    this.targetEpoch,
+    this.error,
+  });
 }
 
 class ClientSyncService {
@@ -70,6 +97,21 @@ class ClientSyncService {
 
     // 1. Crash recovery: Uygulama yeniden başladığında yarıda kalmış IN_PROGRESS işlemlerini düzelt
     await repository.recoverStuckInProgressOperations(deviceId);
+
+    // 1.5. OV-03: Hub yedek geri yüklemesi (`restore_epoch` değişimi veya `HWM` gerilemesi)
+    // sonrası Hub'da bulunmayan geçmiş `SYNCED` işlemleri özgün kimlikleriyle yeniden kuyruğa al.
+    final reconcileOutcome = await reconcilePostRestoreIfNeeded();
+    if (reconcileOutcome.historyMissing) {
+      return SyncBatchResult(
+        syncedCount: 0,
+        retriedCount: 0,
+        permanentFailedCount: 0,
+        hasMore: true,
+        lastError: reconcileOutcome.error,
+        postRestoreHistoryMissing: true,
+        postRestoreRequeuedCount: reconcileOutcome.requeuedCount,
+      );
+    }
 
     var synced = 0;
     var retried = 0;
@@ -241,6 +283,18 @@ class ClientSyncService {
             .get())
         .length;
 
+    if (reconcileOutcome.targetEpoch != null &&
+        remainingCount == 0 &&
+        retried == 0 &&
+        failed == 0 &&
+        !pinMismatch &&
+        !certError) {
+      await repository.saveStoredRestoreEpoch(
+        deviceId,
+        reconcileOutcome.targetEpoch!,
+      );
+    }
+
     return SyncBatchResult(
       syncedCount: synced,
       retriedCount: retried,
@@ -249,7 +303,141 @@ class ClientSyncService {
       lastError: stopError,
       tlsPinMismatch: pinMismatch,
       tlsCertError: certError,
+      postRestoreHistoryMissing: false,
+      postRestoreRequeuedCount: reconcileOutcome.requeuedCount,
     );
+  }
+
+  /// `OV-03`: Hub'ın `restore_epoch` ve `high_water_mark_seq` durumunu denetler;
+  /// eski yedeğe dönüş tespit edilirse `/api/v1/sync/receipts` üzerinden eksik
+  /// işlemleri doğrulayıp yerel `SYNCED` kayıtlarını atomik olarak yeniden kuyruğa alır.
+  Future<PostRestoreReconcileOutcome> reconcilePostRestoreIfNeeded() async {
+    if (transport is! PostRestoreSyncTransport) {
+      return const PostRestoreReconcileOutcome(reconcileRequired: false);
+    }
+    final postRestoreTransport = transport as PostRestoreSyncTransport;
+
+    final String? currentToken;
+    try {
+      currentToken = readDeviceToken != null ? readDeviceToken!() : deviceToken;
+    } catch (_) {
+      return const PostRestoreReconcileOutcome(reconcileRequired: false);
+    }
+    if (currentToken == null || currentToken.isEmpty) {
+      return const PostRestoreReconcileOutcome(reconcileRequired: false);
+    }
+
+    final stateResp = await postRestoreTransport.getDeviceState(
+      hubUrl: hubUrl,
+      token: currentToken,
+      timeout: requestTimeout,
+    );
+    if (!stateResp.isSuccess) {
+      return PostRestoreReconcileOutcome(
+        reconcileRequired: false,
+        error: stateResp.errorMessage ?? 'HTTP ${stateResp.statusCode}',
+      );
+    }
+
+    final Map<String, dynamic> stateData;
+    try {
+      stateData = jsonDecode(stateResp.body) as Map<String, dynamic>;
+    } catch (_) {
+      return const PostRestoreReconcileOutcome(reconcileRequired: false);
+    }
+
+    final hubRestoreEpoch =
+        (stateData['restore_epoch'] as String?)?.trim() ?? 'epoch_0';
+    final hubHwm = (stateData['high_water_mark_seq'] as num?)?.toInt() ?? 0;
+
+    final storedEpoch = await repository.getStoredRestoreEpoch(deviceId);
+    final localState = await repository.getSyncState(deviceId);
+    final localLastSyncedSeq = localState?.lastSyncedSeq ?? 0;
+
+    final epochChanged = storedEpoch != null && storedEpoch != hubRestoreEpoch;
+    final hwmRegressed = hubHwm < localLastSyncedSeq;
+
+    if (!epochChanged && !hwmRegressed) {
+      if (storedEpoch == null) {
+        await repository.saveStoredRestoreEpoch(deviceId, hubRestoreEpoch);
+      }
+      return const PostRestoreReconcileOutcome(reconcileRequired: false);
+    }
+
+    final localSyncedAfterHwm = await repository.getSyncedOutboxOperations(
+      deviceId,
+      afterSeq: hubHwm,
+    );
+    final candidateSeqSet = <int>{
+      if (hubHwm < localLastSyncedSeq)
+        for (var seq = hubHwm + 1; seq <= localLastSyncedSeq; seq++) seq,
+      for (final op in localSyncedAfterHwm) op.clientSeq,
+    };
+    final candidateSeqs = candidateSeqSet.toList()..sort();
+
+    if (candidateSeqs.isEmpty) {
+      return PostRestoreReconcileOutcome(
+        reconcileRequired: true,
+        targetEpoch: hubRestoreEpoch,
+      );
+    }
+
+    final missingSeqs = <int>[];
+    for (var i = 0; i < candidateSeqs.length; i += 500) {
+      final batch = candidateSeqs.sublist(
+        i,
+        min(i + 500, candidateSeqs.length),
+      );
+      final recResp = await postRestoreTransport.postSyncReceipts(
+        hubUrl: hubUrl,
+        token: currentToken,
+        deviceId: deviceId,
+        clientSeqs: batch,
+        timeout: requestTimeout,
+      );
+      if (!recResp.isSuccess) {
+        return PostRestoreReconcileOutcome(
+          reconcileRequired: true,
+          error: recResp.errorMessage ??
+              'Makbuz doğrulaması başarısız (HTTP ${recResp.statusCode}).',
+        );
+      }
+      final recBody = jsonDecode(recResp.body) as Map<String, dynamic>;
+      final receipts = (recBody['receipts'] as List?) ?? const [];
+      for (final r in receipts) {
+        if (r is Map && r['status'] == 'NOT_FOUND') {
+          final seq = (r['client_seq'] as num?)?.toInt();
+          if (seq != null && seq > 0) {
+            missingSeqs.add(seq);
+          }
+        }
+      }
+    }
+
+    if (missingSeqs.isEmpty) {
+      return PostRestoreReconcileOutcome(
+        reconcileRequired: true,
+        targetEpoch: hubRestoreEpoch,
+      );
+    }
+
+    try {
+      final requeued = await repository.requeueOperationsForPostRestore(
+        deviceId: deviceId,
+        missingSeqs: missingSeqs,
+      );
+      return PostRestoreReconcileOutcome(
+        reconcileRequired: true,
+        requeuedCount: requeued,
+        targetEpoch: hubRestoreEpoch,
+      );
+    } on PostRestoreHistoryMissingException catch (e) {
+      return PostRestoreReconcileOutcome(
+        reconcileRequired: true,
+        historyMissing: true,
+        error: e.message,
+      );
+    }
   }
 
   /// S5A-3: Henüz Hub'a iletilmemiş veya onaylanmamış bekleyen ürün sync oturumunu ACK eder
@@ -344,7 +532,12 @@ class ClientSyncService {
     for (final p in productsJson) {
       final pMap = p as Map<String, dynamic>;
       final pId = pMap['id'] as String;
-      final pBarcode = pMap['barcode'] as String?;
+      final rawPrimaryBarcode = (pMap['barcode'] as String?)?.trim();
+      final pBarcode = (rawPrimaryBarcode == null ||
+              rawPrimaryBarcode.isEmpty ||
+              rawPrimaryBarcode == pId)
+          ? null
+          : rawPrimaryBarcode;
       final isActive = pMap['is_active'] as bool? ?? true;
       final priceVersionId = pMap['price_version_id'] as String? ?? 'pv_init';
 
@@ -379,27 +572,30 @@ class ClientSyncService {
         ));
       }
 
-      // Ek alternatif barkodlar varsa SSOT tablosuna ekle
+      // Ek alternatif barkodlar varsa SSOT tablosuna ekle (Hub prodId placeholder'ı atlanır)
       final extraBarcodes = pMap['barcodes'] as List<dynamic>?;
       if (extraBarcodes != null) {
         for (var i = 0; i < extraBarcodes.length; i++) {
-          final extraBc = extraBarcodes[i].toString();
-          if (extraBc != pBarcode) {
-            barcodeCompanions.add(LocalProductBarcodesCompanion(
-              id: Value('bc_${pId}_alt_$i'),
-              productId: Value(pId),
-              barcode: Value(extraBc),
-              isPrimary: const Value(false),
-              isActive: Value(isActive),
-              createdAt: Value(effectiveNow),
-            ));
-          }
+          final extraBc = extraBarcodes[i].toString().trim();
+          if (extraBc.isEmpty || extraBc == pId || extraBc == pBarcode) continue;
+          barcodeCompanions.add(LocalProductBarcodesCompanion(
+            id: Value('bc_${pId}_alt_$i'),
+            productId: Value(pId),
+            barcode: Value(extraBc),
+            isPrimary: const Value(false),
+            isActive: Value(isActive),
+            createdAt: Value(effectiveNow),
+          ));
         }
       }
     }
 
     // Atomik SQLite transaction: Ya hepsi güncellenir ya hiçbiri (Yarım kalan sync cache'i bozamaz)
-    await repository.upsertProducts(productCompanions, barcodes: barcodeCompanions);
+    await repository.upsertProducts(
+      productCompanions,
+      barcodes: barcodeCompanions,
+      deactivateRemovedBarcodes: true,
+    );
 
     final syncState = await repository.getSyncState(deviceId);
     if (syncState == null) {

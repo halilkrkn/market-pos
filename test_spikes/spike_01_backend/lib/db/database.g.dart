@@ -624,6 +624,359 @@ class ProductsCompanion extends UpdateCompanion<Product> {
   }
 }
 
+class $ProductBarcodesTable extends ProductBarcodes
+    with TableInfo<$ProductBarcodesTable, ProductBarcode> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ProductBarcodesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _productIdMeta =
+      const VerificationMeta('productId');
+  @override
+  late final GeneratedColumn<String> productId = GeneratedColumn<String>(
+      'product_id', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('REFERENCES products (id)'));
+  static const VerificationMeta _barcodeMeta =
+      const VerificationMeta('barcode');
+  @override
+  late final GeneratedColumn<String> barcode = GeneratedColumn<String>(
+      'barcode', aliasedName, false,
+      type: DriftSqlType.string,
+      requiredDuringInsert: true,
+      defaultConstraints: GeneratedColumn.constraintIsAlways('UNIQUE'));
+  static const VerificationMeta _isPrimaryMeta =
+      const VerificationMeta('isPrimary');
+  @override
+  late final GeneratedColumn<bool> isPrimary = GeneratedColumn<bool>(
+      'is_primary', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_primary" IN (0, 1))'),
+      defaultValue: const Constant(false));
+  static const VerificationMeta _isActiveMeta =
+      const VerificationMeta('isActive');
+  @override
+  late final GeneratedColumn<bool> isActive = GeneratedColumn<bool>(
+      'is_active', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_active" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, productId, barcode, isPrimary, isActive, createdAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'product_barcodes';
+  @override
+  VerificationContext validateIntegrity(Insertable<ProductBarcode> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('product_id')) {
+      context.handle(_productIdMeta,
+          productId.isAcceptableOrUnknown(data['product_id']!, _productIdMeta));
+    } else if (isInserting) {
+      context.missing(_productIdMeta);
+    }
+    if (data.containsKey('barcode')) {
+      context.handle(_barcodeMeta,
+          barcode.isAcceptableOrUnknown(data['barcode']!, _barcodeMeta));
+    } else if (isInserting) {
+      context.missing(_barcodeMeta);
+    }
+    if (data.containsKey('is_primary')) {
+      context.handle(_isPrimaryMeta,
+          isPrimary.isAcceptableOrUnknown(data['is_primary']!, _isPrimaryMeta));
+    }
+    if (data.containsKey('is_active')) {
+      context.handle(_isActiveMeta,
+          isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ProductBarcode map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ProductBarcode(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      productId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}product_id'])!,
+      barcode: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}barcode'])!,
+      isPrimary: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_primary'])!,
+      isActive: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+    );
+  }
+
+  @override
+  $ProductBarcodesTable createAlias(String alias) {
+    return $ProductBarcodesTable(attachedDatabase, alias);
+  }
+}
+
+class ProductBarcode extends DataClass implements Insertable<ProductBarcode> {
+  final String id;
+  final String productId;
+  final String barcode;
+  final bool isPrimary;
+  final bool isActive;
+  final DateTime createdAt;
+  const ProductBarcode(
+      {required this.id,
+      required this.productId,
+      required this.barcode,
+      required this.isPrimary,
+      required this.isActive,
+      required this.createdAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['product_id'] = Variable<String>(productId);
+    map['barcode'] = Variable<String>(barcode);
+    map['is_primary'] = Variable<bool>(isPrimary);
+    map['is_active'] = Variable<bool>(isActive);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  ProductBarcodesCompanion toCompanion(bool nullToAbsent) {
+    return ProductBarcodesCompanion(
+      id: Value(id),
+      productId: Value(productId),
+      barcode: Value(barcode),
+      isPrimary: Value(isPrimary),
+      isActive: Value(isActive),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory ProductBarcode.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ProductBarcode(
+      id: serializer.fromJson<String>(json['id']),
+      productId: serializer.fromJson<String>(json['productId']),
+      barcode: serializer.fromJson<String>(json['barcode']),
+      isPrimary: serializer.fromJson<bool>(json['isPrimary']),
+      isActive: serializer.fromJson<bool>(json['isActive']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'productId': serializer.toJson<String>(productId),
+      'barcode': serializer.toJson<String>(barcode),
+      'isPrimary': serializer.toJson<bool>(isPrimary),
+      'isActive': serializer.toJson<bool>(isActive),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  ProductBarcode copyWith(
+          {String? id,
+          String? productId,
+          String? barcode,
+          bool? isPrimary,
+          bool? isActive,
+          DateTime? createdAt}) =>
+      ProductBarcode(
+        id: id ?? this.id,
+        productId: productId ?? this.productId,
+        barcode: barcode ?? this.barcode,
+        isPrimary: isPrimary ?? this.isPrimary,
+        isActive: isActive ?? this.isActive,
+        createdAt: createdAt ?? this.createdAt,
+      );
+  ProductBarcode copyWithCompanion(ProductBarcodesCompanion data) {
+    return ProductBarcode(
+      id: data.id.present ? data.id.value : this.id,
+      productId: data.productId.present ? data.productId.value : this.productId,
+      barcode: data.barcode.present ? data.barcode.value : this.barcode,
+      isPrimary: data.isPrimary.present ? data.isPrimary.value : this.isPrimary,
+      isActive: data.isActive.present ? data.isActive.value : this.isActive,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProductBarcode(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('barcode: $barcode, ')
+          ..write('isPrimary: $isPrimary, ')
+          ..write('isActive: $isActive, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, productId, barcode, isPrimary, isActive, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ProductBarcode &&
+          other.id == this.id &&
+          other.productId == this.productId &&
+          other.barcode == this.barcode &&
+          other.isPrimary == this.isPrimary &&
+          other.isActive == this.isActive &&
+          other.createdAt == this.createdAt);
+}
+
+class ProductBarcodesCompanion extends UpdateCompanion<ProductBarcode> {
+  final Value<String> id;
+  final Value<String> productId;
+  final Value<String> barcode;
+  final Value<bool> isPrimary;
+  final Value<bool> isActive;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const ProductBarcodesCompanion({
+    this.id = const Value.absent(),
+    this.productId = const Value.absent(),
+    this.barcode = const Value.absent(),
+    this.isPrimary = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  ProductBarcodesCompanion.insert({
+    required String id,
+    required String productId,
+    required String barcode,
+    this.isPrimary = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        productId = Value(productId),
+        barcode = Value(barcode);
+  static Insertable<ProductBarcode> custom({
+    Expression<String>? id,
+    Expression<String>? productId,
+    Expression<String>? barcode,
+    Expression<bool>? isPrimary,
+    Expression<bool>? isActive,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (productId != null) 'product_id': productId,
+      if (barcode != null) 'barcode': barcode,
+      if (isPrimary != null) 'is_primary': isPrimary,
+      if (isActive != null) 'is_active': isActive,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  ProductBarcodesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? productId,
+      Value<String>? barcode,
+      Value<bool>? isPrimary,
+      Value<bool>? isActive,
+      Value<DateTime>? createdAt,
+      Value<int>? rowid}) {
+    return ProductBarcodesCompanion(
+      id: id ?? this.id,
+      productId: productId ?? this.productId,
+      barcode: barcode ?? this.barcode,
+      isPrimary: isPrimary ?? this.isPrimary,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (productId.present) {
+      map['product_id'] = Variable<String>(productId.value);
+    }
+    if (barcode.present) {
+      map['barcode'] = Variable<String>(barcode.value);
+    }
+    if (isPrimary.present) {
+      map['is_primary'] = Variable<bool>(isPrimary.value);
+    }
+    if (isActive.present) {
+      map['is_active'] = Variable<bool>(isActive.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ProductBarcodesCompanion(')
+          ..write('id: $id, ')
+          ..write('productId: $productId, ')
+          ..write('barcode: $barcode, ')
+          ..write('isPrimary: $isPrimary, ')
+          ..write('isActive: $isActive, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $SalesTable extends Sales with TableInfo<$SalesTable, Sale> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -5398,6 +5751,8 @@ abstract class _$SpikeDatabase extends GeneratedDatabase {
   _$SpikeDatabase(QueryExecutor e) : super(e);
   $SpikeDatabaseManager get managers => $SpikeDatabaseManager(this);
   late final $ProductsTable products = $ProductsTable(this);
+  late final $ProductBarcodesTable productBarcodes =
+      $ProductBarcodesTable(this);
   late final $SalesTable sales = $SalesTable(this);
   late final $SaleItemsTable saleItems = $SaleItemsTable(this);
   late final $StockMovementsTable stockMovements = $StockMovementsTable(this);
@@ -5419,6 +5774,7 @@ abstract class _$SpikeDatabase extends GeneratedDatabase {
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
         products,
+        productBarcodes,
         sales,
         saleItems,
         stockMovements,
@@ -5467,6 +5823,22 @@ typedef $$ProductsTableUpdateCompanionBuilder = ProductsCompanion Function({
 final class $$ProductsTableReferences
     extends BaseReferences<_$SpikeDatabase, $ProductsTable, Product> {
   $$ProductsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static MultiTypedResultKey<$ProductBarcodesTable, List<ProductBarcode>>
+      _productBarcodesRefsTable(_$SpikeDatabase db) =>
+          MultiTypedResultKey.fromTable(db.productBarcodes,
+              aliasName: 'products__id__product_barcodes__product_id');
+
+  $$ProductBarcodesTableProcessedTableManager get productBarcodesRefs {
+    final manager = $$ProductBarcodesTableTableManager(
+            $_db, $_db.productBarcodes)
+        .filter((f) => f.productId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache =
+        $_typedResult.readTableOrNull(_productBarcodesRefsTable($_db));
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: cache));
+  }
 
   static MultiTypedResultKey<$SaleItemsTable, List<SaleItem>>
       _saleItemsRefsTable(_$SpikeDatabase db) =>
@@ -5576,6 +5948,27 @@ class $$ProductsTableFilterComposer
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  Expression<bool> productBarcodesRefs(
+      Expression<bool> Function($$ProductBarcodesTableFilterComposer f) f) {
+    final $$ProductBarcodesTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.productBarcodes,
+        getReferencedColumn: (t) => t.productId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductBarcodesTableFilterComposer(
+              $db: $db,
+              $table: $db.productBarcodes,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
 
   Expression<bool> saleItemsRefs(
       Expression<bool> Function($$SaleItemsTableFilterComposer f) f) {
@@ -5758,6 +6151,27 @@ class $$ProductsTableAnnotationComposer
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
 
+  Expression<T> productBarcodesRefs<T extends Object>(
+      Expression<T> Function($$ProductBarcodesTableAnnotationComposer a) f) {
+    final $$ProductBarcodesTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.productBarcodes,
+        getReferencedColumn: (t) => t.productId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductBarcodesTableAnnotationComposer(
+              $db: $db,
+              $table: $db.productBarcodes,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
+
   Expression<T> saleItemsRefs<T extends Object>(
       Expression<T> Function($$SaleItemsTableAnnotationComposer a) f) {
     final $$SaleItemsTableAnnotationComposer composer = $composerBuilder(
@@ -5857,7 +6271,8 @@ class $$ProductsTableTableManager extends RootTableManager<
     (Product, $$ProductsTableReferences),
     Product,
     PrefetchHooks Function(
-        {bool saleItemsRefs,
+        {bool productBarcodesRefs,
+        bool saleItemsRefs,
         bool stockMovementsRefs,
         bool productPriceHistoriesRefs,
         bool refundItemsRefs})> {
@@ -5936,13 +6351,15 @@ class $$ProductsTableTableManager extends RootTableManager<
                   (e.readTable(table), $$ProductsTableReferences(db, table, e)))
               .toList(),
           prefetchHooksCallback: (
-              {saleItemsRefs = false,
+              {productBarcodesRefs = false,
+              saleItemsRefs = false,
               stockMovementsRefs = false,
               productPriceHistoriesRefs = false,
               refundItemsRefs = false}) {
             return PrefetchHooks(
               db: db,
               explicitlyWatchedTables: [
+                if (productBarcodesRefs) db.productBarcodes,
                 if (saleItemsRefs) db.saleItems,
                 if (stockMovementsRefs) db.stockMovements,
                 if (productPriceHistoriesRefs) db.productPriceHistories,
@@ -5951,6 +6368,19 @@ class $$ProductsTableTableManager extends RootTableManager<
               addJoins: null,
               getPrefetchedDataCallback: (items) async {
                 return [
+                  if (productBarcodesRefs)
+                    await $_getPrefetchedData<Product, $ProductsTable,
+                            ProductBarcode>(
+                        currentTable: table,
+                        referencedTable: $$ProductsTableReferences
+                            ._productBarcodesRefsTable(db),
+                        managerFromTypedResult: (p0) =>
+                            $$ProductsTableReferences(db, table, p0)
+                                .productBarcodesRefs,
+                        referencedItemsForCurrentItem:
+                            (item, referencedItems) => referencedItems
+                                .where((e) => e.productId == item.id),
+                        typedResults: items),
                   if (saleItemsRefs)
                     await $_getPrefetchedData<Product, $ProductsTable,
                             SaleItem>(
@@ -6022,10 +6452,302 @@ typedef $$ProductsTableProcessedTableManager = ProcessedTableManager<
     (Product, $$ProductsTableReferences),
     Product,
     PrefetchHooks Function(
-        {bool saleItemsRefs,
+        {bool productBarcodesRefs,
+        bool saleItemsRefs,
         bool stockMovementsRefs,
         bool productPriceHistoriesRefs,
         bool refundItemsRefs})>;
+typedef $$ProductBarcodesTableCreateCompanionBuilder = ProductBarcodesCompanion
+    Function({
+  required String id,
+  required String productId,
+  required String barcode,
+  Value<bool> isPrimary,
+  Value<bool> isActive,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+typedef $$ProductBarcodesTableUpdateCompanionBuilder = ProductBarcodesCompanion
+    Function({
+  Value<String> id,
+  Value<String> productId,
+  Value<String> barcode,
+  Value<bool> isPrimary,
+  Value<bool> isActive,
+  Value<DateTime> createdAt,
+  Value<int> rowid,
+});
+
+final class $$ProductBarcodesTableReferences extends BaseReferences<
+    _$SpikeDatabase, $ProductBarcodesTable, ProductBarcode> {
+  $$ProductBarcodesTableReferences(
+      super.$_db, super.$_table, super.$_typedResult);
+
+  static $ProductsTable _productIdTable(_$SpikeDatabase db) =>
+      db.products.createAlias('product_barcodes__product_id__products__id');
+
+  $$ProductsTableProcessedTableManager get productId {
+    final $_column = $_itemColumn<String>('product_id')!;
+
+    final manager = $$ProductsTableTableManager($_db, $_db.products)
+        .filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_productIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
+}
+
+class $$ProductBarcodesTableFilterComposer
+    extends Composer<_$SpikeDatabase, $ProductBarcodesTable> {
+  $$ProductBarcodesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get barcode => $composableBuilder(
+      column: $table.barcode, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isPrimary => $composableBuilder(
+      column: $table.isPrimary, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  $$ProductsTableFilterComposer get productId {
+    final $$ProductsTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.productId,
+        referencedTable: $db.products,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductsTableFilterComposer(
+              $db: $db,
+              $table: $db.products,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$ProductBarcodesTableOrderingComposer
+    extends Composer<_$SpikeDatabase, $ProductBarcodesTable> {
+  $$ProductBarcodesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get barcode => $composableBuilder(
+      column: $table.barcode, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isPrimary => $composableBuilder(
+      column: $table.isPrimary, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  $$ProductsTableOrderingComposer get productId {
+    final $$ProductsTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.productId,
+        referencedTable: $db.products,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductsTableOrderingComposer(
+              $db: $db,
+              $table: $db.products,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$ProductBarcodesTableAnnotationComposer
+    extends Composer<_$SpikeDatabase, $ProductBarcodesTable> {
+  $$ProductBarcodesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get barcode =>
+      $composableBuilder(column: $table.barcode, builder: (column) => column);
+
+  GeneratedColumn<bool> get isPrimary =>
+      $composableBuilder(column: $table.isPrimary, builder: (column) => column);
+
+  GeneratedColumn<bool> get isActive =>
+      $composableBuilder(column: $table.isActive, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  $$ProductsTableAnnotationComposer get productId {
+    final $$ProductsTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.productId,
+        referencedTable: $db.products,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductsTableAnnotationComposer(
+              $db: $db,
+              $table: $db.products,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$ProductBarcodesTableTableManager extends RootTableManager<
+    _$SpikeDatabase,
+    $ProductBarcodesTable,
+    ProductBarcode,
+    $$ProductBarcodesTableFilterComposer,
+    $$ProductBarcodesTableOrderingComposer,
+    $$ProductBarcodesTableAnnotationComposer,
+    $$ProductBarcodesTableCreateCompanionBuilder,
+    $$ProductBarcodesTableUpdateCompanionBuilder,
+    (ProductBarcode, $$ProductBarcodesTableReferences),
+    ProductBarcode,
+    PrefetchHooks Function({bool productId})> {
+  $$ProductBarcodesTableTableManager(
+      _$SpikeDatabase db, $ProductBarcodesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ProductBarcodesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ProductBarcodesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ProductBarcodesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> productId = const Value.absent(),
+            Value<String> barcode = const Value.absent(),
+            Value<bool> isPrimary = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              ProductBarcodesCompanion(
+            id: id,
+            productId: productId,
+            barcode: barcode,
+            isPrimary: isPrimary,
+            isActive: isActive,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String productId,
+            required String barcode,
+            Value<bool> isPrimary = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              ProductBarcodesCompanion.insert(
+            id: id,
+            productId: productId,
+            barcode: barcode,
+            isPrimary: isPrimary,
+            isActive: isActive,
+            createdAt: createdAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (
+                    e.readTable(table),
+                    $$ProductBarcodesTableReferences(db, table, e)
+                  ))
+              .toList(),
+          prefetchHooksCallback: ({productId = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [],
+              addJoins: <
+                  T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic>>(state) {
+                if (productId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.productId,
+                    referencedTable:
+                        $$ProductBarcodesTableReferences._productIdTable(db),
+                    referencedColumn:
+                        $$ProductBarcodesTableReferences._productIdTable(db).id,
+                  ) as T;
+                }
+
+                return state;
+              },
+              getPrefetchedDataCallback: (items) async {
+                return [];
+              },
+            );
+          },
+        ));
+}
+
+typedef $$ProductBarcodesTableProcessedTableManager = ProcessedTableManager<
+    _$SpikeDatabase,
+    $ProductBarcodesTable,
+    ProductBarcode,
+    $$ProductBarcodesTableFilterComposer,
+    $$ProductBarcodesTableOrderingComposer,
+    $$ProductBarcodesTableAnnotationComposer,
+    $$ProductBarcodesTableCreateCompanionBuilder,
+    $$ProductBarcodesTableUpdateCompanionBuilder,
+    (ProductBarcode, $$ProductBarcodesTableReferences),
+    ProductBarcode,
+    PrefetchHooks Function({bool productId})>;
 typedef $$SalesTableCreateCompanionBuilder = SalesCompanion Function({
   required String id,
   required String deviceId,
@@ -9297,6 +10019,8 @@ class $SpikeDatabaseManager {
   $SpikeDatabaseManager(this._db);
   $$ProductsTableTableManager get products =>
       $$ProductsTableTableManager(_db, _db.products);
+  $$ProductBarcodesTableTableManager get productBarcodes =>
+      $$ProductBarcodesTableTableManager(_db, _db.productBarcodes);
   $$SalesTableTableManager get sales =>
       $$SalesTableTableManager(_db, _db.sales);
   $$SaleItemsTableTableManager get saleItems =>

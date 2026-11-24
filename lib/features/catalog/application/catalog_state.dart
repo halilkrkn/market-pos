@@ -10,6 +10,10 @@ class CatalogState {
   final String? errorMessage;
   final String? successMessage;
 
+  /// Ürün bazlı katalog (PRODUCT_UPSERT) Hub gönderim durumları; yalnızca eşitlenmemiş
+  /// ürünleri içerir. Liste satırlarında ürün bazlı rozet için kullanılır.
+  final Map<String, ProductCatalogSyncStatus> catalogSyncStatus;
+
   const CatalogState({
     this.isLoading = false,
     this.products = const [],
@@ -19,6 +23,7 @@ class CatalogState {
     this.filterIsActive,
     this.errorMessage,
     this.successMessage,
+    this.catalogSyncStatus = const {},
   });
 
   CatalogState copyWith({
@@ -32,6 +37,7 @@ class CatalogState {
     String? errorMessage,
     String? successMessage,
     bool clearMessages = false,
+    Map<String, ProductCatalogSyncStatus>? catalogSyncStatus,
   }) {
     return CatalogState(
       isLoading: isLoading ?? this.isLoading,
@@ -42,6 +48,7 @@ class CatalogState {
       filterIsActive: filterIsActive ?? this.filterIsActive,
       errorMessage: clearMessages ? null : (errorMessage ?? this.errorMessage),
       successMessage: clearMessages ? null : (successMessage ?? this.successMessage),
+      catalogSyncStatus: catalogSyncStatus ?? this.catalogSyncStatus,
     );
   }
 }

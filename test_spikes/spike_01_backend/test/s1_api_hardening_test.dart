@@ -318,6 +318,7 @@ void main() {
       final unconfigServer = SpikeServer(
         db: db,
         writeQueue: unconfigQueue,
+        backupDirectory: p.join(tempDir.path, 'backups_unconfig'),
         adminSecret: null, // Yapılandırılmamış
         pepperManager: pepperManager,
       );

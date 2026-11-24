@@ -96,6 +96,7 @@ void main() {
       server = SpikeServer(
         db: db,
         writeQueue: writeQueue,
+        backupDirectory: p.join(tempDir.path, 'backups'),
         adminSecret: adminSecret,
         pepperManager: pepperManager,
         liveDriveSecretManager: secretManager,
@@ -212,6 +213,7 @@ void main() {
       final tlsServer = SpikeServer(
         db: db,
         writeQueue: writeQueue,
+        backupDirectory: p.join(tempDir.path, 'backups_tls'),
         adminSecret: adminSecret,
         pepperManager: pepperManager,
         liveDriveSecretManager: secretManager,

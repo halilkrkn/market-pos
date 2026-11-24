@@ -1,7 +1,4 @@
-import 'package:flutter/foundation.dart';
-
 /// Open Food Facts ürün besin değerleri özeti (100g/100ml bazında Salt Okuma).
-@immutable
 class NutritionFactsSummary {
   final String? energyKcal100g;
   final String? fat100g;
@@ -52,7 +49,6 @@ class NutritionFactsSummary {
 
 /// Harici ürün bilgi kaynağından (Open Food Facts) dönen kullanıcı düzenlemesine
 /// tabi ürün öneri modeli. Satış fiyatı, maliyet veya stok bilgisi ASLA içermez.
-@immutable
 class ExternalProductSuggestion {
   final String barcode;
   final String productName;
@@ -110,7 +106,7 @@ class ExternalProductSuggestion {
           barcode == other.barcode &&
           productName == other.productName &&
           brand == other.brand &&
-          listEquals(categories, other.categories) &&
+          _stringListEquals(categories, other.categories) &&
           imageUrl == other.imageUrl &&
           ingredientsText == other.ingredientsText &&
           quantityText == other.quantityText &&
@@ -140,7 +136,6 @@ enum ExternalProductLookupStatus {
   error,
 }
 
-@immutable
 class ExternalProductLookupResult {
   final ExternalProductLookupStatus status;
   final String barcode;
@@ -191,4 +186,13 @@ class ExternalProductLookupResult {
 
   bool get isFound =>
       status == ExternalProductLookupStatus.found && suggestion != null;
+}
+
+bool _stringListEquals(List<String> a, List<String> b) {
+  if (identical(a, b)) return true;
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }

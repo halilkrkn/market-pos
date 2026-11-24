@@ -275,6 +275,7 @@ void main() {
         db: db,
         dbFile: dbFile,
         writeQueue: queue,
+        backupDirectory: '${tempDir.path}/backups',
       );
 
       const serverHttpPort = 18099;

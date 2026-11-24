@@ -13,6 +13,7 @@ import 'core/security/windows_dpapi_token_store.dart';
 import 'core/storage/local_database_service.dart';
 import 'core/theme/theme_preference_store.dart';
 import 'core/theme/theme_provider.dart';
+import 'core/utils/user_friendly_error_mapper.dart';
 import 'features/backup/backup_providers.dart';
 import 'features/diagnostics/application/system_status_notifier.dart';
 import 'features/security/data/device_pairing_client.dart';
@@ -33,7 +34,9 @@ Future<void> main() async {
     final defaultDbPath = LocalDatabaseService.resolveDefaultDatabasePath();
     DatabaseBackupEngine.recoverPendingRestoreSync(File(defaultDbPath));
   } catch (e) {
-    debugPrint('[Main] Bekleyen restore kurtarma uyarısı: $e');
+    debugPrint(
+      '[Main] Bekleyen restore kurtarma uyarısı: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}',
+    );
   }
 
   // 1. İstemci Yerel SQLite Veritabanını (client_local.db) Başlat
@@ -50,7 +53,9 @@ Future<void> main() async {
       initialSetupConfig.deviceId,
     );
   } catch (e) {
-    debugPrint('[Main] Ürün mutabakatı uyarısı: $e');
+    debugPrint(
+      '[Main] Ürün mutabakatı uyarısı: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}',
+    );
   }
 
   // 1.3 B-3 OS/Donanım destekli güvenli token deposunu başlat ve crash recovery re-pairing uzlaştır
@@ -87,7 +92,9 @@ Future<void> main() async {
       },
     );
   } catch (e) {
-    debugPrint('[Main] Bekleyen re-pairing uzlaştırma uyarısı: $e');
+    debugPrint(
+      '[Main] Bekleyen re-pairing uzlaştırma uyarısı: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}',
+    );
   }
 
   String? initialStoredToken;
@@ -95,7 +102,9 @@ Future<void> main() async {
     initialStoredToken =
         await tokenStore.readDeviceToken(initialSetupConfig.deviceId);
   } catch (e) {
-    debugPrint('[Main] Güvenli token okuma uyarısı: $e');
+    debugPrint(
+      '[Main] Güvenli token okuma uyarısı: ${UserFriendlyErrorMapper.redactSecrets(e.toString())}',
+    );
   }
 
   // 1.4 Kalıcı Hub bağlantı yapılandırmasını platform güvenlik politikasıyla yükle

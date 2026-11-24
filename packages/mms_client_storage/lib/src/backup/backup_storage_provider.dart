@@ -99,7 +99,11 @@ class LocalStorageProvider implements BackupStorageProvider {
       if (await tmpFile.exists()) {
         try {
           await tmpFile.delete();
-        } catch (_) {}
+        } catch (delErr) {
+          stderr.writeln(
+            '[LocalStorageProvider] Geçici dosya temizlenemedi (${p.basename(tmpFile.path)}): ${delErr.runtimeType}',
+          );
+        }
       }
       rethrow;
     }

@@ -445,10 +445,20 @@ class AndroidGoogleSignInTokenProvider implements DriveAccessTokenProvider {
       _currentAccount = null;
       try {
         await secureStore.deleteSecret(connectedFlagSecretKey);
-      } catch (_) {}
+      } catch (e) {
+        logger?.warning(
+          'drive_auth',
+          'Bağlı durum anahtarı silinemedi: ${e.runtimeType}',
+        );
+      }
       try {
         await secureStore.deleteSecret(connectedEmailHintKey);
-      } catch (_) {}
+      } catch (e) {
+        logger?.warning(
+          'drive_auth',
+          'E-posta ipucu anahtarı silinemedi: ${e.runtimeType}',
+        );
+      }
     }
   }
 

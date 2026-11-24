@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../../core/design_system/design_system.dart';
+import '../../../../core/security/security_providers.dart';
 import '../../../../core/security/tls_pinned_client_factory.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart';
@@ -42,6 +43,7 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
   final _secretController = TextEditingController();
   List<PendingPairingRequest> _pending = const [];
   PairingSessionInfo? _session;
+  HubReadinessSummary? _readiness;
   String? _message;
   AppBadgeTone _tone = AppBadgeTone.info;
   bool _busy = false;
@@ -77,8 +79,49 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
 
   Future<String?> _refresh(HubPairingAdminClient c, String secret) async {
     final list = await c.listPendingRequests(adminSecret: secret);
-    if (mounted) setState(() => _pending = list);
+    HubReadinessSummary? readiness;
+    try {
+      readiness = await c.fetchHubReadiness();
+    } catch (e) {
+      ref.read(redactingLoggerProvider).warning(
+            'pairing',
+            'Hub sağlık özeti yenilenemedi: ${e.runtimeType}',
+          );
+    }
+    if (mounted) {
+      setState(() {
+        _pending = list;
+        if (readiness != null) _readiness = readiness;
+      });
+    }
     return list.isEmpty ? 'Onay bekleyen eşleştirme talebi yok.' : null;
+  }
+
+  Future<String?> _bootstrapOwner(HubPairingAdminClient c, String secret) async {
+    final setup = ref.read(setupConfigProvider);
+    final res = await c.bootstrapOwner(
+      adminSecret: secret,
+      deviceId: setup.deviceId,
+      deviceName: setup.deviceName,
+      registerIfMissing: true,
+    );
+    if (res.token != null && res.token!.isNotEmpty) {
+      await ref.read(deviceAuthProvider.notifier).setStoredToken(res.deviceId, res.token!);
+      await ref.read(deviceRoleProvider.notifier).refreshRole(force: true);
+    }
+    HubReadinessSummary? readiness;
+    try {
+      readiness = await c.fetchHubReadiness();
+    } catch (e) {
+      ref.read(redactingLoggerProvider).warning(
+            'pairing',
+            'Bootstrap sonrası Hub sağlık özeti yenilenemedi: ${e.runtimeType}',
+          );
+    }
+    if (mounted && readiness != null) {
+      setState(() => _readiness = readiness);
+    }
+    return 'İlk OWNER kurulumu (${res.deviceId}) tamamlandı ve mühürlendi.';
   }
 
   @override
@@ -105,6 +148,15 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
           SizedBox(
             height: 48,
             child: FilledButton.icon(
+              key: const Key('owner_bootstrap_button'),
+              onPressed: _busy ? null : () => _run(_bootstrapOwner),
+              icon: const Icon(Icons.admin_panel_settings_rounded),
+              label: const Text('İlk OWNER Kurulumu (Bootstrap)'),
+            ),
+          ),
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
               key: const Key('pairing_create_session_button'),
               onPressed: _busy
                   ? null
@@ -127,6 +179,19 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
             ),
           ),
         ]),
+        if (_readiness != null) ...[
+          const SizedBox(height: MmsSpacing.xs),
+          AppBadge(
+            key: const Key('hub_recovery_key_health_badge'),
+            label: _readiness!.recoveryKeyConfigured
+                ? 'Kurtarma Parolası: Yapılandırıldı'
+                : 'Kurtarma Parolası: Tanımsız (Yedek Fail-Closed)',
+            tone: _readiness!.recoveryKeyConfigured
+                ? AppBadgeTone.success
+                : AppBadgeTone.warning,
+            compact: true,
+          ),
+        ],
         if (_session != null) ...[
           const SizedBox(height: MmsSpacing.sm),
           if (_session!.qrPayload.trim().isNotEmpty) ...[

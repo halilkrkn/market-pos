@@ -1,6 +1,6 @@
 # MARKET MMS — Fiziksel Kabul Test Planı (Saha / Pilot)
 
-*Tarih: 21 Kasım 2026 · Hazırlayan: Claude Code · Durum: **Hiçbiri çalıştırılmadı (BLOCKED — gerçek donanım/ortam gerekir)***
+*Tarih: 21 Kasım 2026 (Güncelleme: 23 Kasım 2026 — `PAT-19`, `PAT-20` ve Hat B `BK-PAT-01…18` bölümü eklendi) · Hazırlayan: Claude Code · Durum: **Hiçbiri çalıştırılmadı (BLOCKED — gerçek donanım/ortam gerekir)***
 
 Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğrulamak içindir.
 
@@ -10,7 +10,7 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 **Genel ön koşullar (tüm testler):**
 1. `OWNER_ACTION_CHECKLIST.md` B1 (Android imza anahtarı) ve B2 (Hub TLS sertifikaları) tamamlanmış olmalı.
 2. Hub temiz bir DB ile kurulmuş olmalı; manuel test DB'si ve token'ları **kullanılmaz**.
-3. Test öncesi Hub'dan şifreli yedek alınmalı (`POST /api/v1/admin/backup`).
+3. Test öncesi Hub'dan şifreli yedek alınmalı (`POST /api/v1/admin/backup`). 23 Kasım 2026 sonrası sürümde bu yedek Portable Recovery Password ile şifrelenir; parola tanımlı değilse `412 ERR_RECOVERY_KEY_NOT_CONFIGURED` döner (bkz. Hat B ön adım 3).
 4. Her test için kanıt klasörü açılmalı: `pilot_kanit/PAT-xx_<tarih>/`.
 
 **Kayıt formatı (her test sonunda doldurun):**
@@ -317,10 +317,71 @@ Bu plan, otomatik testlerin doğrulayamadığı her şeyi gerçek cihazda doğru
 - **Beklenen sonuç:** Hub varken 0 Drive sync trafiği; Hub kapalıyken veri kayıpsız/echo-loop'suz aktarım ve non-LWW çakışma bildirimi; Hub dönüşünde temiz reconciliation ve mükerrer satış yok.
 - **Kanıt:** Tanılama UI ekran görüntüleri (her geçişte), Hub satış listesi ve her iki cihazın Outbox sayacı (`0 PENDING`).
 
+## PAT-19 — İkincil Barkodun Çoklu Cihaz Senkronizasyonu (`GAP-A01`) *(23 Kasım 2026 eklendi)*
+- **Ön koşullar:** `PAT-03` ile eşleştirilmiş 2 cihaz (Cihaz A Android, Cihaz B Windows kasa veya ikinci Android); Hub çalışıyor; USB/Bluetooth barkod okuyucu (Windows) ve/veya kamera (Android).
+- **Donanım:** Windows Master Hub PC + 2 istemci + üzerinde **iki farklı barkod** bulunan (veya iki ayrı etiket basılmış) tek bir test ürünü.
+- **Adımlar:**
+  1. Cihaz A'da test ürününü birincil barkoduyla oluşturun ve senkron olmasını bekleyin (Tanılama → Outbox `0 PENDING`).
+  2. Cihaz A'da **Ürün Kataloğu → ürün satırındaki "Barkodları Yönet"** (veya ürün düzenleme ekranındaki **"İkincil Barkodları Yönet"**) ile **ikinci barkodu** ekleyin; Android'de **Kamera ile Tara** düğmesini de deneyin. Diyalogdaki ürün bazlı durumun önce *"Hub'a gönderilmeyi bekleyen … değişiklik"* sonra (diyalog yeniden açıldığında) *"Hub ile eşitlendi"* olduğunu ve Outbox'taki `PRODUCT_UPSERT` satırının `SYNCED` olduğunu doğrulayın. *(23 Kasım 2026 (2. tur): bu ekran bu turda eklendi; önceki sürümde UI yoktu.)*
+  3. Cihaz B'de ürün listesini yenileyin (veya senkron döngüsünü bekleyin). İkinci barkodu okutun: ürün sepete **doğru fiyatla** gelmelidir.
+  4. Aynı ikinci barkodu Cihaz B'de **başka bir ürüne** eklemeyi deneyin: "… başka bir ürüne kayıtlı: "<ürün adı>"" hatası alınmalı (yerel katalog güncel değilse Hub `409 ERR_DUPLICATE_BARCODE` → ürün satırında **HUB HATASI** rozeti ve diyalogda kalıcı hata bildirimi). Ürünün **birincil** barkodunu ikincil olarak eklemeyi deneyin: reddedilmeli.
+  5. Cihaz A'da ikinci barkodu **silin** (onay diyaloğunda önce **Vazgeç** → barkod kalmalı; sonra **Sil**); senkron sonrası Cihaz B'de o barkod okutulduğunda ürün **bulunmamalı** (OD-03 bilinmeyen barkod mesajı).
+  5a. *(9.4)* Ağı kesip Cihaz A'da bir ikincil barkodu silin: ürün satırında **HUB'A GİDECEK** rozeti ve diyalogda "bekleyen değişiklik" bildirimi görünmeli. Ağı açın; ilk senkron turlarında silinen barkod Cihaz A'da **geri gelmemeli**, Outbox onaylanınca rozet kaybolmalı ve barkod her iki cihazda da silinmiş kalmalı. *(Outbox'ın Hub erişilebilirken ilerlemediği — öndeki bir işlemin `RETRY`/`FAILED_PERMANENT` kaldığı — durum yalnızca otomatik testlerle doğrulanmıştır; sahada oluşursa ekran görüntüsüyle kanıtlayın.)*
+  6. Cihaz A ağdan ayrıyken (uçak modu) bir barkod ekleyin, ürünü bu barkodla satın, sonra ağı açın: hem barkod hem satış Hub'a sırasıyla (FIFO) ulaşmalı, stok tek sefer düşmelidir.
+- **Beklenen sonuç:** Barkod ekleme/silme iki cihazda tutarlı; mükerrer barkod iki katmanda reddedilir; silinen barkod geri dirilmez; çevrimdışı ekleme kaybolmaz.
+- **Kanıt:** Her iki cihazın ürün detay ekranı, Outbox listesi ve Hub `GET /api/v1/products` çıktısında ürünün `barcodes` alanı (token'sız ekran görüntüsü).
+
+## PAT-20 — `android_full_e2e_verification_test.dart` Cihaz Koşumu (Yalnız İzole TEST Hub) *(23 Kasım 2026 eklendi)*
+- **Ön koşullar:** Üretim Hub'ından **ayrı** bir TEST Hub (ayrı PC veya ayrı port + ayrı `DB_PATH`), bu TEST Hub'a eşleştirilmiş geçici test cihaz token'ı. Test, uygulamanın gerçek `client_local.db` dosyasını **kullanmaz** (her koşumda geçici izole SQLite açar ve sonunda siler) ancak senkronizasyon adımları verilen Hub'a test ürünü/satışı yazar.
+- **Adımlar:**
+  0. *(S6, 23 Kasım 2026 (2. tur) — teknik koruma)* TEST Hub'ı **`HUB_ID=E2E-HUB-01`** (veya `E2E-`/`TEST-` önekli başka bir kimlik) ile başlatın. Test; `MMS_E2E_HUB_ALLOWLIST` (`host:port`) ve `MMS_E2E_EXPECTED_HUB_ID` verilmezse, adres listede değilse, kimlik test önekli değilse veya Hub'ın `GET /api/v1/sync/device-state` ile bildirdiği `hub_id` beklenenle eşleşmezse **hiçbir şey yazmadan** durur. Üretim Hub kimlikleri (ör. `MMS-HUB-MASTER`) reddedilir.
+  1. `flutter test integration_test/android_full_e2e_verification_test.dart -d <android_cihaz> --dart-define=MMS_E2E_HUB_URL=https://<TEST_HUB_IP>:<port> --dart-define=MMS_E2E_DEVICE_TOKEN=<geçici_test_token> --dart-define=MMS_E2E_HUB_ALLOWLIST=<TEST_HUB_IP>:<port> --dart-define=MMS_E2E_EXPECTED_HUB_ID=E2E-HUB-01`
+  2. Yerel ağ keşfi ile çalıştırmak gerekiyorsa ayrıca `--dart-define=MMS_E2E_ALLOW_DISCOVERY=true` verin — keşfedilen adres de allowlist'te olmalı ve kimlik doğrulamasından geçmelidir.
+  2a. Negatif kontrol: `MMS_E2E_EXPECTED_HUB_ID` değerini değiştirerek (ör. `E2E-YANLIS`) çalıştırın; test `E2eHubTargetRejected` ile durmalı ve TEST Hub'da yeni satış/ürün oluşmamalıdır.
+  3. Test bitince geçici test token'ını TEST Hub'da iptal edin (`D2`).
+- **Beklenen sonuç:** 10/10 adım geçer; kısmi iade sonrası satış durumu `PARTIALLY_REFUNDED`; yedek `VACUUM INTO` ile alınır ve `PRAGMA integrity_check = ok`.
+- **Kanıt:** Test çıktısı (token maskeli).
+
+---
+
+## Hat B — Merkezi Hub Google Drive Yedekleme Fiziksel Testleri (`BK-PAT-01…BK-PAT-18`)
+
+Ayrıntılı adımlar, ön koşullar ve beklenen sonuçlar [`docs/testing/BACKUP_RESTORE_ACCEPTANCE_TESTS_V1_1.md`](docs/testing/BACKUP_RESTORE_ACCEPTANCE_TESTS_V1_1.md) §4.2'dedir (`PAT-xx` kimlikleri ile çakışmaz). Yazılım tarafı otomatik testlerle doğrulanmıştır; aşağıdakilerin hiçbiri sahada çalıştırılmamıştır.
+
+**Hat B için zorunlu ön adımlar (sırasıyla):**
+1. `B2` TLS sertifikaları + `MarketMMSService` kurulumu (`PAT-08`) + `setup_service_acls.ps1` (`PAT-10`; `backups\` dizini dahil).
+2. `C1/C2` Google Cloud OAuth (Desktop Client ID, yalnız `drive.file` kapsamı).
+3. **Portable Recovery Password tanımlama** (Windows Hub ekranı → *Merkezi Hub Yedekleme* → Kurtarma Parolası; en az 12 karakter). Parolayı kağıda yazıp kasadan ayrı güvenli yerde saklayın. **Bu adım yapılmadan hiçbir Hub yedeği (eski 24 saatlik yerel yedek dahil) alınmaz** (`ERR_RECOVERY_KEY_NOT_CONFIGURED`).
+4. Retention testleri (`BK-PAT-10/11`) için **yalnızca `TEST_ONLY`** Google Drive hesabı/klasörü; gerçek mağaza yedeklerine dokunulmaz, sistem saati değiştirilmez.
+
+| Test | Kısa kapsam | Durum |
+|---|---|---|
+| `BK-PAT-01` | Windows PKCE → `LocalService` token devri, reboot kalıcılığı | **BLOCKED** |
+| `BK-PAT-02` | İlk etkinleştirme yedeği + gerçek Drive upload/download | **BLOCKED** |
+| `BK-PAT-03` | Doğal gece `00:00` yedeği + ertesi sabah `CATCH_UP` (saat değiştirilmez) | **BLOCKED** |
+| `BK-PAT-04` | Ağ kesintisinde 4 MiB chunk + `HTTP 308` devam | **BLOCKED** |
+| `BK-PAT-05` | Drive kota dolu / OAuth iptali (`FAILED_QUOTA` / `FAILED_AUTH`) | **BLOCKED** |
+| `BK-PAT-06` | Gerçek disk dolu (`ERR_INSUFFICIENT_DISK_SPACE`) | **BLOCKED** |
+| `BK-PAT-07` | Upload sırasında servis durdurma (<12 s), aynı `backup_id` ile devam | **BLOCKED** |
+| `BK-PAT-08` | Güç kesintisi / süreç çökmesi sonrası aşamalı kurtarma | **BLOCKED** |
+| `BK-PAT-09` | Restore sırasında eşzamanlı yedek/sync koruması (`409`) | **BLOCKED** |
+| `BK-PAT-10` | `TEST_ONLY` klasörde 30 gün + 12 ay retention | **BLOCKED** |
+| `BK-PAT-11` | `TEST_ONLY` klasörde son geçerli yedek koruması | **BLOCKED** |
+| `BK-PAT-12` | Yanlış kurtarma parolası reddi + şifreli safety snapshot | **BLOCKED** |
+| `BK-PAT-13` | İkinci temiz PC'de restore + toplu re-pairing | **BLOCKED** |
+| `BK-PAT-14` | Restore sonrası çevrimdışı Android satışlarının kayıpsız uzlaştırması (`OV-03`) | **BLOCKED** |
+| `BK-PAT-15` | Android `OWNER` uzaktan tetik vs `CASHIER` kısıtı | **BLOCKED** |
+| `BK-PAT-16` | Eski Android yerel `.mmsbak` dosyalarının korunması | **BLOCKED** |
+| `BK-PAT-17` | Safety snapshot'tan geri dönüş | **BLOCKED** |
+| `BK-PAT-18` | Oturum kapalıyken uzun süreli servis kararlılığı | **BLOCKED** |
+
+**Eski (23 Kasım 2026 öncesi) Hub yedekleri:** Eski sürüm parolasız Hub yedeklerini makineye bağlı pepper ile şifreliyordu. Bunlar yalnızca **aynı Hub PC'de** `POST /api/v1/admin/restore` gövdesine `"legacy_machine_key": true` eklenerek açılabilir; yeni PC'ye taşınamaz. Yeni sürüme geçtikten sonra kurtarma parolasıyla yeni bir yedek alın.
+
 ---
 
 ## Durum Özeti
 
 | Test | Durum | Bağımlılık |
 |---|---|---|
-| PAT-01 … PAT-18 | **BLOCKED** (çalıştırılmadı) | Owner B1, B2, C1, C2, D1, E1; `P-BLOCK-1..3` canlı `PAT-03` & `PAT-12`; Android arka plan iş planlayıcı (`PAT-16`); Google Drive OAuth & Hibrit Sync (`PAT-13`, `PAT-17`, `PAT-18`) |
+| PAT-01 … PAT-20 | **BLOCKED** (çalıştırılmadı) | Owner B1, B2, C1, C2, D1, E1; `P-BLOCK-1..3` canlı `PAT-03` & `PAT-12`; Android arka plan iş planlayıcı (`PAT-16`); Google Drive OAuth & Hibrit Sync (`PAT-13`, `PAT-17`, `PAT-18`); ikincil barkod (`PAT-19`); izole TEST Hub (`PAT-20`) |
+| BK-PAT-01 … BK-PAT-18 | **BLOCKED** (çalıştırılmadı) | `B2`, `PAT-08`, `PAT-10`, `C1/C2`, Portable Recovery Password, `TEST_ONLY` Drive klasörü, ikinci temiz Windows PC, fiziksel Android `OWNER`/`CASHIER` cihazları |

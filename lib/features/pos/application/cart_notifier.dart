@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../domain/barcode_input_sanitizer.dart';
 import '../domain/cart_state.dart';
 import '../domain/money.dart';
@@ -60,7 +61,11 @@ class CartNotifier extends StateNotifier<CartState> {
       state = state.copyWith(errorMessage: e.message, infoMessage: null);
       return false;
     } catch (e, stack) {
-      debugPrint('[CartNotifier] Barkod sorgu hatası: $e\n$stack');
+      debugPrint(
+        UserFriendlyErrorMapper.redactSecrets(
+          '[CartNotifier] Barkod sorgu hatası: $e\n$stack',
+        ),
+      );
       state = state.copyWith(
         errorMessage: 'Barkod sorgulanırken beklenmeyen bir hata oluştu.',
         infoMessage: null,
@@ -239,7 +244,11 @@ class CartNotifier extends StateNotifier<CartState> {
         );
         return null;
       } catch (e, stack) {
-        debugPrint('[CartNotifier] Satış kaydetme hatası: $e\n$stack');
+        debugPrint(
+          UserFriendlyErrorMapper.redactSecrets(
+            '[CartNotifier] Satış kaydetme hatası: $e\n$stack',
+          ),
+        );
         state = state.copyWith(
           isProcessing: false,
           errorMessage:
@@ -269,7 +278,9 @@ class CartNotifier extends StateNotifier<CartState> {
           await onSaleCommitted!();
         } catch (e, stack) {
           debugPrint(
-            '[CartNotifier] Satış sonrası durum yenileme hatası (satış kaydedildi): $e\n$stack',
+            UserFriendlyErrorMapper.redactSecrets(
+              '[CartNotifier] Satış sonrası durum yenileme hatası (satış kaydedildi): $e\n$stack',
+            ),
           );
         }
       }

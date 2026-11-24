@@ -85,6 +85,7 @@ class _IntegrityTestEnv {
       db: db,
       dbFile: dbFile,
       writeQueue: WriteQueue(),
+      backupDirectory: p.join(tempDir.path, 'backups'),
       pepperManager: pepper,
     );
     await server.start(

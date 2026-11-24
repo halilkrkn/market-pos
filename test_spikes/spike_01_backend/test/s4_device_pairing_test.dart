@@ -82,6 +82,7 @@ void main() {
       server = SpikeServer(
         db: db,
         writeQueue: writeQueue,
+        backupDirectory: p.join(tempDir.path, 'backups'),
         adminSecret: adminSecret,
         pepperManager: pepperManager,
         caCertPath: caCertPath,

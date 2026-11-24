@@ -160,6 +160,7 @@ void main() {
       db: db,
       dbFile: dbFile,
       writeQueue: WriteQueue(),
+      backupDirectory: p.join(dir.path, 'backups'),
       adminSecret: adminSecret,
       pepperManager: pepper,
       securityContext: secCtx,
@@ -199,6 +200,7 @@ void main() {
     final devServer = SpikeServer(
       db: devDb,
       writeQueue: WriteQueue(),
+      backupDirectory: p.join(dir.path, 'backups_dev'),
       adminSecret: adminSecret,
       pepperManager: pepper,
       requireTls: false,

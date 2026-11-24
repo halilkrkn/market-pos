@@ -62,7 +62,12 @@ void main() {
           ),
         );
 
-    server = SpikeServer(db: db, writeQueue: writeQueue, pepperManager: pepperManager);
+    server = SpikeServer(
+      db: db,
+      writeQueue: writeQueue,
+      backupDirectory: p.join(tempDir.path, 'backups'),
+      pepperManager: pepperManager,
+    );
     await server.start(port: testPort);
     baseUrl = 'http://127.0.0.1:$testPort';
   });

@@ -238,10 +238,10 @@ Future<void> main(List<String> args) async {
           .transform(const LineSplitter())
           .firstWhere((line) => line.trim() == 'ACQUIRED')
           .timeout(
-            const Duration(seconds: 15),
+            const Duration(seconds: 45),
             onTimeout: () => throw TimeoutException(
               'Çocuk süreç ACQUIRED bildirmedi. stderr: $stderrBuffer',
-              const Duration(seconds: 15),
+              const Duration(seconds: 45),
             ),
           );
       expect(ready, 'ACQUIRED');

@@ -326,7 +326,11 @@ class LocalDatabaseService {
 
     try {
       await _db.customStatement('PRAGMA wal_checkpoint(TRUNCATE);');
-    } catch (_) {}
+    } catch (e) {
+      stderr.writeln(
+        '[LocalDatabaseService] Restore öncesi WAL checkpoint uyarısı: ${e.runtimeType}',
+      );
+    }
 
     await _db.close().timeout(dbCloseTimeout);
     _closeFuture = null;
@@ -427,7 +431,11 @@ class LocalDatabaseService {
       try {
         final service = await _initializationFuture!;
         await service.close();
-      } catch (_) {}
+      } catch (e) {
+        stderr.writeln(
+          '[LocalDatabaseService] closeActive devam eden başlatma kapatma uyarısı: ${e.runtimeType}',
+        );
+      }
       return;
     }
 
@@ -478,7 +486,7 @@ class LocalDatabaseService {
             stderr.writeln(
               '[LocalDatabaseService] UYARI: $_activeQueryCount aktif sorgu/operasyon '
               '${drainTimeout.inSeconds}s drain süresi içinde tamamlanamadı. '
-              'Zorla kapatmaya geçiliyor. (path: $_databasePath)',
+              'Zorla kapatmaya geçiliyor. (db: ${p.basename(_databasePath)})',
             );
           },
         );
@@ -493,7 +501,7 @@ class LocalDatabaseService {
           stderr.writeln(
             '[LocalDatabaseService] UYARI: _db.close() ${dbCloseTimeout.inSeconds}s '
             'emniyet süresi içinde tamamlanamadı. Drift isolate yanıt vermiyor olabilir. '
-            '(path: $_databasePath)',
+            '(db: ${p.basename(_databasePath)})',
           );
         },
       );
@@ -559,9 +567,14 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
   Future<void> upsertProducts(
     List<LocalProductsCompanion> products, {
     List<LocalProductBarcodesCompanion>? barcodes,
+    bool deactivateRemovedBarcodes = false,
   }) =>
       _service.runOperation(
-        () => _delegate.upsertProducts(products, barcodes: barcodes),
+        () => _delegate.upsertProducts(
+          products,
+          barcodes: barcodes,
+          deactivateRemovedBarcodes: deactivateRemovedBarcodes,
+        ),
       );
 
   @override
@@ -641,9 +654,15 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
       );
 
   @override
-  Future<void> retryFailedPermanentOperation(String operationId) =>
+  Future<void> retryFailedPermanentOperation(
+    String operationId, {
+    bool allowProtocolConflictOverride = false,
+  }) =>
       _service.runOperation(
-        () => _delegate.retryFailedPermanentOperation(operationId),
+        () => _delegate.retryFailedPermanentOperation(
+          operationId,
+          allowProtocolConflictOverride: allowProtocolConflictOverride,
+        ),
       );
 
   @override
@@ -832,6 +851,7 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     int? price,
     String? categoryId,
     String? barcode,
+    bool clearBarcode = false,
     String? stockUnit,
     String? pricingUnit,
     int? conversionFactorNumerator,
@@ -848,6 +868,7 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
           price: price,
           categoryId: categoryId,
           barcode: barcode,
+          clearBarcode: clearBarcode,
           stockUnit: stockUnit,
           pricingUnit: pricingUnit,
           conversionFactorNumerator: conversionFactorNumerator,
@@ -874,18 +895,25 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     required String productId,
     required String barcode,
     bool isPrimary = false,
+    String? deviceId,
   }) =>
       _service.runOperation(
         () => _delegate.addProductBarcode(
           productId: productId,
           barcode: barcode,
           isPrimary: isPrimary,
+          deviceId: deviceId,
         ),
       );
 
   @override
-  Future<void> removeProductBarcode(String barcodeId) =>
-      _service.runOperation(() => _delegate.removeProductBarcode(barcodeId));
+  Future<void> removeProductBarcode(
+    String barcodeId, {
+    String? deviceId,
+  }) =>
+      _service.runOperation(
+        () => _delegate.removeProductBarcode(barcodeId, deviceId: deviceId),
+      );
 
   @override
   Future<List<LocalPriceHistoryData>> getPriceHistory(String productId) =>
@@ -916,6 +944,18 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
   @override
   Future<Set<String>> productIdsWithUnsyncedStockChanges() =>
       _service.runOperation(() => _delegate.productIdsWithUnsyncedStockChanges());
+
+  @override
+  Future<Set<String>> productIdsWithPendingCatalogChanges() =>
+      _service.runOperation(() => _delegate.productIdsWithPendingCatalogChanges());
+
+  @override
+  Future<Map<String, ProductCatalogSyncStatus>> getCatalogSyncStatusByProduct() =>
+      _service.runOperation(() => _delegate.getCatalogSyncStatusByProduct());
+
+  @override
+  Future<ProductCatalogSyncStatus> getProductCatalogSyncStatus(String productId) =>
+      _service.runOperation(() => _delegate.getProductCatalogSyncStatus(productId));
 
   @override
   Future<List<LocalStockMovement>> getStockMovements({
@@ -994,6 +1034,69 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
       );
 
   @override
+  Future<DashboardProductSummary> getDashboardProductSummary({
+    int criticalStockThresholdMilli = 5000,
+    int previewLimit = 8,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getDashboardProductSummary(
+          criticalStockThresholdMilli: criticalStockThresholdMilli,
+          previewLimit: previewLimit,
+        ),
+      );
+
+  @override
+  Future<DashboardSalesSummary> getDashboardSalesSummary({
+    required DateTime todayStart,
+    int trendDays = 7,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getDashboardSalesSummary(
+          todayStart: todayStart,
+          trendDays: trendDays,
+        ),
+      );
+
+  @override
+  Future<Map<String, int>> getRefundTotalsBySaleIds(
+    Iterable<String> saleIds,
+  ) =>
+      _service.runOperation(
+        () => _delegate.getRefundTotalsBySaleIds(saleIds),
+      );
+
+  @override
   Future<void> clearStoredHubConnection() =>
       _service.runOperation(() => _delegate.clearStoredHubConnection());
+
+  @override
+  Future<String?> getStoredRestoreEpoch(String deviceId) =>
+      _service.runOperation(() => _delegate.getStoredRestoreEpoch(deviceId));
+
+  @override
+  Future<void> saveStoredRestoreEpoch(String deviceId, String restoreEpoch) =>
+      _service.runOperation(
+        () => _delegate.saveStoredRestoreEpoch(deviceId, restoreEpoch),
+      );
+
+  @override
+  Future<List<OutboxOperation>> getSyncedOutboxOperations(
+    String deviceId, {
+    int afterSeq = 0,
+  }) =>
+      _service.runOperation(
+        () => _delegate.getSyncedOutboxOperations(deviceId, afterSeq: afterSeq),
+      );
+
+  @override
+  Future<int> requeueOperationsForPostRestore({
+    required String deviceId,
+    required List<int> missingSeqs,
+  }) =>
+      _service.runOperation(
+        () => _delegate.requeueOperationsForPostRestore(
+          deviceId: deviceId,
+          missingSeqs: missingSeqs,
+        ),
+      );
 }

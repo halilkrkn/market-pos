@@ -24,6 +24,8 @@ class _FakeDriveServer {
   final Map<String, Uint8List> files = <String, Uint8List>{};
   final Map<String, Map<String, dynamic>> meta = <String, Map<String, dynamic>>{};
   final Map<String, String> uploadSessions = <String, String>{};
+  bool rejectNextUploadPutWith401 = false;
+  final List<String?> putAuthHeaders = <String?>[];
   int _seq = 0;
 
   http.Client createClient() => MockClient((req) async {
@@ -75,6 +77,14 @@ class _FakeDriveServer {
         }
 
         if (req.method == 'PUT' && req.url.path == '/upload/drive/v3/files') {
+          putAuthHeaders.add(req.headers['authorization']);
+          if (rejectNextUploadPutWith401) {
+            rejectNextUploadPutWith401 = false;
+            return http.Response(
+              jsonEncode({'error': 'invalid_token'}),
+              401,
+            );
+          }
           final sessionId = req.url.queryParameters['session']!;
           final initMeta = jsonDecode(uploadSessions[sessionId]!) as Map<String, dynamic>;
           final fileId = 'drive_file_${++_seq}';
@@ -114,8 +124,21 @@ class _FakeDriveServer {
 }
 
 class _FixedDriveToken implements DriveAccessTokenProvider {
+  int calls = 0;
+  int forcedRefreshes = 0;
+  final List<bool> forceRefreshHistory = <bool>[];
+  String _currentToken = 'ya29.fake-1';
+
   @override
-  Future<String> accessToken({bool forceRefresh = false}) async => 'ya29.fake';
+  Future<String> accessToken({bool forceRefresh = false}) async {
+    calls++;
+    forceRefreshHistory.add(forceRefresh);
+    if (forceRefresh) {
+      forcedRefreshes++;
+      _currentToken = 'ya29.fake-${forcedRefreshes + 1}';
+    }
+    return _currentToken;
+  }
 }
 
 void main() {
@@ -391,6 +414,54 @@ void main() {
         httpClient.close();
         if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
       });
+    });
+
+    test('AUD-LOW-02: _FixedDriveToken forceRefresh=false/true ayrımını uygular ve 401 sonrası token yeniler', () async {
+      final tokenProvider = _FixedDriveToken();
+      final initial = await tokenProvider.accessToken(forceRefresh: false);
+      final cached = await tokenProvider.accessToken(forceRefresh: false);
+      expect(cached, equals(initial));
+
+      final tempDir = Directory.systemTemp.createTempSync('mms_drive_refresh_');
+      addTearDown(() {
+        if (tempDir.existsSync()) tempDir.deleteSync(recursive: true);
+      });
+
+      final dummyDb = LocalDatabaseService.forTesting(
+        NativeDatabase.memory(),
+        path: p.join(tempDir.path, 'refresh.db'),
+      );
+      addTearDown(() async => dummyDb.close());
+      final backupService = ClientBackupService(
+        dbService: dummyDb,
+        backupRootDir: Directory(p.join(tempDir.path, 'backups')),
+        readSetupConfig: () => setup,
+        kdfIterations: 1000,
+        databaseTypeOverride: DatabaseType.clientLocal,
+      );
+      await backupService.createEncryptedBackup(password: 'Low02-RefreshTest-2026!');
+      final localInfo = (await backupService.listBackups()).single;
+
+      final fakeDrive = _FakeDriveServer()..rejectNextUploadPutWith401 = true;
+      final httpClient = fakeDrive.createClient();
+      addTearDown(httpClient.close);
+
+      final uploader = GoogleDriveBackupUploader(
+        tokenProvider: tokenProvider,
+        httpClient: httpClient,
+        ledger: DriveUploadLedger(File(p.join(tempDir.path, 'ledger.json'))),
+      );
+      final res = await uploader.upload(
+        backupFile: localInfo.file,
+        manifest: localInfo.manifest,
+      );
+      expect(res.driveFileId, isNotEmpty);
+      expect(fakeDrive.putAuthHeaders.length, greaterThanOrEqualTo(2));
+      expect(fakeDrive.putAuthHeaders.first, equals('Bearer $initial'));
+      expect(
+        fakeDrive.putAuthHeaders.last,
+        isNot(equals(fakeDrive.putAuthHeaders.first)),
+      );
     });
   });
 }

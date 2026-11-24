@@ -1088,7 +1088,11 @@ class DevicePairingClient {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map<String, dynamic>) return decoded;
-    } catch (_) {}
+    } catch (e) {
+      debugPrint(
+        '[DevicePairingClient] Hub JSON yanıtı ayrıştırılamadı: ${e.runtimeType}',
+      );
+    }
     return <String, dynamic>{};
   }
 }

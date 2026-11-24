@@ -4,10 +4,10 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
-import 'backup_crypto.dart';
 import 'backup_manifest.dart';
 import 'backup_storage_provider.dart';
 import 'database_backup_engine.dart';
+import 'mmsbak_v2_crypto.dart';
 import 'scheduled_backup.dart';
 
 /// Hedef dosyaya bayt yazan fonksiyon (testlerde disk dolu / aygıt çıkarıldı enjeksiyonu).
@@ -66,24 +66,9 @@ class BackupFileTransfer {
     }
   }
 
-  /// Paketin parola olmadan doğrulanabilen yapısını kontrol eder ve manifesti döner.
+  /// Paketin parola olmadan doğrulanabilen yapısını kontrol eder (`MMSBAK01` / `MMSBAK02`) ve manifesti döner.
   static BackupManifest verifyPackageStructure(Uint8List bytes) {
-    final BackupManifest manifest;
-    try {
-      manifest = BackupCryptoService.extractManifestWithoutDecryption(bytes);
-    } catch (e) {
-      throw const BackupException('ERR_CORRUPT_BACKUP', 'Dosya geçerli bir MMS yedeği değil veya başlığı bozuk.');
-    }
-    final manifestLen = (bytes[8] << 24) | (bytes[9] << 16) | (bytes[10] << 8) | bytes[11];
-    // [Header 8][Len 4][Manifest N][Salt 16][IV 16][Ciphertext C][HMAC 32]
-    final expected = 12 + manifestLen + 16 + 16 + manifest.encryptedSizeBytes + 32;
-    if (manifest.encryptedSizeBytes <= 0 || bytes.length != expected) {
-      throw BackupException(
-        'ERR_INCOMPLETE_BACKUP',
-        'Yedek dosyası eksik veya yarım kopyalanmış (beklenen $expected bayt, bulunan ${bytes.length}).',
-      );
-    }
-    return manifest;
+    return MmsbakV2Crypto.verifyBytesStructure(bytes).manifest;
   }
 
   static Future<BackupPackageInfo> importFromFile({
@@ -139,7 +124,7 @@ class BackupFileTransfer {
     try {
       if (await f.exists()) await f.delete();
     } on FileSystemException catch (e) {
-      stderr.writeln('[BackupFileTransfer] Geçici dosya silinemedi (${f.path}): ${e.message}');
+      stderr.writeln('[BackupFileTransfer] Geçici dosya silinemedi (${p.basename(f.path)}): ${e.message}');
     }
   }
 }

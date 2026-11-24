@@ -119,7 +119,7 @@ Write-Host "  -> Izin matrisi basariyla uygulandi." -ForegroundColor Green
 
 # 7. Bildirimsel SID Denetimi (Self-Check)
 Write-Host "[7/7] Bildirimsel SID denetimi yapiliyor..." -ForegroundColor Yellow
-$criticalPaths = @("$BaseDir\data", "$BaseDir\config", "$BaseDir\certs", "$BaseDir\security", "$BaseDir\run", "$BaseDir\logs", "$BaseDir\lib")
+$criticalPaths = @("$BaseDir\data", "$BaseDir\config", "$BaseDir\certs", "$BaseDir\security", "$BaseDir\backups", "$BaseDir\run", "$BaseDir\logs", "$BaseDir\lib")
 foreach ($p in $criticalPaths) {
     $acl = Get-Acl -Path $p
     foreach ($access in $acl.Access) {
@@ -129,7 +129,7 @@ foreach ($p in $criticalPaths) {
         }
     }
 }
-Write-Host "  -> Tum kritik dizinler (data, config, certs, security, run, logs) standart kullanici erisimine basariyla kapatildi!" -ForegroundColor Green
+Write-Host "  -> Tum kritik dizinler (data, config, certs, security, backups, run, logs, lib) standart kullanici erisimine basariyla kapatildi!" -ForegroundColor Green
 
 Write-Host "====================================================" -ForegroundColor Cyan
 Write-Host "Market MMS NTFS ACL Yapilandirmasi Tamamlandi!" -ForegroundColor Green

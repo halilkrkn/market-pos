@@ -17,6 +17,7 @@ import 'package:mms_client_storage/mms_client_storage.dart'
         constantTimeEqualsAscii,
         encodeDerCertificateAsPem,
         extractCanonicalSingleCertDer;
+import 'hex_fingerprint_normalizer.dart';
 
 /// B-2 Certificate Pinning yapılandırma modeli.
 class PinnedTlsConfig {
@@ -30,9 +31,8 @@ class PinnedTlsConfig {
 
   String get normalizedExpectedSha256 => normalizeHex(expectedSha256Hex);
 
-  static String normalizeHex(String raw) {
-    return raw.replaceAll(':', '').replaceAll(' ', '').trim().toUpperCase();
-  }
+  static String normalizeHex(String raw) =>
+      HexFingerprintNormalizer.normalizeHex(raw);
 }
 
 /// B-2 Kök CA ve SHA-256 sertifika sabitlemeli `http.Client` fabrikası.

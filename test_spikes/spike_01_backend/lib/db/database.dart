@@ -30,6 +30,20 @@ class Products extends Table {
   List<Set<Column>> get uniqueKeys => [{barcode}];
 }
 
+/// v4 (GAP-A01): Ürün başına çoklu/ikincil barkod yaşam döngüsü tablosu.
+/// Bir barkod Hub genelinde yalnızca tek bir ürüne ait olabilir (`unique`).
+class ProductBarcodes extends Table {
+  TextColumn get id => text()();
+  TextColumn get productId => text().references(Products, #id)();
+  TextColumn get barcode => text().unique()();
+  BoolColumn get isPrimary => boolean().withDefault(const Constant(false))();
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 class Sales extends Table {
   TextColumn get id => text()();
   TextColumn get deviceId => text()();
@@ -200,7 +214,7 @@ class CheckpointResult {
   String toString() => 'CheckpointResult(busy: $busy, log: $log, checkpointed: $checkpointed, isSuccess: $isSuccess)';
 }
 
-@DriftDatabase(tables: [Products, Sales, SaleItems, StockMovements, ProcessedOperations, Devices, DeviceAuditLogs, ProductPriceHistories, ProductSyncSessions, Refunds, RefundItems, HubMetadata])
+@DriftDatabase(tables: [Products, ProductBarcodes, Sales, SaleItems, StockMovements, ProcessedOperations, Devices, DeviceAuditLogs, ProductPriceHistories, ProductSyncSessions, Refunds, RefundItems, HubMetadata])
 class SpikeDatabase extends _$SpikeDatabase {
   SpikeDatabase(File file) : super(_openConnection(file));
 
@@ -222,7 +236,7 @@ class SpikeDatabase extends _$SpikeDatabase {
   }
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -230,6 +244,7 @@ class SpikeDatabase extends _$SpikeDatabase {
           await m.createAll();
           await _ensureLegacySalesAndRefundTables();
           await _upgradeV1ToV2();
+          await _ensureV4ProductBarcodesTable();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -238,6 +253,9 @@ class SpikeDatabase extends _$SpikeDatabase {
           }
           if (from < 3) {
             await _ensureV3StockMovementColumns();
+          }
+          if (from < 4) {
+            await _ensureV4ProductBarcodesTable();
           }
         },
         beforeOpen: (details) async {
@@ -261,8 +279,33 @@ class SpikeDatabase extends _$SpikeDatabase {
           await _ensureLegacySalesAndRefundTables();
           await _ensureV2SchemaAndIndexes();
           await _ensureV3StockMovementColumns();
+          await _ensureV4ProductBarcodesTable();
         },
       );
+
+  /// Hub v3 -> v4 (GAP-A01): Çoklu/ikincil barkodlar için additive, veri koruyucu
+  /// migration. Mevcut `products.barcode` değerlerini kaybetmeden `product_barcodes`
+  /// tablosuna backfill eder.
+  Future<void> _ensureV4ProductBarcodesTable() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS product_barcodes (
+        id TEXT NOT NULL PRIMARY KEY,
+        product_id TEXT NOT NULL REFERENCES products(id),
+        barcode TEXT NOT NULL UNIQUE,
+        is_primary INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+      );
+    ''');
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_product_barcodes_product ON product_barcodes(product_id, is_active);',
+    );
+    await customStatement(
+      'INSERT OR IGNORE INTO product_barcodes (id, product_id, barcode, is_primary, is_active, created_at) '
+      "SELECT 'bc_' || id || '_primary', id, TRIM(barcode), 1, 1, COALESCE(updated_at, strftime('%s', 'now')) "
+      "FROM products WHERE barcode IS NOT NULL AND TRIM(barcode) != '';",
+    );
+  }
 
   /// Hub v2 -> v3 (Owner onayı 21 Kasım 2026): STOCK_RECEIPT için additive, veri koruyucu
   /// sütunlar. DROP/RECREATE yapmaz; restore edilen eski yedeklerde de idempotent çalışır.

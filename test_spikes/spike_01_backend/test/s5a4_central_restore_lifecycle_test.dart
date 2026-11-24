@@ -96,16 +96,17 @@ void main() {
 
   group('Aşama S-5A-4: Merkezi Sunucu (market_master.db) Restore ve Yaşam Döngüsü', () {
     test('1. Merkezi Restore Sırasında AdmissionGate 503 Engellemesi, WriteQueue Dondurma ve Güvenli Yeniden Açılış', () async {
-      // 1. Durum A: 100 stok var iken şifreli bir yedek oluştur
+      // 1. Durum A: 100 stok var iken kayıtlı kurtarma parolasıyla şifreli bir yedek oluştur (S2)
+      await server.hubRecoveryKeyStore.saveRecoveryPassword(
+        'Mms_Master_Backup_Password_2026!',
+      );
       final backupResp = await http.post(
         Uri.parse('$baseUrl/api/v1/admin/backup'),
         headers: {
           'x-mms-admin-secret': adminSecret,
           'content-type': 'application/json',
         },
-        body: jsonEncode({
-          'backup_password': 'Mms_Master_Backup_Password_2026!',
-        }),
+        body: jsonEncode(const <String, dynamic>{}),
       );
 
       expect(backupResp.statusCode, equals(200));

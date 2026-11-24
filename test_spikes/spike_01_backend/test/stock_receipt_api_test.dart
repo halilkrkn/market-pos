@@ -95,6 +95,7 @@ void main() {
       db: db,
       writeQueue: writeQueue,
       dbFile: dbFile,
+      backupDirectory: p.join(tempDir.path, 'backups'),
       pepperManager: pepperManager,
       requireTls: false,
       requireTenantStoreHeaders: true,

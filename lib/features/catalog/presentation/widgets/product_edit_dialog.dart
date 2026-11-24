@@ -12,6 +12,7 @@ import '../../../pos/domain/money.dart';
 import '../../catalog_providers.dart';
 import '../../domain/external_product_suggestion.dart';
 import 'external_product_suggestion_card.dart';
+import 'product_barcodes_dialog.dart';
 
 class ProductEditDialog extends ConsumerStatefulWidget {
   final LocalProduct? product;
@@ -182,7 +183,9 @@ class _ProductEditDialogState extends ConsumerState<ProductEditDialog> {
           _existingBarcodeProduct = null;
         }
       });
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[ProductEditDialog] Yerel barkod ön kontrolü atlandı: ${e.runtimeType}');
+    }
   }
 
   Future<void> _handleCameraBarcodeScan() async {
@@ -275,14 +278,16 @@ class _ProductEditDialogState extends ConsumerState<ProductEditDialog> {
 
     bool success;
     if (isEditing) {
+      final trimmedBarcode = _barcodeController.text.trim();
+      final hadPrimaryBarcode =
+          (widget.product!.barcode?.trim().isNotEmpty ?? false);
       success = await ref.read(catalogProvider.notifier).updateProduct(
             id: widget.product!.id,
             name: _nameController.text.trim(),
             price: parsedPriceCents,
             categoryId: _selectedCategoryId,
-            barcode: _barcodeController.text.trim().isEmpty
-                ? null
-                : _barcodeController.text.trim(),
+            barcode: trimmedBarcode.isEmpty ? null : trimmedBarcode,
+            clearBarcode: hadPrimaryBarcode && trimmedBarcode.isEmpty,
             stockUnit: _selectedStockUnit,
             pricingUnit: _selectedStockUnit,
             vatRate: _selectedVatRate,
@@ -578,6 +583,24 @@ class _ProductEditDialogState extends ConsumerState<ProductEditDialog> {
                 ),
               const SizedBox(height: MmsSpacing.sm),
               barcodeActionRow,
+              if (isEditing) ...[
+                const SizedBox(height: MmsSpacing.sm),
+                AppButton(
+                  key: const Key('product_manage_secondary_barcodes_button'),
+                  label: 'İkincil Barkodları Yönet',
+                  icon: Icons.qr_code_2_rounded,
+                  variant: AppButtonVariant.secondary,
+                  minHeight: 48,
+                  expand: true,
+                  onPressed: _isSubmitting
+                      ? null
+                      : () => showDialog<void>(
+                            context: context,
+                            builder: (_) =>
+                                ProductBarcodesDialog(productId: widget.product!.id),
+                          ),
+                ),
+              ],
               if (_externalSuggestion != null) ...[
                 const SizedBox(height: MmsSpacing.sm),
                 ExternalProductSuggestionCard(

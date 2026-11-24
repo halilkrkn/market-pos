@@ -167,8 +167,8 @@ class _BackupManagementCardState extends ConsumerState<BackupManagementCard> {
 
     return DiagnosticsSectionCard(
       key: const Key('diagnostics_backup_card'),
-      title: 'Şifreli Yedekleme ve Kurtarma (S5A-4)',
-      subtitle: 'AES-256-CBC · PBKDF2-HMAC-SHA256 (600.000 tur) · HMAC doğrulama',
+      title: 'Legacy Yerel Cihaz Yedeği (S5A-4)',
+      subtitle: 'Yerel SQLite dosyası için AES-256-CBC · PBKDF2-HMAC-SHA256',
       trailing: const AppBadge(
         label: 'AES-256 + HMAC',
         tone: AppBadgeTone.info,
