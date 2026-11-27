@@ -340,7 +340,9 @@ void main() {
       expect(aclScript, contains('"lib"'));
       expect(aclScript, contains(r'$BaseDir\lib'));
       expect(aclScript, contains(r'$BaseDir\security'));
-      expect(aclScript, contains(r'${sidTarget}:(OI)(CI)M'));
+      expect(aclScript, contains('"M" { "(OI)(CI)M" }'));
+      expect(aclScript, contains(r'${sidTarget}:${svcSpec}'));
+      expect(aclScript, contains('[System.Security.AccessControl.FileSystemRights]::Modify'));
     });
 
     test('ADR-015 H-3 & M-1: --config ile başlatılan başlangıç akışı ADMIN_SECRET ve ROOT_CA_CERT_FILE env sızıntısını reddeder; eksik backup_dir System32 yerine config/backups olur', () async {

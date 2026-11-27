@@ -116,8 +116,12 @@ void main() {
           reason: 'ACL betiği reparse point denetimini en başta yapmalıdır.');
       expect(aclContent, contains('[2/7] ca.key dosya taramasi'),
           reason: 'ACL betiği ca.key kontrolünü içermelidir.');
-      expect(aclContent, contains('NT SERVICE\\\$ServiceName'),
+      expect(aclContent, contains(r'[string]$ServiceName = "MarketMMSService"'),
+          reason: 'ACL betiği varsayılan MarketMMSService parametresini içermelidir.');
+      expect(aclContent, contains(r'NT SERVICE\$TargetServiceName'),
           reason: 'ACL betiği Service SID tanımlarını içermelidir.');
+      expect(aclContent, contains(r'sc.exe showsid $TargetServiceName'),
+          reason: 'ACL betiği deterministik sc.exe showsid fallback içermelidir.');
     });
 
     test('5. S5A-1 Kurulum Betikleri PowerShell AST Ayrıştırmasından Hatasız Geçmelidir', () {
