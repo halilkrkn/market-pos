@@ -202,23 +202,58 @@ try {
 
     Set-Content -Path $payloadWxsPath -Value $sb.ToString() -Encoding UTF8
 
-    # 6. dotnet build ile WiX MSI derle
+    # 6. dotnet build ile izole gecici obj/bin dizininde WiX MSI derle (NTFS hardlink izolasyonu)
     $outTarget = if ([System.IO.Path]::IsPathRooted($OutputDir)) { $OutputDir } else { Join-Path $repoRoot $OutputDir }
     if (-not (Test-Path $outTarget)) { New-Item -ItemType Directory -Path $outTarget -Force | Out-Null }
 
     $wixProj = Join-Path $wixDir "MarketMMSInstaller.wixproj"
-    & dotnet build $wixProj -c $Configuration "-p:MmsVersion=$appVersion" "-p:MmsStagingDir=$StagingDir" "-p:GeneratedPayloadWxs=$payloadWxsPath" "-p:OutputPath=$outTarget"
-    if ($LASTEXITCODE -ne 0) {
-        throw "WiX MSI derlemesi basarisiz oldu ($LASTEXITCODE)."
-    }
+    $wixTempRoot = Join-Path $env:TEMP ("mms_wix_build_" + [guid]::NewGuid().ToString("N"))
+    $wixObjDir = ((Join-Path $wixTempRoot "obj") -replace '\\', '/') + "/"
+    $wixBinDir = ((Join-Path $wixTempRoot "bin") -replace '\\', '/') + "/"
+    $wixOutBuildDir = Join-Path $wixTempRoot "out"
+    New-Item -ItemType Directory -Path $wixOutBuildDir -Force | Out-Null
 
-    $expectedMsi = Join-Path $outTarget ("MarketMMS-Setup-{0}-x64.msi" -f $appVersion)
-    if (-not (Test-Path $expectedMsi)) {
-        $found = Get-ChildItem -Path $outTarget -Recurse -Filter "*.msi" | Select-Object -First 1
-        if ($found) {
-            Copy-Item -Path $found.FullName -Destination $expectedMsi -Force
-        } else {
-            throw "Beklenen MSI paketi uretilemedi: $expectedMsi"
+    try {
+        & dotnet build $wixProj -c $Configuration `
+            "-p:MmsVersion=$appVersion" `
+            "-p:MmsStagingDir=$StagingDir" `
+            "-p:GeneratedPayloadWxs=$payloadWxsPath" `
+            "-p:BaseIntermediateOutputPath=$wixObjDir" `
+            "-p:BaseOutputPath=$wixBinDir" `
+            "-p:CreateHardLinksForCopyFilesToOutputDirectoryIfPossible=false" `
+            "-p:CreateHardLinksForAdditionalFilesIfPossible=false" `
+            "-p:CreateHardLinksForPublishFilesIfPossible=false" `
+            "-p:OutputPath=$wixOutBuildDir"
+        if ($LASTEXITCODE -ne 0) {
+            throw "WiX MSI derlemesi basarisiz oldu ($LASTEXITCODE)."
+        }
+
+        $builtMsi = Join-Path $wixOutBuildDir ("MarketMMS-Setup-{0}-x64.msi" -f $appVersion)
+        if (-not (Test-Path -LiteralPath $builtMsi)) {
+            $found = Get-ChildItem -Path $wixTempRoot -Recurse -Filter "*.msi" | Select-Object -First 1
+            if ($found) {
+                $builtMsi = $found.FullName
+            } else {
+                throw "Beklenen MSI paketi uretilemedi: $builtMsi"
+            }
+        }
+
+        $expectedMsi = Join-Path $outTarget ("MarketMMS-Setup-{0}-x64.msi" -f $appVersion)
+        $expectedPdb = Join-Path $outTarget ("MarketMMS-Setup-{0}-x64.wixpdb" -f $appVersion)
+        foreach ($oldTarget in @($expectedMsi, $expectedPdb)) {
+            if (Test-Path -LiteralPath $oldTarget) {
+                Remove-Item -LiteralPath $oldTarget -Force
+            }
+        }
+        [System.IO.File]::Copy($builtMsi, $expectedMsi, $true)
+
+        $builtPdb = [System.IO.Path]::ChangeExtension($builtMsi, ".wixpdb")
+        if (Test-Path -LiteralPath $builtPdb) {
+            [System.IO.File]::Copy($builtPdb, $expectedPdb, $true)
+        }
+    } finally {
+        if (Test-Path -LiteralPath $wixTempRoot) {
+            Remove-Item -Path $wixTempRoot -Recurse -Force -ErrorAction SilentlyContinue
         }
     }
 
