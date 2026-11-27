@@ -19,6 +19,7 @@ import 'features/diagnostics/application/system_status_notifier.dart';
 import 'features/security/data/device_pairing_client.dart';
 import 'features/setup/data/local_setup_config_store.dart';
 import 'features/setup/setup_providers.dart';
+import 'features/shell/presentation/windows/windows_tray_providers.dart';
 import 'features/sync/application/hub_connection_notifier.dart';
 import 'features/sync/data/drive_authorized_registry_store.dart';
 import 'features/sync/sync_providers.dart';
@@ -138,6 +139,8 @@ Future<void> main() async {
         hubAutoDiscoveryLifecycleEnabledProvider
             .overrideWithValue(autoDiscoveryEnabled),
         backupAutoScheduleLifecycleEnabledProvider.overrideWithValue(true),
+        windowsTrayLifecycleEnabledProvider
+            .overrideWithValue(Platform.isWindows),
         themePreferenceStoreProvider.overrideWithValue(themeStore),
         initialThemeModeProvider.overrideWithValue(initialThemeMode),
         driveAuthorizedRegistryStoreProvider.overrideWithValue(registryStore),

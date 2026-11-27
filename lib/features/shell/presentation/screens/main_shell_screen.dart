@@ -6,16 +6,21 @@ import '../../../../core/theme/design_tokens.dart';
 import '../../../backup/backup_providers.dart';
 import '../../../catalog/presentation/screens/catalog_screen.dart';
 import '../../../dashboard/presentation/screens/dashboard_screen.dart';
+import '../../../diagnostics/application/system_status_notifier.dart';
 import '../../../diagnostics/presentation/screens/diagnostics_view.dart';
 import '../../../pos/presentation/screens/pos_screen.dart';
 import '../../../sales/presentation/screens/sales_history_screen.dart';
 import '../../../setup/presentation/widgets/first_setup_wizard_dialog.dart';
 import '../../../setup/setup_providers.dart';
 import '../../../stock/presentation/screens/stock_screen.dart';
+import '../../../sync/application/hub_connection_notifier.dart';
+import '../../../sync/sync_providers.dart';
 import '../../domain/app_destination.dart';
 import '../../shell_providers.dart';
 import '../widgets/desktop_shell_layout.dart';
 import '../widgets/mobile_shell_layout.dart';
+import '../windows/windows_tray_models.dart';
+import '../windows/windows_tray_providers.dart';
 
 /// MARKET MMS — Platform ve Pencere Sınıfı Duyarlı Uygulama İskeleti.
 ///
@@ -31,6 +36,19 @@ class MainShellScreen extends ConsumerWidget {
     final uiProfile = ref.watch(mmsUiProfileProvider);
     if (ref.watch(backupAutoScheduleLifecycleEnabledProvider)) {
       ref.watch(backupScheduleControllerProvider);
+    }
+    if (ref.watch(windowsTrayLifecycleEnabledProvider)) {
+      ref.watch(windowsTrayControllerProvider);
+      final traySnapshot = WindowsTrayStatusFormatter.format(
+        systemStatus: ref.watch(systemStatusProvider),
+        hubConnection: ref.watch(hubConnectionProvider),
+        syncState: ref.watch(backgroundSyncCoordinatorProvider),
+        backupState: ref.watch(backupScheduleControllerProvider),
+      );
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!context.mounted) return;
+        ref.read(windowsTrayControllerProvider.notifier).pushStatus(traySnapshot);
+      });
     }
     final selectedDestination = ref.watch(activeDestinationProvider);
     final windowClass = context.windowClass;

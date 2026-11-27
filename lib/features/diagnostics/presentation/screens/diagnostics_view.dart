@@ -11,6 +11,7 @@ import '../../../backup/presentation/widgets/hub_central_backup_card.dart';
 import '../../../security/presentation/widgets/device_security_card.dart';
 import '../../../security/presentation/widgets/pairing_approval_panel.dart';
 import '../../../setup/presentation/widgets/store_setup_card.dart';
+import '../../../shell/presentation/windows/windows_desktop_settings_card.dart';
 import '../../../sync/application/hub_connection_notifier.dart';
 import '../../../sync/domain/hub_connection_state.dart';
 import '../../../sync/domain/sync_coordinator_state.dart';
@@ -67,6 +68,12 @@ class DiagnosticsView extends ConsumerWidget {
             // 1. Kart: Görünüm ve Tema Ayarları (Light / Dark / System)
             _buildAppearanceCard(context, ref, themeMode),
             const SizedBox(height: MmsSpacing.md),
+
+            // 1.1 Kart (yalnızca Windows masaüstü): Sistem Tepsisi ve Otomatik Başlatma
+            if (ref.watch(mmsUiProfileProvider).isDesktop) ...[
+              const WindowsDesktopSettingsCard(),
+              const SizedBox(height: MmsSpacing.md),
+            ],
 
             // 2. Kart: Merkezi Shelf Backend (Hub) Durumu
             _buildHubCard(context, status, hubConnection),
