@@ -3,6 +3,355 @@
 part of 'database.dart';
 
 // ignore_for_file: type=lint
+class $CategoriesTable extends Categories
+    with TableInfo<$CategoriesTable, Category> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CategoriesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+      'id', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+      'name', aliasedName, false,
+      type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _parentIdMeta =
+      const VerificationMeta('parentId');
+  @override
+  late final GeneratedColumn<String> parentId = GeneratedColumn<String>(
+      'parent_id', aliasedName, true,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('REFERENCES categories (id)'));
+  static const VerificationMeta _isActiveMeta =
+      const VerificationMeta('isActive');
+  @override
+  late final GeneratedColumn<bool> isActive = GeneratedColumn<bool>(
+      'is_active', aliasedName, false,
+      type: DriftSqlType.bool,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('CHECK ("is_active" IN (0, 1))'),
+      defaultValue: const Constant(true));
+  static const VerificationMeta _createdAtMeta =
+      const VerificationMeta('createdAt');
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+      'created_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  static const VerificationMeta _updatedAtMeta =
+      const VerificationMeta('updatedAt');
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+      'updated_at', aliasedName, false,
+      type: DriftSqlType.dateTime,
+      requiredDuringInsert: false,
+      defaultValue: currentDateAndTime);
+  @override
+  List<GeneratedColumn> get $columns =>
+      [id, name, parentId, isActive, createdAt, updatedAt];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'categories';
+  @override
+  VerificationContext validateIntegrity(Insertable<Category> instance,
+      {bool isInserting = false}) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+          _nameMeta, name.isAcceptableOrUnknown(data['name']!, _nameMeta));
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('parent_id')) {
+      context.handle(_parentIdMeta,
+          parentId.isAcceptableOrUnknown(data['parent_id']!, _parentIdMeta));
+    }
+    if (data.containsKey('is_active')) {
+      context.handle(_isActiveMeta,
+          isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(_createdAtMeta,
+          createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta));
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(_updatedAtMeta,
+          updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta));
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  Category map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return Category(
+      id: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}id'])!,
+      name: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
+      parentId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}parent_id']),
+      isActive: attachedDatabase.typeMapping
+          .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
+      createdAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}created_at'])!,
+      updatedAt: attachedDatabase.typeMapping
+          .read(DriftSqlType.dateTime, data['${effectivePrefix}updated_at'])!,
+    );
+  }
+
+  @override
+  $CategoriesTable createAlias(String alias) {
+    return $CategoriesTable(attachedDatabase, alias);
+  }
+}
+
+class Category extends DataClass implements Insertable<Category> {
+  final String id;
+  final String name;
+  final String? parentId;
+  final bool isActive;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  const Category(
+      {required this.id,
+      required this.name,
+      this.parentId,
+      required this.isActive,
+      required this.createdAt,
+      required this.updatedAt});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['name'] = Variable<String>(name);
+    if (!nullToAbsent || parentId != null) {
+      map['parent_id'] = Variable<String>(parentId);
+    }
+    map['is_active'] = Variable<bool>(isActive);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  CategoriesCompanion toCompanion(bool nullToAbsent) {
+    return CategoriesCompanion(
+      id: Value(id),
+      name: Value(name),
+      parentId: parentId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(parentId),
+      isActive: Value(isActive),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory Category.fromJson(Map<String, dynamic> json,
+      {ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return Category(
+      id: serializer.fromJson<String>(json['id']),
+      name: serializer.fromJson<String>(json['name']),
+      parentId: serializer.fromJson<String?>(json['parentId']),
+      isActive: serializer.fromJson<bool>(json['isActive']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'name': serializer.toJson<String>(name),
+      'parentId': serializer.toJson<String?>(parentId),
+      'isActive': serializer.toJson<bool>(isActive),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  Category copyWith(
+          {String? id,
+          String? name,
+          Value<String?> parentId = const Value.absent(),
+          bool? isActive,
+          DateTime? createdAt,
+          DateTime? updatedAt}) =>
+      Category(
+        id: id ?? this.id,
+        name: name ?? this.name,
+        parentId: parentId.present ? parentId.value : this.parentId,
+        isActive: isActive ?? this.isActive,
+        createdAt: createdAt ?? this.createdAt,
+        updatedAt: updatedAt ?? this.updatedAt,
+      );
+  Category copyWithCompanion(CategoriesCompanion data) {
+    return Category(
+      id: data.id.present ? data.id.value : this.id,
+      name: data.name.present ? data.name.value : this.name,
+      parentId: data.parentId.present ? data.parentId.value : this.parentId,
+      isActive: data.isActive.present ? data.isActive.value : this.isActive,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('Category(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('parentId: $parentId, ')
+          ..write('isActive: $isActive, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(id, name, parentId, isActive, createdAt, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is Category &&
+          other.id == this.id &&
+          other.name == this.name &&
+          other.parentId == this.parentId &&
+          other.isActive == this.isActive &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CategoriesCompanion extends UpdateCompanion<Category> {
+  final Value<String> id;
+  final Value<String> name;
+  final Value<String?> parentId;
+  final Value<bool> isActive;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const CategoriesCompanion({
+    this.id = const Value.absent(),
+    this.name = const Value.absent(),
+    this.parentId = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CategoriesCompanion.insert({
+    required String id,
+    required String name,
+    this.parentId = const Value.absent(),
+    this.isActive = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  })  : id = Value(id),
+        name = Value(name);
+  static Insertable<Category> custom({
+    Expression<String>? id,
+    Expression<String>? name,
+    Expression<String>? parentId,
+    Expression<bool>? isActive,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (name != null) 'name': name,
+      if (parentId != null) 'parent_id': parentId,
+      if (isActive != null) 'is_active': isActive,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CategoriesCompanion copyWith(
+      {Value<String>? id,
+      Value<String>? name,
+      Value<String?>? parentId,
+      Value<bool>? isActive,
+      Value<DateTime>? createdAt,
+      Value<DateTime>? updatedAt,
+      Value<int>? rowid}) {
+    return CategoriesCompanion(
+      id: id ?? this.id,
+      name: name ?? this.name,
+      parentId: parentId ?? this.parentId,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (parentId.present) {
+      map['parent_id'] = Variable<String>(parentId.value);
+    }
+    if (isActive.present) {
+      map['is_active'] = Variable<bool>(isActive.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CategoriesCompanion(')
+          ..write('id: $id, ')
+          ..write('name: $name, ')
+          ..write('parentId: $parentId, ')
+          ..write('isActive: $isActive, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
   @override
   final GeneratedDatabase attachedDatabase;
@@ -24,6 +373,15 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
   late final GeneratedColumn<String> name = GeneratedColumn<String>(
       'name', aliasedName, false,
       type: DriftSqlType.string, requiredDuringInsert: true);
+  static const VerificationMeta _categoryIdMeta =
+      const VerificationMeta('categoryId');
+  @override
+  late final GeneratedColumn<String> categoryId = GeneratedColumn<String>(
+      'category_id', aliasedName, true,
+      type: DriftSqlType.string,
+      requiredDuringInsert: false,
+      defaultConstraints:
+          GeneratedColumn.constraintIsAlways('REFERENCES categories (id)'));
   static const VerificationMeta _priceMeta = const VerificationMeta('price');
   @override
   late final GeneratedColumn<int> price = GeneratedColumn<int>(
@@ -74,6 +432,14 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
           type: DriftSqlType.int,
           requiredDuringInsert: false,
           defaultValue: const Constant(1));
+  static const VerificationMeta _vatRateMeta =
+      const VerificationMeta('vatRate');
+  @override
+  late final GeneratedColumn<int> vatRate = GeneratedColumn<int>(
+      'vat_rate', aliasedName, false,
+      type: DriftSqlType.int,
+      requiredDuringInsert: false,
+      defaultValue: const Constant(20));
   static const VerificationMeta _isActiveMeta =
       const VerificationMeta('isActive');
   @override
@@ -97,6 +463,7 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
         id,
         barcode,
         name,
+        categoryId,
         price,
         priceVersionId,
         stock,
@@ -104,6 +471,7 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
         pricingUnit,
         conversionFactorNumerator,
         conversionFactorDenominator,
+        vatRate,
         isActive,
         updatedAt
       ];
@@ -133,6 +501,12 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
           _nameMeta, name.isAcceptableOrUnknown(data['name']!, _nameMeta));
     } else if (isInserting) {
       context.missing(_nameMeta);
+    }
+    if (data.containsKey('category_id')) {
+      context.handle(
+          _categoryIdMeta,
+          categoryId.isAcceptableOrUnknown(
+              data['category_id']!, _categoryIdMeta));
     }
     if (data.containsKey('price')) {
       context.handle(
@@ -176,6 +550,10 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
               data['conversion_factor_denominator']!,
               _conversionFactorDenominatorMeta));
     }
+    if (data.containsKey('vat_rate')) {
+      context.handle(_vatRateMeta,
+          vatRate.isAcceptableOrUnknown(data['vat_rate']!, _vatRateMeta));
+    }
     if (data.containsKey('is_active')) {
       context.handle(_isActiveMeta,
           isActive.isAcceptableOrUnknown(data['is_active']!, _isActiveMeta));
@@ -203,6 +581,8 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
           .read(DriftSqlType.string, data['${effectivePrefix}barcode'])!,
       name: attachedDatabase.typeMapping
           .read(DriftSqlType.string, data['${effectivePrefix}name'])!,
+      categoryId: attachedDatabase.typeMapping
+          .read(DriftSqlType.string, data['${effectivePrefix}category_id']),
       price: attachedDatabase.typeMapping
           .read(DriftSqlType.int, data['${effectivePrefix}price'])!,
       priceVersionId: attachedDatabase.typeMapping.read(
@@ -219,6 +599,8 @@ class $ProductsTable extends Products with TableInfo<$ProductsTable, Product> {
       conversionFactorDenominator: attachedDatabase.typeMapping.read(
           DriftSqlType.int,
           data['${effectivePrefix}conversion_factor_denominator'])!,
+      vatRate: attachedDatabase.typeMapping
+          .read(DriftSqlType.int, data['${effectivePrefix}vat_rate'])!,
       isActive: attachedDatabase.typeMapping
           .read(DriftSqlType.bool, data['${effectivePrefix}is_active'])!,
       updatedAt: attachedDatabase.typeMapping
@@ -236,6 +618,7 @@ class Product extends DataClass implements Insertable<Product> {
   final String id;
   final String barcode;
   final String name;
+  final String? categoryId;
   final int price;
   final String priceVersionId;
   final int stock;
@@ -243,12 +626,14 @@ class Product extends DataClass implements Insertable<Product> {
   final String pricingUnit;
   final int conversionFactorNumerator;
   final int conversionFactorDenominator;
+  final int vatRate;
   final bool isActive;
   final DateTime updatedAt;
   const Product(
       {required this.id,
       required this.barcode,
       required this.name,
+      this.categoryId,
       required this.price,
       required this.priceVersionId,
       required this.stock,
@@ -256,6 +641,7 @@ class Product extends DataClass implements Insertable<Product> {
       required this.pricingUnit,
       required this.conversionFactorNumerator,
       required this.conversionFactorDenominator,
+      required this.vatRate,
       required this.isActive,
       required this.updatedAt});
   @override
@@ -264,6 +650,9 @@ class Product extends DataClass implements Insertable<Product> {
     map['id'] = Variable<String>(id);
     map['barcode'] = Variable<String>(barcode);
     map['name'] = Variable<String>(name);
+    if (!nullToAbsent || categoryId != null) {
+      map['category_id'] = Variable<String>(categoryId);
+    }
     map['price'] = Variable<int>(price);
     map['price_version_id'] = Variable<String>(priceVersionId);
     map['stock'] = Variable<int>(stock);
@@ -273,6 +662,7 @@ class Product extends DataClass implements Insertable<Product> {
         Variable<int>(conversionFactorNumerator);
     map['conversion_factor_denominator'] =
         Variable<int>(conversionFactorDenominator);
+    map['vat_rate'] = Variable<int>(vatRate);
     map['is_active'] = Variable<bool>(isActive);
     map['updated_at'] = Variable<DateTime>(updatedAt);
     return map;
@@ -283,6 +673,9 @@ class Product extends DataClass implements Insertable<Product> {
       id: Value(id),
       barcode: Value(barcode),
       name: Value(name),
+      categoryId: categoryId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(categoryId),
       price: Value(price),
       priceVersionId: Value(priceVersionId),
       stock: Value(stock),
@@ -290,6 +683,7 @@ class Product extends DataClass implements Insertable<Product> {
       pricingUnit: Value(pricingUnit),
       conversionFactorNumerator: Value(conversionFactorNumerator),
       conversionFactorDenominator: Value(conversionFactorDenominator),
+      vatRate: Value(vatRate),
       isActive: Value(isActive),
       updatedAt: Value(updatedAt),
     );
@@ -302,6 +696,7 @@ class Product extends DataClass implements Insertable<Product> {
       id: serializer.fromJson<String>(json['id']),
       barcode: serializer.fromJson<String>(json['barcode']),
       name: serializer.fromJson<String>(json['name']),
+      categoryId: serializer.fromJson<String?>(json['categoryId']),
       price: serializer.fromJson<int>(json['price']),
       priceVersionId: serializer.fromJson<String>(json['priceVersionId']),
       stock: serializer.fromJson<int>(json['stock']),
@@ -311,6 +706,7 @@ class Product extends DataClass implements Insertable<Product> {
           serializer.fromJson<int>(json['conversionFactorNumerator']),
       conversionFactorDenominator:
           serializer.fromJson<int>(json['conversionFactorDenominator']),
+      vatRate: serializer.fromJson<int>(json['vatRate']),
       isActive: serializer.fromJson<bool>(json['isActive']),
       updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
     );
@@ -322,6 +718,7 @@ class Product extends DataClass implements Insertable<Product> {
       'id': serializer.toJson<String>(id),
       'barcode': serializer.toJson<String>(barcode),
       'name': serializer.toJson<String>(name),
+      'categoryId': serializer.toJson<String?>(categoryId),
       'price': serializer.toJson<int>(price),
       'priceVersionId': serializer.toJson<String>(priceVersionId),
       'stock': serializer.toJson<int>(stock),
@@ -331,6 +728,7 @@ class Product extends DataClass implements Insertable<Product> {
           serializer.toJson<int>(conversionFactorNumerator),
       'conversionFactorDenominator':
           serializer.toJson<int>(conversionFactorDenominator),
+      'vatRate': serializer.toJson<int>(vatRate),
       'isActive': serializer.toJson<bool>(isActive),
       'updatedAt': serializer.toJson<DateTime>(updatedAt),
     };
@@ -340,6 +738,7 @@ class Product extends DataClass implements Insertable<Product> {
           {String? id,
           String? barcode,
           String? name,
+          Value<String?> categoryId = const Value.absent(),
           int? price,
           String? priceVersionId,
           int? stock,
@@ -347,12 +746,14 @@ class Product extends DataClass implements Insertable<Product> {
           String? pricingUnit,
           int? conversionFactorNumerator,
           int? conversionFactorDenominator,
+          int? vatRate,
           bool? isActive,
           DateTime? updatedAt}) =>
       Product(
         id: id ?? this.id,
         barcode: barcode ?? this.barcode,
         name: name ?? this.name,
+        categoryId: categoryId.present ? categoryId.value : this.categoryId,
         price: price ?? this.price,
         priceVersionId: priceVersionId ?? this.priceVersionId,
         stock: stock ?? this.stock,
@@ -362,6 +763,7 @@ class Product extends DataClass implements Insertable<Product> {
             conversionFactorNumerator ?? this.conversionFactorNumerator,
         conversionFactorDenominator:
             conversionFactorDenominator ?? this.conversionFactorDenominator,
+        vatRate: vatRate ?? this.vatRate,
         isActive: isActive ?? this.isActive,
         updatedAt: updatedAt ?? this.updatedAt,
       );
@@ -370,6 +772,8 @@ class Product extends DataClass implements Insertable<Product> {
       id: data.id.present ? data.id.value : this.id,
       barcode: data.barcode.present ? data.barcode.value : this.barcode,
       name: data.name.present ? data.name.value : this.name,
+      categoryId:
+          data.categoryId.present ? data.categoryId.value : this.categoryId,
       price: data.price.present ? data.price.value : this.price,
       priceVersionId: data.priceVersionId.present
           ? data.priceVersionId.value
@@ -384,6 +788,7 @@ class Product extends DataClass implements Insertable<Product> {
       conversionFactorDenominator: data.conversionFactorDenominator.present
           ? data.conversionFactorDenominator.value
           : this.conversionFactorDenominator,
+      vatRate: data.vatRate.present ? data.vatRate.value : this.vatRate,
       isActive: data.isActive.present ? data.isActive.value : this.isActive,
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
     );
@@ -395,6 +800,7 @@ class Product extends DataClass implements Insertable<Product> {
           ..write('id: $id, ')
           ..write('barcode: $barcode, ')
           ..write('name: $name, ')
+          ..write('categoryId: $categoryId, ')
           ..write('price: $price, ')
           ..write('priceVersionId: $priceVersionId, ')
           ..write('stock: $stock, ')
@@ -402,6 +808,7 @@ class Product extends DataClass implements Insertable<Product> {
           ..write('pricingUnit: $pricingUnit, ')
           ..write('conversionFactorNumerator: $conversionFactorNumerator, ')
           ..write('conversionFactorDenominator: $conversionFactorDenominator, ')
+          ..write('vatRate: $vatRate, ')
           ..write('isActive: $isActive, ')
           ..write('updatedAt: $updatedAt')
           ..write(')'))
@@ -413,6 +820,7 @@ class Product extends DataClass implements Insertable<Product> {
       id,
       barcode,
       name,
+      categoryId,
       price,
       priceVersionId,
       stock,
@@ -420,6 +828,7 @@ class Product extends DataClass implements Insertable<Product> {
       pricingUnit,
       conversionFactorNumerator,
       conversionFactorDenominator,
+      vatRate,
       isActive,
       updatedAt);
   @override
@@ -429,6 +838,7 @@ class Product extends DataClass implements Insertable<Product> {
           other.id == this.id &&
           other.barcode == this.barcode &&
           other.name == this.name &&
+          other.categoryId == this.categoryId &&
           other.price == this.price &&
           other.priceVersionId == this.priceVersionId &&
           other.stock == this.stock &&
@@ -437,6 +847,7 @@ class Product extends DataClass implements Insertable<Product> {
           other.conversionFactorNumerator == this.conversionFactorNumerator &&
           other.conversionFactorDenominator ==
               this.conversionFactorDenominator &&
+          other.vatRate == this.vatRate &&
           other.isActive == this.isActive &&
           other.updatedAt == this.updatedAt);
 }
@@ -445,6 +856,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
   final Value<String> id;
   final Value<String> barcode;
   final Value<String> name;
+  final Value<String?> categoryId;
   final Value<int> price;
   final Value<String> priceVersionId;
   final Value<int> stock;
@@ -452,6 +864,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
   final Value<String> pricingUnit;
   final Value<int> conversionFactorNumerator;
   final Value<int> conversionFactorDenominator;
+  final Value<int> vatRate;
   final Value<bool> isActive;
   final Value<DateTime> updatedAt;
   final Value<int> rowid;
@@ -459,6 +872,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     this.id = const Value.absent(),
     this.barcode = const Value.absent(),
     this.name = const Value.absent(),
+    this.categoryId = const Value.absent(),
     this.price = const Value.absent(),
     this.priceVersionId = const Value.absent(),
     this.stock = const Value.absent(),
@@ -466,6 +880,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     this.pricingUnit = const Value.absent(),
     this.conversionFactorNumerator = const Value.absent(),
     this.conversionFactorDenominator = const Value.absent(),
+    this.vatRate = const Value.absent(),
     this.isActive = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -474,6 +889,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     required String id,
     required String barcode,
     required String name,
+    this.categoryId = const Value.absent(),
     required int price,
     this.priceVersionId = const Value.absent(),
     required int stock,
@@ -481,6 +897,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     this.pricingUnit = const Value.absent(),
     this.conversionFactorNumerator = const Value.absent(),
     this.conversionFactorDenominator = const Value.absent(),
+    this.vatRate = const Value.absent(),
     this.isActive = const Value.absent(),
     this.updatedAt = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -493,6 +910,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     Expression<String>? id,
     Expression<String>? barcode,
     Expression<String>? name,
+    Expression<String>? categoryId,
     Expression<int>? price,
     Expression<String>? priceVersionId,
     Expression<int>? stock,
@@ -500,6 +918,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     Expression<String>? pricingUnit,
     Expression<int>? conversionFactorNumerator,
     Expression<int>? conversionFactorDenominator,
+    Expression<int>? vatRate,
     Expression<bool>? isActive,
     Expression<DateTime>? updatedAt,
     Expression<int>? rowid,
@@ -508,6 +927,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       if (id != null) 'id': id,
       if (barcode != null) 'barcode': barcode,
       if (name != null) 'name': name,
+      if (categoryId != null) 'category_id': categoryId,
       if (price != null) 'price': price,
       if (priceVersionId != null) 'price_version_id': priceVersionId,
       if (stock != null) 'stock': stock,
@@ -517,6 +937,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
         'conversion_factor_numerator': conversionFactorNumerator,
       if (conversionFactorDenominator != null)
         'conversion_factor_denominator': conversionFactorDenominator,
+      if (vatRate != null) 'vat_rate': vatRate,
       if (isActive != null) 'is_active': isActive,
       if (updatedAt != null) 'updated_at': updatedAt,
       if (rowid != null) 'rowid': rowid,
@@ -527,6 +948,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       {Value<String>? id,
       Value<String>? barcode,
       Value<String>? name,
+      Value<String?>? categoryId,
       Value<int>? price,
       Value<String>? priceVersionId,
       Value<int>? stock,
@@ -534,6 +956,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       Value<String>? pricingUnit,
       Value<int>? conversionFactorNumerator,
       Value<int>? conversionFactorDenominator,
+      Value<int>? vatRate,
       Value<bool>? isActive,
       Value<DateTime>? updatedAt,
       Value<int>? rowid}) {
@@ -541,6 +964,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       id: id ?? this.id,
       barcode: barcode ?? this.barcode,
       name: name ?? this.name,
+      categoryId: categoryId ?? this.categoryId,
       price: price ?? this.price,
       priceVersionId: priceVersionId ?? this.priceVersionId,
       stock: stock ?? this.stock,
@@ -550,6 +974,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
           conversionFactorNumerator ?? this.conversionFactorNumerator,
       conversionFactorDenominator:
           conversionFactorDenominator ?? this.conversionFactorDenominator,
+      vatRate: vatRate ?? this.vatRate,
       isActive: isActive ?? this.isActive,
       updatedAt: updatedAt ?? this.updatedAt,
       rowid: rowid ?? this.rowid,
@@ -567,6 +992,9 @@ class ProductsCompanion extends UpdateCompanion<Product> {
     }
     if (name.present) {
       map['name'] = Variable<String>(name.value);
+    }
+    if (categoryId.present) {
+      map['category_id'] = Variable<String>(categoryId.value);
     }
     if (price.present) {
       map['price'] = Variable<int>(price.value);
@@ -591,6 +1019,9 @@ class ProductsCompanion extends UpdateCompanion<Product> {
       map['conversion_factor_denominator'] =
           Variable<int>(conversionFactorDenominator.value);
     }
+    if (vatRate.present) {
+      map['vat_rate'] = Variable<int>(vatRate.value);
+    }
     if (isActive.present) {
       map['is_active'] = Variable<bool>(isActive.value);
     }
@@ -609,6 +1040,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
           ..write('id: $id, ')
           ..write('barcode: $barcode, ')
           ..write('name: $name, ')
+          ..write('categoryId: $categoryId, ')
           ..write('price: $price, ')
           ..write('priceVersionId: $priceVersionId, ')
           ..write('stock: $stock, ')
@@ -616,6 +1048,7 @@ class ProductsCompanion extends UpdateCompanion<Product> {
           ..write('pricingUnit: $pricingUnit, ')
           ..write('conversionFactorNumerator: $conversionFactorNumerator, ')
           ..write('conversionFactorDenominator: $conversionFactorDenominator, ')
+          ..write('vatRate: $vatRate, ')
           ..write('isActive: $isActive, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('rowid: $rowid')
@@ -5750,6 +6183,7 @@ class HubMetadataCompanion extends UpdateCompanion<HubMetadataData> {
 abstract class _$SpikeDatabase extends GeneratedDatabase {
   _$SpikeDatabase(QueryExecutor e) : super(e);
   $SpikeDatabaseManager get managers => $SpikeDatabaseManager(this);
+  late final $CategoriesTable categories = $CategoriesTable(this);
   late final $ProductsTable products = $ProductsTable(this);
   late final $ProductBarcodesTable productBarcodes =
       $ProductBarcodesTable(this);
@@ -5773,6 +6207,7 @@ abstract class _$SpikeDatabase extends GeneratedDatabase {
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
   @override
   List<DatabaseSchemaEntity> get allSchemaEntities => [
+        categories,
         products,
         productBarcodes,
         sales,
@@ -5789,10 +6224,368 @@ abstract class _$SpikeDatabase extends GeneratedDatabase {
       ];
 }
 
+typedef $$CategoriesTableCreateCompanionBuilder = CategoriesCompanion Function({
+  required String id,
+  required String name,
+  Value<String?> parentId,
+  Value<bool> isActive,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<int> rowid,
+});
+typedef $$CategoriesTableUpdateCompanionBuilder = CategoriesCompanion Function({
+  Value<String> id,
+  Value<String> name,
+  Value<String?> parentId,
+  Value<bool> isActive,
+  Value<DateTime> createdAt,
+  Value<DateTime> updatedAt,
+  Value<int> rowid,
+});
+
+final class $$CategoriesTableReferences
+    extends BaseReferences<_$SpikeDatabase, $CategoriesTable, Category> {
+  $$CategoriesTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $CategoriesTable _parentIdTable(_$SpikeDatabase db) =>
+      db.categories.createAlias('categories__parent_id__categories__id');
+
+  $$CategoriesTableProcessedTableManager? get parentId {
+    final $_column = $_itemColumn<String>('parent_id');
+    if ($_column == null) return null;
+    final manager = $$CategoriesTableTableManager($_db, $_db.categories)
+        .filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_parentIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
+
+  static MultiTypedResultKey<$ProductsTable, List<Product>> _productsRefsTable(
+          _$SpikeDatabase db) =>
+      MultiTypedResultKey.fromTable(db.products,
+          aliasName: 'categories__id__products__category_id');
+
+  $$ProductsTableProcessedTableManager get productsRefs {
+    final manager = $$ProductsTableTableManager($_db, $_db.products)
+        .filter((f) => f.categoryId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(_productsRefsTable($_db));
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: cache));
+  }
+}
+
+class $$CategoriesTableFilterComposer
+    extends Composer<_$SpikeDatabase, $CategoriesTable> {
+  $$CategoriesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<String> get name => $composableBuilder(
+      column: $table.name, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnFilters(column));
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  $$CategoriesTableFilterComposer get parentId {
+    final $$CategoriesTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.parentId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableFilterComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+
+  Expression<bool> productsRefs(
+      Expression<bool> Function($$ProductsTableFilterComposer f) f) {
+    final $$ProductsTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.products,
+        getReferencedColumn: (t) => t.categoryId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductsTableFilterComposer(
+              $db: $db,
+              $table: $db.products,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
+}
+
+class $$CategoriesTableOrderingComposer
+    extends Composer<_$SpikeDatabase, $CategoriesTable> {
+  $$CategoriesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+      column: $table.id, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<String> get name => $composableBuilder(
+      column: $table.name, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<bool> get isActive => $composableBuilder(
+      column: $table.isActive, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+      column: $table.createdAt, builder: (column) => ColumnOrderings(column));
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+      column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  $$CategoriesTableOrderingComposer get parentId {
+    final $$CategoriesTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.parentId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableOrderingComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+}
+
+class $$CategoriesTableAnnotationComposer
+    extends Composer<_$SpikeDatabase, $CategoriesTable> {
+  $$CategoriesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<bool> get isActive =>
+      $composableBuilder(column: $table.isActive, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$CategoriesTableAnnotationComposer get parentId {
+    final $$CategoriesTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.parentId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableAnnotationComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
+
+  Expression<T> productsRefs<T extends Object>(
+      Expression<T> Function($$ProductsTableAnnotationComposer a) f) {
+    final $$ProductsTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.id,
+        referencedTable: $db.products,
+        getReferencedColumn: (t) => t.categoryId,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$ProductsTableAnnotationComposer(
+              $db: $db,
+              $table: $db.products,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return f(composer);
+  }
+}
+
+class $$CategoriesTableTableManager extends RootTableManager<
+    _$SpikeDatabase,
+    $CategoriesTable,
+    Category,
+    $$CategoriesTableFilterComposer,
+    $$CategoriesTableOrderingComposer,
+    $$CategoriesTableAnnotationComposer,
+    $$CategoriesTableCreateCompanionBuilder,
+    $$CategoriesTableUpdateCompanionBuilder,
+    (Category, $$CategoriesTableReferences),
+    Category,
+    PrefetchHooks Function({bool parentId, bool productsRefs})> {
+  $$CategoriesTableTableManager(_$SpikeDatabase db, $CategoriesTable table)
+      : super(TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CategoriesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CategoriesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CategoriesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback: ({
+            Value<String> id = const Value.absent(),
+            Value<String> name = const Value.absent(),
+            Value<String?> parentId = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoriesCompanion(
+            id: id,
+            name: name,
+            parentId: parentId,
+            isActive: isActive,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            rowid: rowid,
+          ),
+          createCompanionCallback: ({
+            required String id,
+            required String name,
+            Value<String?> parentId = const Value.absent(),
+            Value<bool> isActive = const Value.absent(),
+            Value<DateTime> createdAt = const Value.absent(),
+            Value<DateTime> updatedAt = const Value.absent(),
+            Value<int> rowid = const Value.absent(),
+          }) =>
+              CategoriesCompanion.insert(
+            id: id,
+            name: name,
+            parentId: parentId,
+            isActive: isActive,
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            rowid: rowid,
+          ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (
+                    e.readTable(table),
+                    $$CategoriesTableReferences(db, table, e)
+                  ))
+              .toList(),
+          prefetchHooksCallback: ({parentId = false, productsRefs = false}) {
+            return PrefetchHooks(
+              db: db,
+              explicitlyWatchedTables: [if (productsRefs) db.products],
+              addJoins: <
+                  T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic>>(state) {
+                if (parentId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.parentId,
+                    referencedTable:
+                        $$CategoriesTableReferences._parentIdTable(db),
+                    referencedColumn:
+                        $$CategoriesTableReferences._parentIdTable(db).id,
+                  ) as T;
+                }
+
+                return state;
+              },
+              getPrefetchedDataCallback: (items) async {
+                return [
+                  if (productsRefs)
+                    await $_getPrefetchedData<Category, $CategoriesTable,
+                            Product>(
+                        currentTable: table,
+                        referencedTable:
+                            $$CategoriesTableReferences._productsRefsTable(db),
+                        managerFromTypedResult: (p0) =>
+                            $$CategoriesTableReferences(db, table, p0)
+                                .productsRefs,
+                        referencedItemsForCurrentItem:
+                            (item, referencedItems) => referencedItems
+                                .where((e) => e.categoryId == item.id),
+                        typedResults: items)
+                ];
+              },
+            );
+          },
+        ));
+}
+
+typedef $$CategoriesTableProcessedTableManager = ProcessedTableManager<
+    _$SpikeDatabase,
+    $CategoriesTable,
+    Category,
+    $$CategoriesTableFilterComposer,
+    $$CategoriesTableOrderingComposer,
+    $$CategoriesTableAnnotationComposer,
+    $$CategoriesTableCreateCompanionBuilder,
+    $$CategoriesTableUpdateCompanionBuilder,
+    (Category, $$CategoriesTableReferences),
+    Category,
+    PrefetchHooks Function({bool parentId, bool productsRefs})>;
 typedef $$ProductsTableCreateCompanionBuilder = ProductsCompanion Function({
   required String id,
   required String barcode,
   required String name,
+  Value<String?> categoryId,
   required int price,
   Value<String> priceVersionId,
   required int stock,
@@ -5800,6 +6593,7 @@ typedef $$ProductsTableCreateCompanionBuilder = ProductsCompanion Function({
   Value<String> pricingUnit,
   Value<int> conversionFactorNumerator,
   Value<int> conversionFactorDenominator,
+  Value<int> vatRate,
   Value<bool> isActive,
   Value<DateTime> updatedAt,
   Value<int> rowid,
@@ -5808,6 +6602,7 @@ typedef $$ProductsTableUpdateCompanionBuilder = ProductsCompanion Function({
   Value<String> id,
   Value<String> barcode,
   Value<String> name,
+  Value<String?> categoryId,
   Value<int> price,
   Value<String> priceVersionId,
   Value<int> stock,
@@ -5815,6 +6610,7 @@ typedef $$ProductsTableUpdateCompanionBuilder = ProductsCompanion Function({
   Value<String> pricingUnit,
   Value<int> conversionFactorNumerator,
   Value<int> conversionFactorDenominator,
+  Value<int> vatRate,
   Value<bool> isActive,
   Value<DateTime> updatedAt,
   Value<int> rowid,
@@ -5823,6 +6619,20 @@ typedef $$ProductsTableUpdateCompanionBuilder = ProductsCompanion Function({
 final class $$ProductsTableReferences
     extends BaseReferences<_$SpikeDatabase, $ProductsTable, Product> {
   $$ProductsTableReferences(super.$_db, super.$_table, super.$_typedResult);
+
+  static $CategoriesTable _categoryIdTable(_$SpikeDatabase db) =>
+      db.categories.createAlias('products__category_id__categories__id');
+
+  $$CategoriesTableProcessedTableManager? get categoryId {
+    final $_column = $_itemColumn<String>('category_id');
+    if ($_column == null) return null;
+    final manager = $$CategoriesTableTableManager($_db, $_db.categories)
+        .filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_categoryIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+        manager.$state.copyWith(prefetchedData: [item]));
+  }
 
   static MultiTypedResultKey<$ProductBarcodesTable, List<ProductBarcode>>
       _productBarcodesRefsTable(_$SpikeDatabase db) =>
@@ -5943,11 +6753,34 @@ class $$ProductsTableFilterComposer
       column: $table.conversionFactorDenominator,
       builder: (column) => ColumnFilters(column));
 
+  ColumnFilters<int> get vatRate => $composableBuilder(
+      column: $table.vatRate, builder: (column) => ColumnFilters(column));
+
   ColumnFilters<bool> get isActive => $composableBuilder(
       column: $table.isActive, builder: (column) => ColumnFilters(column));
 
   ColumnFilters<DateTime> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnFilters(column));
+
+  $$CategoriesTableFilterComposer get categoryId {
+    final $$CategoriesTableFilterComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.categoryId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableFilterComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
 
   Expression<bool> productBarcodesRefs(
       Expression<bool> Function($$ProductBarcodesTableFilterComposer f) f) {
@@ -6099,11 +6932,34 @@ class $$ProductsTableOrderingComposer
       column: $table.conversionFactorDenominator,
       builder: (column) => ColumnOrderings(column));
 
+  ColumnOrderings<int> get vatRate => $composableBuilder(
+      column: $table.vatRate, builder: (column) => ColumnOrderings(column));
+
   ColumnOrderings<bool> get isActive => $composableBuilder(
       column: $table.isActive, builder: (column) => ColumnOrderings(column));
 
   ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
       column: $table.updatedAt, builder: (column) => ColumnOrderings(column));
+
+  $$CategoriesTableOrderingComposer get categoryId {
+    final $$CategoriesTableOrderingComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.categoryId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableOrderingComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
 }
 
 class $$ProductsTableAnnotationComposer
@@ -6145,11 +7001,34 @@ class $$ProductsTableAnnotationComposer
   GeneratedColumn<int> get conversionFactorDenominator => $composableBuilder(
       column: $table.conversionFactorDenominator, builder: (column) => column);
 
+  GeneratedColumn<int> get vatRate =>
+      $composableBuilder(column: $table.vatRate, builder: (column) => column);
+
   GeneratedColumn<bool> get isActive =>
       $composableBuilder(column: $table.isActive, builder: (column) => column);
 
   GeneratedColumn<DateTime> get updatedAt =>
       $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  $$CategoriesTableAnnotationComposer get categoryId {
+    final $$CategoriesTableAnnotationComposer composer = $composerBuilder(
+        composer: this,
+        getCurrentColumn: (t) => t.categoryId,
+        referencedTable: $db.categories,
+        getReferencedColumn: (t) => t.id,
+        builder: (joinBuilder,
+                {$addJoinBuilderToRootComposer,
+                $removeJoinBuilderFromRootComposer}) =>
+            $$CategoriesTableAnnotationComposer(
+              $db: $db,
+              $table: $db.categories,
+              $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+              joinBuilder: joinBuilder,
+              $removeJoinBuilderFromRootComposer:
+                  $removeJoinBuilderFromRootComposer,
+            ));
+    return composer;
+  }
 
   Expression<T> productBarcodesRefs<T extends Object>(
       Expression<T> Function($$ProductBarcodesTableAnnotationComposer a) f) {
@@ -6271,7 +7150,8 @@ class $$ProductsTableTableManager extends RootTableManager<
     (Product, $$ProductsTableReferences),
     Product,
     PrefetchHooks Function(
-        {bool productBarcodesRefs,
+        {bool categoryId,
+        bool productBarcodesRefs,
         bool saleItemsRefs,
         bool stockMovementsRefs,
         bool productPriceHistoriesRefs,
@@ -6290,6 +7170,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             Value<String> id = const Value.absent(),
             Value<String> barcode = const Value.absent(),
             Value<String> name = const Value.absent(),
+            Value<String?> categoryId = const Value.absent(),
             Value<int> price = const Value.absent(),
             Value<String> priceVersionId = const Value.absent(),
             Value<int> stock = const Value.absent(),
@@ -6297,6 +7178,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             Value<String> pricingUnit = const Value.absent(),
             Value<int> conversionFactorNumerator = const Value.absent(),
             Value<int> conversionFactorDenominator = const Value.absent(),
+            Value<int> vatRate = const Value.absent(),
             Value<bool> isActive = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
@@ -6305,6 +7187,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             id: id,
             barcode: barcode,
             name: name,
+            categoryId: categoryId,
             price: price,
             priceVersionId: priceVersionId,
             stock: stock,
@@ -6312,6 +7195,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             pricingUnit: pricingUnit,
             conversionFactorNumerator: conversionFactorNumerator,
             conversionFactorDenominator: conversionFactorDenominator,
+            vatRate: vatRate,
             isActive: isActive,
             updatedAt: updatedAt,
             rowid: rowid,
@@ -6320,6 +7204,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             required String id,
             required String barcode,
             required String name,
+            Value<String?> categoryId = const Value.absent(),
             required int price,
             Value<String> priceVersionId = const Value.absent(),
             required int stock,
@@ -6327,6 +7212,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             Value<String> pricingUnit = const Value.absent(),
             Value<int> conversionFactorNumerator = const Value.absent(),
             Value<int> conversionFactorDenominator = const Value.absent(),
+            Value<int> vatRate = const Value.absent(),
             Value<bool> isActive = const Value.absent(),
             Value<DateTime> updatedAt = const Value.absent(),
             Value<int> rowid = const Value.absent(),
@@ -6335,6 +7221,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             id: id,
             barcode: barcode,
             name: name,
+            categoryId: categoryId,
             price: price,
             priceVersionId: priceVersionId,
             stock: stock,
@@ -6342,6 +7229,7 @@ class $$ProductsTableTableManager extends RootTableManager<
             pricingUnit: pricingUnit,
             conversionFactorNumerator: conversionFactorNumerator,
             conversionFactorDenominator: conversionFactorDenominator,
+            vatRate: vatRate,
             isActive: isActive,
             updatedAt: updatedAt,
             rowid: rowid,
@@ -6351,7 +7239,8 @@ class $$ProductsTableTableManager extends RootTableManager<
                   (e.readTable(table), $$ProductsTableReferences(db, table, e)))
               .toList(),
           prefetchHooksCallback: (
-              {productBarcodesRefs = false,
+              {categoryId = false,
+              productBarcodesRefs = false,
               saleItemsRefs = false,
               stockMovementsRefs = false,
               productPriceHistoriesRefs = false,
@@ -6365,7 +7254,32 @@ class $$ProductsTableTableManager extends RootTableManager<
                 if (productPriceHistoriesRefs) db.productPriceHistories,
                 if (refundItemsRefs) db.refundItems
               ],
-              addJoins: null,
+              addJoins: <
+                  T extends TableManagerState<
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic,
+                      dynamic>>(state) {
+                if (categoryId) {
+                  state = state.withJoin(
+                    currentTable: table,
+                    currentColumn: table.categoryId,
+                    referencedTable:
+                        $$ProductsTableReferences._categoryIdTable(db),
+                    referencedColumn:
+                        $$ProductsTableReferences._categoryIdTable(db).id,
+                  ) as T;
+                }
+
+                return state;
+              },
               getPrefetchedDataCallback: (items) async {
                 return [
                   if (productBarcodesRefs)
@@ -6452,7 +7366,8 @@ typedef $$ProductsTableProcessedTableManager = ProcessedTableManager<
     (Product, $$ProductsTableReferences),
     Product,
     PrefetchHooks Function(
-        {bool productBarcodesRefs,
+        {bool categoryId,
+        bool productBarcodesRefs,
         bool saleItemsRefs,
         bool stockMovementsRefs,
         bool productPriceHistoriesRefs,
@@ -10017,6 +10932,8 @@ typedef $$HubMetadataTableProcessedTableManager = ProcessedTableManager<
 class $SpikeDatabaseManager {
   final _$SpikeDatabase _db;
   $SpikeDatabaseManager(this._db);
+  $$CategoriesTableTableManager get categories =>
+      $$CategoriesTableTableManager(_db, _db.categories);
   $$ProductsTableTableManager get products =>
       $$ProductsTableTableManager(_db, _db.products);
   $$ProductBarcodesTableTableManager get productBarcodes =>

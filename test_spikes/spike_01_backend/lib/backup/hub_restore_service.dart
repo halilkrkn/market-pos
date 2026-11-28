@@ -74,7 +74,7 @@ class HubRestoreService {
     String? expectedHubId,
     String? safetyBackupPassword,
     int minSupportedSchemaVersion = 1,
-    int maxSupportedSchemaVersion = 4,
+    int maxSupportedSchemaVersion = 5,
     int kdfIterations = MmsbakV2Crypto.defaultPbkdf2Iterations,
     bool acquireLock = true,
     Future<void> Function(SpikeDatabase newDb, String restoreEpoch)? onDbReopened,

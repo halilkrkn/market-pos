@@ -2187,19 +2187,105 @@ class SpikeServer {
     });
 
 
-    // 4.5. Ürün Listesi ve Fiyat Senkronizasyonu (S5A-3 İki Aşamalı İstemci Senkronizasyonu - Snapshot)
+    // 4.5. Ürün Listesi ve Fiyat Senkronizasyonu (S5A-3 + MMS-001 KDV/Kategori + MMS-005 Sayfalama)
     _router.get('/api/v1/products', (Request req) async {
       final deviceId = req.context['authenticated_device_id'] as String?;
       final now = DateTime.now();
 
-      final products = await db.select(db.products).get();
-      final activeBarcodes = await (db.select(db.productBarcodes)
-            ..where((b) => b.isActive.equals(true))
-            ..orderBy([
-              (b) => OrderingTerm.desc(b.isPrimary),
-              (b) => OrderingTerm.asc(b.createdAt),
-            ]))
-          .get();
+      final queryParams = req.requestedUri.queryParameters;
+      final rawLimitParam = queryParams['limit'];
+      final rawOffsetParam = queryParams['offset'];
+      final isPaginated =
+          rawLimitParam != null && rawLimitParam.trim().isNotEmpty;
+
+      var limit = 0;
+      if (isPaginated) {
+        final parsedLimit = int.tryParse(rawLimitParam.trim());
+        if (parsedLimit == null || parsedLimit <= 0) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_PAGINATION',
+              'message': 'limit parametresi pozitif bir tamsayı olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        limit = parsedLimit.clamp(1, 2000);
+      }
+
+      var offset = 0;
+      if (rawOffsetParam != null && rawOffsetParam.trim().isNotEmpty) {
+        final parsedOffset = int.tryParse(rawOffsetParam.trim());
+        if (parsedOffset == null || parsedOffset < 0) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_PAGINATION',
+              'message': 'offset parametresi 0 veya pozitif bir tamsayı olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        offset = parsedOffset;
+      }
+
+      final int totalCount;
+      final List<Product> products;
+      if (isPaginated) {
+        final countRow = await db
+            .customSelect('SELECT COUNT(*) AS cnt FROM products;')
+            .getSingle();
+        final rawCnt = countRow.data['cnt'];
+        totalCount = rawCnt is int ? rawCnt : int.parse(rawCnt.toString());
+        products = await (db.select(db.products)
+              ..orderBy([(p) => OrderingTerm.asc(p.id)])
+              ..limit(limit, offset: offset))
+            .get();
+      } else {
+        products = await (db.select(db.products)
+              ..orderBy([(p) => OrderingTerm.asc(p.id)]))
+            .get();
+        totalCount = products.length;
+      }
+
+      final List<ProductBarcode> activeBarcodes;
+      if (isPaginated) {
+        if (products.isEmpty) {
+          activeBarcodes = const <ProductBarcode>[];
+        } else {
+          final productIds = products.map((p) => p.id).toList(growable: false);
+          final collected = <ProductBarcode>[];
+          const chunkSize = 500;
+          for (var i = 0; i < productIds.length; i += chunkSize) {
+            final end = (i + chunkSize < productIds.length)
+                ? i + chunkSize
+                : productIds.length;
+            final chunk = productIds.sublist(i, end);
+            final rows = await (db.select(db.productBarcodes)
+                  ..where((b) =>
+                      b.isActive.equals(true) & b.productId.isIn(chunk))
+                  ..orderBy([
+                    (b) => OrderingTerm.desc(b.isPrimary),
+                    (b) => OrderingTerm.asc(b.createdAt),
+                  ]))
+                .get();
+            collected.addAll(rows);
+          }
+          activeBarcodes = collected;
+        }
+      } else {
+        activeBarcodes = await (db.select(db.productBarcodes)
+              ..where((b) => b.isActive.equals(true))
+              ..orderBy([
+                (b) => OrderingTerm.desc(b.isPrimary),
+                (b) => OrderingTerm.asc(b.createdAt),
+              ]))
+            .get();
+      }
+
       final barcodesByProductId = <String, List<String>>{};
       for (final row in activeBarcodes) {
         final list = barcodesByProductId.putIfAbsent(row.productId, () => <String>[]);
@@ -2223,6 +2309,7 @@ class SpikeServer {
           'id': p.id,
           'barcode': p.barcode,
           'name': p.name,
+          'category_id': p.categoryId,
           'price': p.price,
           'price_version_id': p.priceVersionId,
           'stock': p.stock,
@@ -2230,21 +2317,44 @@ class SpikeServer {
           'pricing_unit': p.pricingUnit,
           'conversion_factor_numerator': p.conversionFactorNumerator,
           'conversion_factor_denominator': p.conversionFactorDenominator,
+          'vat_rate': p.vatRate,
           'is_active': p.isActive,
           'barcodes': deduped,
           'updated_at': p.updatedAt.toIso8601String(),
         };
       }).toList();
 
+      final categories = await (db.select(db.categories)
+            ..orderBy([
+              (c) => OrderingTerm.asc(c.createdAt),
+              (c) => OrderingTerm.asc(c.id),
+            ]))
+          .get();
+      final categoriesPayload = categories
+          .map(
+            (c) => {
+              'id': c.id,
+              'name': c.name,
+              'parent_id': c.parentId,
+              'is_active': c.isActive,
+              'created_at': c.createdAt.toIso8601String(),
+              'updated_at': c.updatedAt.toIso8601String(),
+            },
+          )
+          .toList();
+
+      final hasMore = isPaginated && (offset + items.length < totalCount);
+      final nextOffset = offset + items.length;
+
       String? syncSessionId;
-      if (deviceId != null) {
+      if (deviceId != null && !hasMore) {
         syncSessionId = 'sync_${deviceId}_${now.microsecondsSinceEpoch}';
         await writeQueue.enqueue(() async {
           await db.into(db.productSyncSessions).insert(
                 ProductSyncSessionsCompanion(
                   id: Value(syncSessionId!),
                   deviceId: Value(deviceId),
-                  productCount: Value(items.length),
+                  productCount: Value(isPaginated ? totalCount : items.length),
                   syncedAt: Value(now),
                   isAcknowledged: const Value(false),
                   createdAt: Value(now),
@@ -2257,7 +2367,11 @@ class SpikeServer {
         jsonEncode({
           'status': 'OK',
           'products': items,
+          'categories': categoriesPayload,
           'count': items.length,
+          if (isPaginated) 'has_more': hasMore,
+          if (isPaginated) 'next_offset': nextOffset,
+          if (isPaginated) 'total_count': totalCount,
           'synced_at': now.toIso8601String(),
           if (syncSessionId != null) 'sync_session_id': syncSessionId,
         }),
@@ -2585,6 +2699,43 @@ class SpikeServer {
         );
       }
 
+      int? incomingVatRate;
+      if (productData.containsKey('vat_rate') &&
+          productData['vat_rate'] != null) {
+        final rawVat = productData['vat_rate'];
+        if (rawVat is! int || rawVat < 0 || rawVat > 100) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_VAT_RATE',
+              'message': 'vat_rate 0 ile 100 arasında bir tamsayı olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        incomingVatRate = rawVat;
+      }
+
+      final hasCategoryIdField = productData.containsKey('category_id');
+      String? incomingCategoryId;
+      if (hasCategoryIdField && productData['category_id'] != null) {
+        final rawCatId = productData['category_id'];
+        if (rawCatId is! String) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_CATEGORY_ID',
+              'message': 'category_id metin veya null olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final trimmed = rawCatId.trim();
+        incomingCategoryId = trimmed.isEmpty ? null : trimmed;
+      }
+
       final operationId =
           body['operation_id'] as String? ?? 'op_prod_${deviceId}_${prodId}_$clientSeq';
       final idempotencyKey = '$deviceId:$clientSeq';
@@ -2774,10 +2925,41 @@ class SpikeServer {
                 }
               }
 
+              final effectiveCategoryId = hasCategoryIdField
+                  ? incomingCategoryId
+                  : existingProduct.categoryId;
+              final effectiveVatRate =
+                  incomingVatRate ?? existingProduct.vatRate;
+              if (effectiveCategoryId != null) {
+                final existingCat = await (db.select(db.categories)
+                      ..where((c) => c.id.equals(effectiveCategoryId)))
+                    .getSingleOrNull();
+                if (existingCat == null) {
+                  final rawCatName =
+                      (productData['category_name'] as String?)?.trim();
+                  await db.into(db.categories).insert(
+                        CategoriesCompanion(
+                          id: Value(effectiveCategoryId),
+                          name: Value(
+                            (rawCatName != null && rawCatName.isNotEmpty)
+                                ? rawCatName
+                                : 'Genel',
+                          ),
+                          parentId: const Value(null),
+                          isActive: const Value(true),
+                          createdAt: Value(now),
+                          updatedAt: Value(now),
+                        ),
+                        mode: InsertMode.insertOrIgnore,
+                      );
+                }
+              }
+
               await (db.update(db.products)..where((p) => p.id.equals(prodId))).write(
                 ProductsCompanion(
                   name: Value(name),
                   barcode: Value(effectiveBarcode),
+                  categoryId: Value(effectiveCategoryId),
                   price: Value(price),
                   priceVersionId: Value(priceVersionId),
                   // Faz 7A (Owner onayı 21.11.2026): Mevcut ürünün stoğu istemcinin mutlak
@@ -2787,11 +2969,40 @@ class SpikeServer {
                   pricingUnit: Value(productData['pricing_unit'] as String? ?? existingProduct.pricingUnit),
                   conversionFactorNumerator: Value(productData['conversion_factor_numerator'] as int? ?? existingProduct.conversionFactorNumerator),
                   conversionFactorDenominator: Value(productData['conversion_factor_denominator'] as int? ?? existingProduct.conversionFactorDenominator),
+                  vatRate: Value(effectiveVatRate),
                   isActive: Value(productData['is_active'] as bool? ?? existingProduct.isActive),
                   updatedAt: Value(now),
                 ),
               );
             } else {
+              final effectiveCategoryId =
+                  hasCategoryIdField ? incomingCategoryId : null;
+              final effectiveVatRate = incomingVatRate ?? 20;
+              if (effectiveCategoryId != null) {
+                final existingCat = await (db.select(db.categories)
+                      ..where((c) => c.id.equals(effectiveCategoryId)))
+                    .getSingleOrNull();
+                if (existingCat == null) {
+                  final rawCatName =
+                      (productData['category_name'] as String?)?.trim();
+                  await db.into(db.categories).insert(
+                        CategoriesCompanion(
+                          id: Value(effectiveCategoryId),
+                          name: Value(
+                            (rawCatName != null && rawCatName.isNotEmpty)
+                                ? rawCatName
+                                : 'Genel',
+                          ),
+                          parentId: const Value(null),
+                          isActive: const Value(true),
+                          createdAt: Value(now),
+                          updatedAt: Value(now),
+                        ),
+                        mode: InsertMode.insertOrIgnore,
+                      );
+                }
+              }
+
               priceVersionId =
                   incomingPv ?? 'pv_init_${now.microsecondsSinceEpoch}';
               await db.into(db.products).insert(
@@ -2799,6 +3010,7 @@ class SpikeServer {
                   id: Value(prodId),
                   barcode: Value(effectiveBarcode),
                   name: Value(name),
+                  categoryId: Value(effectiveCategoryId),
                   price: Value(price),
                   priceVersionId: Value(priceVersionId),
                   stock: Value(productData['stock'] as int? ?? 0),
@@ -2806,6 +3018,7 @@ class SpikeServer {
                   pricingUnit: Value(productData['pricing_unit'] as String? ?? 'adet'),
                   conversionFactorNumerator: Value(productData['conversion_factor_numerator'] as int? ?? 1),
                   conversionFactorDenominator: Value(productData['conversion_factor_denominator'] as int? ?? 1),
+                  vatRate: Value(effectiveVatRate),
                   isActive: Value(productData['is_active'] as bool? ?? true),
                   updatedAt: Value(now),
                 ),
@@ -2935,6 +3148,278 @@ class SpikeServer {
       }
     });
 
+
+    // 4.7.1. Kategori Ekleme / Güncelleme Senkronizasyonu (Outbox CATEGORY_UPSERT - Idempotent, FIFO)
+    _router.post('/api/v1/categories/upsert', (Request req) async {
+      final deviceId = req.context['authenticated_device_id'] as String?;
+      if (deviceId == null) {
+        return Response(
+          401,
+          body: jsonEncode({
+            'error': 'UNAUTHORIZED',
+            'code': 'ERR_AUTH_REQUIRED',
+            'message': 'Kategori kaydı için yetkili bir cihaz oturumu gereklidir.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final bodyStr = await req.readAsString();
+      Map<String, dynamic> body;
+      try {
+        body = jsonDecode(bodyStr) as Map<String, dynamic>;
+      } catch (_) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_JSON',
+            'message': 'Geçersiz JSON formatı.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final rawClientSeq = body['client_seq'];
+      if (rawClientSeq is! int || rawClientSeq <= 0) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CLIENT_SEQ',
+            'message': 'client_seq pozitif bir tamsayı (> 0) olmalıdır.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      final clientSeq = rawClientSeq;
+
+      final categoryData = body['category'] as Map<String, dynamic>?;
+      if (categoryData == null) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CATEGORY_DATA',
+            'message': 'category nesnesi zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final rawCatId = categoryData['id'];
+      final rawCatName = categoryData['name'];
+      if (rawCatId is! String || rawCatId.trim().isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CATEGORY_ID',
+            'message': 'Kategori kimliği (id) zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      if (rawCatName is! String || rawCatName.trim().isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CATEGORY_NAME',
+            'message': 'Kategori adı (name) zorunludur.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      final catId = rawCatId.trim();
+      final catName = rawCatName.trim();
+
+      String? parentId;
+      if (categoryData.containsKey('parent_id') &&
+          categoryData['parent_id'] != null) {
+        final rawParent = categoryData['parent_id'];
+        if (rawParent is! String) {
+          return Response(
+            400,
+            body: jsonEncode({
+              'error': 'BAD_REQUEST',
+              'code': 'ERR_INVALID_PARENT_CATEGORY',
+              'message': 'parent_id metin veya null olmalıdır.',
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+        final trimmedParent = rawParent.trim();
+        parentId = trimmedParent.isEmpty ? null : trimmedParent;
+      }
+      if (parentId == catId) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_PARENT_CATEGORY',
+            'message': 'Kategori kendi kendisinin üst kategorisi olamaz.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+
+      final rawIsActive = categoryData['is_active'];
+      if (rawIsActive != null && rawIsActive is! bool) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'BAD_REQUEST',
+            'code': 'ERR_INVALID_CATEGORY_DATA',
+            'message': 'is_active boolean olmalıdır.',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+      final incomingIsActive = rawIsActive as bool?;
+
+      final operationId =
+          body['operation_id'] as String? ?? 'op_cat_${deviceId}_${catId}_$clientSeq';
+      final idempotencyKey = '$deviceId:$clientSeq';
+      final incomingCanonicalHash = CanonicalPayloadHasher.computeCanonicalV2(
+        operationType: 'CATEGORY_UPSERT',
+        body: body,
+      );
+
+      final existingOp = await (db.select(db.processedOperations)
+            ..where((o) => o.idempotencyKey.equals(idempotencyKey)))
+          .getSingleOrNull();
+
+      if (existingOp != null) {
+        return _evaluateExistingReceipt(
+          existingOp: existingOp,
+          operationType: 'CATEGORY_UPSERT',
+          incomingBody: body,
+          rawBody: bodyStr,
+          idempotencyKey: idempotencyKey,
+        );
+      }
+
+      try {
+        final txResult = await writeQueue.enqueue(() async {
+          return await db.transaction(() async {
+            final txReplay = await _checkExistingReceiptInTx(
+              idempotencyKey: idempotencyKey,
+              operationType: 'CATEGORY_UPSERT',
+              incomingBody: body,
+              rawBody: bodyStr,
+            );
+            if (txReplay != null) {
+              return txReplay;
+            }
+
+            await _assertExpectedClientSeqInTx(deviceId, clientSeq);
+
+            if (parentId != null) {
+              final parentRow = await (db.select(db.categories)
+                    ..where((c) => c.id.equals(parentId!)))
+                  .getSingleOrNull();
+              if (parentRow == null) {
+                throw _ValidationException(
+                  409,
+                  'ERR_PARENT_CATEGORY_NOT_FOUND',
+                  'Üst kategori bulunamadı: $parentId',
+                );
+              }
+            }
+
+            final now = DateTime.now();
+            final existingCat = await (db.select(db.categories)
+                  ..where((c) => c.id.equals(catId)))
+                .getSingleOrNull();
+
+            if (existingCat != null) {
+              await (db.update(db.categories)
+                    ..where((c) => c.id.equals(catId)))
+                  .write(
+                CategoriesCompanion(
+                  name: Value(catName),
+                  parentId: Value(parentId),
+                  isActive: Value(incomingIsActive ?? existingCat.isActive),
+                  updatedAt: Value(now),
+                ),
+              );
+            } else {
+              await db.into(db.categories).insert(
+                    CategoriesCompanion(
+                      id: Value(catId),
+                      name: Value(catName),
+                      parentId: Value(parentId),
+                      isActive: Value(incomingIsActive ?? true),
+                      createdAt: Value(now),
+                      updatedAt: Value(now),
+                    ),
+                  );
+            }
+
+            final res = {
+              'status': 'COMMITTED',
+              'operation_type': 'CATEGORY_UPSERT',
+              'device_id': deviceId,
+              'client_seq': clientSeq,
+              'category_id': catId,
+              'processed_at': now.toIso8601String(),
+              '__hash_version': CanonicalPayloadHasher.hashVersionV2Canonical,
+              '__request_hash': incomingCanonicalHash,
+            };
+
+            final encoded = await _commitReceiptAndAdvanceHwmInTx(
+              operationId: operationId,
+              deviceId: deviceId,
+              idempotencyKey: idempotencyKey,
+              clientSeq: clientSeq,
+              operationType: 'CATEGORY_UPSERT',
+              canonicalHash: incomingCanonicalHash,
+              responsePayload: res,
+              committedAt: now,
+            );
+
+            return _MutationTxResult(isReplay: false, bodyJson: encoded);
+          });
+        });
+
+        return Response.ok(
+          txResult.bodyJson,
+          headers: {
+            'content-type': 'application/json',
+            if (txResult.isReplay) 'x-mms-idempotent-replay': 'true',
+          },
+        );
+      } on _IdempotencyConflictException catch (e) {
+        return _idempotencyConflictResponse(e.idempotencyKey);
+      } on _IdempotencyHashUnverifiableException catch (e) {
+        return _idempotencyHashUnverifiableResponse(e.idempotencyKey);
+      } on _SequenceGapException catch (e) {
+        return _sequenceGapResponse(e);
+      } on _ValidationException catch (e) {
+        return Response(
+          e.statusCode,
+          body: jsonEncode({
+            'error': e.statusCode == 409 ? 'CONFLICT' : 'BAD_REQUEST',
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      } catch (e, stack) {
+        final safeErr = redactLogText('$e\n$stack');
+        stderr.writeln('CATEGORY_UPSERT işlenirken beklenmeyen hata: $safeErr');
+        return Response.internalServerError(
+          body: jsonEncode({
+            'error': 'INTERNAL_ERROR',
+            'code': 'ERR_INTERNAL_SERVER_ERROR',
+            'message':
+                'Kategori kaydedilirken sunucu hatası oluştu: ${redactLogText(e.toString())}',
+          }),
+          headers: {'content-type': 'application/json'},
+        );
+      }
+    });
 
     // 4.8. Mevcut Ürüne Stok Girişi (Outbox STOCK_RECEIPT - Delta, Idempotent, FIFO)
     // Owner onayı (21.11.2026): Mutlak stok yerine delta taşır; aynı receipt_id ikinci kez uygulanmaz.

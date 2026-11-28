@@ -9,10 +9,23 @@ import '../sync/device_sequence_inspector.dart';
 
 part 'database.g.dart';
 
+class Categories extends Table {
+  TextColumn get id => text()();
+  TextColumn get name => text()();
+  TextColumn get parentId => text().nullable().references(Categories, #id)();
+  BoolColumn get isActive => boolean().withDefault(const Constant(true))();
+  DateTimeColumn get createdAt => dateTime().withDefault(currentDateAndTime)();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 class Products extends Table {
   TextColumn get id => text()();
   TextColumn get barcode => text()();
   TextColumn get name => text()();
+  TextColumn get categoryId => text().nullable().references(Categories, #id)();
   IntColumn get price => integer()(); // kuruş bazlı tamsayı (1000 = 10.00 TL)
   TextColumn get priceVersionId => text().withDefault(const Constant('pv_init'))(); // S5A-3: Fiyat sürüm kimliği
   IntColumn get stock => integer()(); // stock_unit bazlı tamsayı (scale=1000)
@@ -20,6 +33,7 @@ class Products extends Table {
   TextColumn get pricingUnit => text().withDefault(const Constant('adet'))(); // 'adet', 'kg', 'l', 'koli'
   IntColumn get conversionFactorNumerator => integer().withDefault(const Constant(1))(); // 1 pricing_unit = (num / den) stock_unit
   IntColumn get conversionFactorDenominator => integer().withDefault(const Constant(1))(); // Payda (> 0)
+  IntColumn get vatRate => integer().withDefault(const Constant(20))(); // KDV oranı (%)
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
   DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
 
@@ -214,7 +228,7 @@ class CheckpointResult {
   String toString() => 'CheckpointResult(busy: $busy, log: $log, checkpointed: $checkpointed, isSuccess: $isSuccess)';
 }
 
-@DriftDatabase(tables: [Products, ProductBarcodes, Sales, SaleItems, StockMovements, ProcessedOperations, Devices, DeviceAuditLogs, ProductPriceHistories, ProductSyncSessions, Refunds, RefundItems, HubMetadata])
+@DriftDatabase(tables: [Categories, Products, ProductBarcodes, Sales, SaleItems, StockMovements, ProcessedOperations, Devices, DeviceAuditLogs, ProductPriceHistories, ProductSyncSessions, Refunds, RefundItems, HubMetadata])
 class SpikeDatabase extends _$SpikeDatabase {
   SpikeDatabase(File file) : super(_openConnection(file));
 
@@ -236,7 +250,7 @@ class SpikeDatabase extends _$SpikeDatabase {
   }
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -245,6 +259,7 @@ class SpikeDatabase extends _$SpikeDatabase {
           await _ensureLegacySalesAndRefundTables();
           await _upgradeV1ToV2();
           await _ensureV4ProductBarcodesTable();
+          await _ensureV5CategoriesAndVatColumns();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -256,6 +271,11 @@ class SpikeDatabase extends _$SpikeDatabase {
           }
           if (from < 4) {
             await _ensureV4ProductBarcodesTable();
+          }
+          if (from < 5) {
+            await m.createTable(categories);
+            await m.addColumn(products, products.categoryId);
+            await m.addColumn(products, products.vatRate);
           }
         },
         beforeOpen: (details) async {
@@ -280,8 +300,36 @@ class SpikeDatabase extends _$SpikeDatabase {
           await _ensureV2SchemaAndIndexes();
           await _ensureV3StockMovementColumns();
           await _ensureV4ProductBarcodesTable();
+          await _ensureV5CategoriesAndVatColumns();
         },
       );
+
+  /// Hub v4 -> v5 (MMS-001): Kategoriler ve ürün KDV/kategori sütunları için
+  /// idempotent güvence (restore edilen eski yedeklerde de güvenli çalışır).
+  Future<void> _ensureV5CategoriesAndVatColumns() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS categories (
+        id TEXT NOT NULL PRIMARY KEY,
+        name TEXT NOT NULL,
+        parent_id TEXT REFERENCES categories(id),
+        is_active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now')),
+        updated_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
+      );
+    ''');
+    final prodCols = await customSelect("PRAGMA table_info('products');").get();
+    final prodColNames = prodCols.map((c) => c.data['name'].toString()).toSet();
+    if (!prodColNames.contains('category_id')) {
+      await customStatement(
+        'ALTER TABLE products ADD COLUMN category_id TEXT REFERENCES categories(id);',
+      );
+    }
+    if (!prodColNames.contains('vat_rate')) {
+      await customStatement(
+        'ALTER TABLE products ADD COLUMN vat_rate INTEGER NOT NULL DEFAULT 20;',
+      );
+    }
+  }
 
   /// Hub v3 -> v4 (GAP-A01): Çoklu/ikincil barkodlar için additive, veri koruyucu
   /// migration. Mevcut `products.barcode` değerlerini kaybetmeden `product_barcodes`

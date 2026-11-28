@@ -25,6 +25,7 @@ Middleware createAuthMiddleware({
   List<String> storeDataPrefixes = const [
     '/api/v1/sales',
     '/api/v1/products',
+    '/api/v1/categories',
     '/api/v1/sync/',
     '/api/v1/stock/',
   ],

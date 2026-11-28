@@ -25,6 +25,7 @@ class CanonicalPayloadHasher {
     'SALE_CANCEL',
     'SALE_REFUND',
     'PRODUCT_UPSERT',
+    'CATEGORY_UPSERT',
     'STOCK_RECEIPT',
   };
 
@@ -117,6 +118,14 @@ class CanonicalPayloadHasher {
           'operation_type': 'PRODUCT_UPSERT',
           'client_seq': body['client_seq'],
           'product': canonicalizeJsonValue(body['product']),
+        };
+        break;
+      case 'CATEGORY_UPSERT':
+        rawCanonical = <String, dynamic>{
+          'hash_version': hashVersionV2Canonical,
+          'operation_type': 'CATEGORY_UPSERT',
+          'client_seq': body['client_seq'],
+          'category': canonicalizeJsonValue(body['category']),
         };
         break;
       case 'STOCK_RECEIPT':

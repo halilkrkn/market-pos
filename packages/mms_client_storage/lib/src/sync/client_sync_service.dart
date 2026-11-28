@@ -72,6 +72,8 @@ class ClientSyncService {
   final Duration baseBackoff;
   final Duration maxBackoff;
   final Duration requestTimeout;
+  final Duration catalogSyncTimeout;
+  final int catalogPageSize;
 
   ClientSyncService({
     required this.repository,
@@ -83,6 +85,8 @@ class ClientSyncService {
     this.baseBackoff = const Duration(seconds: 1),
     this.maxBackoff = const Duration(seconds: 60),
     this.requestTimeout = const Duration(seconds: 10),
+    this.catalogSyncTimeout = const Duration(seconds: 30),
+    this.catalogPageSize = 1000,
   });
 
   /// S5A-3: Outbox kuyruğundaki bekleyen işlemleri katı FIFO (client_seq ASC) sırasıyla gönderir
@@ -183,6 +187,20 @@ class ClientSyncService {
           payload: op.payload,
           timeout: requestTimeout,
         );
+      } else if (op.operationType == 'CATEGORY_UPSERT') {
+        if (transport is CatalogExtendedSyncTransport) {
+          resp = await (transport as CatalogExtendedSyncTransport)
+              .postCategoryUpsert(
+            hubUrl: hubUrl,
+            token: currentToken,
+            payload: op.payload,
+            timeout: requestTimeout,
+          );
+        } else {
+          resp = SyncResponse.networkError(
+            'CATEGORY_UPSERT mevcut taşıyıcı tarafından desteklenmiyor.',
+          );
+        }
       } else if (op.operationType == 'STOCK_RECEIPT') {
         resp = await transport.postStockReceipt(
           hubUrl: hubUrl,
@@ -488,7 +506,8 @@ class ClientSyncService {
     return false;
   }
 
-  /// S5A-3: Merkezi sunucudaki güncel ürün ve fiyat listesini çeker ve yerel cache'i atomik olarak günceller
+  /// S5A-3 + MMS-001 + MMS-005: Merkezi sunucudaki güncel kategori, ürün ve fiyat
+  /// listesini (büyük kataloglarda sayfalı olarak) çeker ve yerel cache'i atomik olarak günceller.
   Future<int> syncProducts({DateTime? now}) async {
     final effectiveNow = now ?? DateTime.now();
 
@@ -506,96 +525,204 @@ class ClientSyncService {
       throw StateError('Cihaz yetkilendirme anahtarı (deviceToken) eksik veya boş.');
     }
 
-    final resp = await transport.getProducts(
-      hubUrl: hubUrl,
-      token: currentToken,
-      timeout: requestTimeout,
-    );
+    final effectiveCatalogTimeout =
+        catalogSyncTimeout > requestTimeout ? catalogSyncTimeout : requestTimeout;
+    final pageLimit = catalogPageSize > 0 ? catalogPageSize : 1000;
 
-    if (!resp.isSuccess) {
-      if (resp.isTlsPinMismatch) {
-        throw StateError('Ürün senkronizasyonu TLS hatası [TLS_PIN_MISMATCH]: ${resp.errorMessage}');
-      }
-      if (resp.isTlsCertError) {
-        throw StateError('Ürün senkronizasyonu TLS hatası [TLS_CERT_ERROR]: ${resp.errorMessage}');
-      }
-      throw StateError('Ürün senkronizasyonu başarısız oldu [${resp.statusCode}]: ${resp.errorMessage ?? resp.body}');
-    }
-
-    final data = jsonDecode(resp.body) as Map<String, dynamic>;
-    final productsJson = data['products'] as List<dynamic>? ?? [];
-    final syncSessionId = data['sync_session_id'] as String?;
-
+    final categoriesById = <String, LocalCategoriesCompanion>{};
     final productCompanions = <LocalProductsCompanion>[];
     final barcodeCompanions = <LocalProductBarcodesCompanion>[];
+    String? syncSessionId;
 
-    for (final p in productsJson) {
-      final pMap = p as Map<String, dynamic>;
-      final pId = pMap['id'] as String;
-      final rawPrimaryBarcode = (pMap['barcode'] as String?)?.trim();
-      final pBarcode = (rawPrimaryBarcode == null ||
-              rawPrimaryBarcode.isEmpty ||
-              rawPrimaryBarcode == pId)
-          ? null
-          : rawPrimaryBarcode;
-      final isActive = pMap['is_active'] as bool? ?? true;
-      final priceVersionId = pMap['price_version_id'] as String? ?? 'pv_init';
+    void collectCatalogPage(Map<String, dynamic> data) {
+      final rawCategories = data['categories'] as List<dynamic>? ?? const [];
+      for (final rawCat in rawCategories) {
+        if (rawCat is! Map) continue;
+        final cMap = Map<String, dynamic>.from(rawCat);
+        final catId = (cMap['id'] as String?)?.trim();
+        final catName = (cMap['name'] as String?)?.trim();
+        if (catId == null || catId.isEmpty || catName == null || catName.isEmpty) {
+          continue;
+        }
+        final rawParentId = (cMap['parent_id'] as String?)?.trim();
+        final parentId =
+            (rawParentId == null || rawParentId.isEmpty) ? null : rawParentId;
+        final isActive = cMap['is_active'] as bool? ?? true;
+        final createdAt = DateTime.tryParse(cMap['created_at'] as String? ?? '') ??
+            effectiveNow;
+        final updatedAt = DateTime.tryParse(cMap['updated_at'] as String? ?? '') ??
+            effectiveNow;
 
-      productCompanions.add(LocalProductsCompanion(
-        id: Value(pId),
-        barcode: Value(pBarcode),
-        name: Value(pMap['name'] as String),
-        price: Value(pMap['price'] as int),
-        priceVersionId: Value(priceVersionId),
-        stock: Value(pMap['stock'] as int),
-        stockUnit: Value(pMap['stock_unit'] as String? ?? 'adet'),
-        pricingUnit: Value(pMap['pricing_unit'] as String? ?? 'adet'),
-        conversionFactorNumerator: Value(pMap['conversion_factor_numerator'] as int? ?? 1),
-        conversionFactorDenominator: Value(pMap['conversion_factor_denominator'] as int? ?? 1),
-        // Hub şeması KDV oranı taşımıyorsa yerel oran korunur (20'ye sıfırlanmaz).
-        vatRate: pMap['vat_rate'] is int
-            ? Value(pMap['vat_rate'] as int)
-            : const Value.absent(),
-        isActive: Value(isActive),
-        updatedAt: Value(effectiveNow),
-      ));
-
-      // Ana barkod varsa SSOT tablosuna ekle
-      if (pBarcode != null && pBarcode.isNotEmpty) {
-        barcodeCompanions.add(LocalProductBarcodesCompanion(
-          id: Value('bc_${pId}_primary'),
-          productId: Value(pId),
-          barcode: Value(pBarcode),
-          isPrimary: const Value(true),
+        categoriesById[catId] = LocalCategoriesCompanion(
+          id: Value(catId),
+          name: Value(catName),
+          parentId: Value(parentId),
           isActive: Value(isActive),
-          createdAt: Value(effectiveNow),
-        ));
+          createdAt: Value(createdAt),
+          updatedAt: Value(updatedAt),
+        );
       }
 
-      // Ek alternatif barkodlar varsa SSOT tablosuna ekle (Hub prodId placeholder'ı atlanır)
-      final extraBarcodes = pMap['barcodes'] as List<dynamic>?;
-      if (extraBarcodes != null) {
-        for (var i = 0; i < extraBarcodes.length; i++) {
-          final extraBc = extraBarcodes[i].toString().trim();
-          if (extraBc.isEmpty || extraBc == pId || extraBc == pBarcode) continue;
+      final productsJson = data['products'] as List<dynamic>? ?? const [];
+      final pageSessionId = data['sync_session_id'] as String?;
+      if (pageSessionId != null && pageSessionId.isNotEmpty) {
+        syncSessionId = pageSessionId;
+      }
+
+      for (final p in productsJson) {
+        final pMap = p as Map<String, dynamic>;
+        final pId = pMap['id'] as String;
+        final rawPrimaryBarcode = (pMap['barcode'] as String?)?.trim();
+        final pBarcode = (rawPrimaryBarcode == null ||
+                rawPrimaryBarcode.isEmpty ||
+                rawPrimaryBarcode == pId)
+            ? null
+            : rawPrimaryBarcode;
+        final isActive = pMap['is_active'] as bool? ?? true;
+        final priceVersionId = pMap['price_version_id'] as String? ?? 'pv_init';
+        final hasCategoryId = pMap.containsKey('category_id');
+        final rawCategoryId = (pMap['category_id'] as String?)?.trim();
+        final effectiveCategoryId =
+            (rawCategoryId == null || rawCategoryId.isEmpty)
+                ? null
+                : rawCategoryId;
+
+        productCompanions.add(LocalProductsCompanion(
+          id: Value(pId),
+          barcode: Value(pBarcode),
+          name: Value(pMap['name'] as String),
+          categoryId: hasCategoryId
+              ? Value(effectiveCategoryId)
+              : const Value.absent(),
+          price: Value(pMap['price'] as int),
+          priceVersionId: Value(priceVersionId),
+          stock: Value(pMap['stock'] as int),
+          stockUnit: Value(pMap['stock_unit'] as String? ?? 'adet'),
+          pricingUnit: Value(pMap['pricing_unit'] as String? ?? 'adet'),
+          conversionFactorNumerator:
+              Value(pMap['conversion_factor_numerator'] as int? ?? 1),
+          conversionFactorDenominator:
+              Value(pMap['conversion_factor_denominator'] as int? ?? 1),
+          // Hub şeması KDV oranı taşımıyorsa yerel oran korunur (20'ye sıfırlanmaz).
+          vatRate: pMap['vat_rate'] is int
+              ? Value(pMap['vat_rate'] as int)
+              : const Value.absent(),
+          isActive: Value(isActive),
+          updatedAt: Value(effectiveNow),
+        ));
+
+        // Ana barkod varsa SSOT tablosuna ekle
+        if (pBarcode != null && pBarcode.isNotEmpty) {
           barcodeCompanions.add(LocalProductBarcodesCompanion(
-            id: Value('bc_${pId}_alt_$i'),
+            id: Value('bc_${pId}_primary'),
             productId: Value(pId),
-            barcode: Value(extraBc),
-            isPrimary: const Value(false),
+            barcode: Value(pBarcode),
+            isPrimary: const Value(true),
             isActive: Value(isActive),
             createdAt: Value(effectiveNow),
           ));
         }
+
+        // Ek alternatif barkodlar varsa SSOT tablosuna ekle (Hub prodId placeholder'ı atlanır)
+        final extraBarcodes = pMap['barcodes'] as List<dynamic>?;
+        if (extraBarcodes != null) {
+          for (var i = 0; i < extraBarcodes.length; i++) {
+            final extraBc = extraBarcodes[i].toString().trim();
+            if (extraBc.isEmpty || extraBc == pId || extraBc == pBarcode) {
+              continue;
+            }
+            barcodeCompanions.add(LocalProductBarcodesCompanion(
+              id: Value('bc_${pId}_alt_$i'),
+              productId: Value(pId),
+              barcode: Value(extraBc),
+              isPrimary: const Value(false),
+              isActive: Value(isActive),
+              createdAt: Value(effectiveNow),
+            ));
+          }
+        }
       }
     }
 
-    // Atomik SQLite transaction: Ya hepsi güncellenir ya hiçbiri (Yarım kalan sync cache'i bozamaz)
-    await repository.upsertProducts(
-      productCompanions,
-      barcodes: barcodeCompanions,
-      deactivateRemovedBarcodes: true,
-    );
+    if (transport is CatalogExtendedSyncTransport) {
+      final pagedTransport = transport as CatalogExtendedSyncTransport;
+      var offset = 0;
+      while (true) {
+        final resp = await pagedTransport.getProductsPage(
+          hubUrl: hubUrl,
+          token: currentToken,
+          limit: pageLimit,
+          offset: offset,
+          timeout: effectiveCatalogTimeout,
+        );
+        if (!resp.isSuccess) {
+          if (resp.isTlsPinMismatch) {
+            throw StateError(
+              'Ürün senkronizasyonu TLS hatası [TLS_PIN_MISMATCH]: ${resp.errorMessage}',
+            );
+          }
+          if (resp.isTlsCertError) {
+            throw StateError(
+              'Ürün senkronizasyonu TLS hatası [TLS_CERT_ERROR]: ${resp.errorMessage}',
+            );
+          }
+          throw StateError(
+            'Ürün senkronizasyonu başarısız oldu [${resp.statusCode}]: ${resp.errorMessage ?? resp.body}',
+          );
+        }
+
+        final data = jsonDecode(resp.body) as Map<String, dynamic>;
+        collectCatalogPage(data);
+
+        final hasMore = data['has_more'] == true;
+        final pageProducts = data['products'] as List<dynamic>? ?? const [];
+        final nextOffset =
+            (data['next_offset'] as num?)?.toInt() ?? (offset + pageProducts.length);
+        if (!hasMore || pageProducts.isEmpty || nextOffset <= offset) {
+          break;
+        }
+        offset = nextOffset;
+      }
+    } else {
+      final resp = await transport.getProducts(
+        hubUrl: hubUrl,
+        token: currentToken,
+        timeout: effectiveCatalogTimeout,
+      );
+
+      if (!resp.isSuccess) {
+        if (resp.isTlsPinMismatch) {
+          throw StateError(
+            'Ürün senkronizasyonu TLS hatası [TLS_PIN_MISMATCH]: ${resp.errorMessage}',
+          );
+        }
+        if (resp.isTlsCertError) {
+          throw StateError(
+            'Ürün senkronizasyonu TLS hatası [TLS_CERT_ERROR]: ${resp.errorMessage}',
+          );
+        }
+        throw StateError(
+          'Ürün senkronizasyonu başarısız oldu [${resp.statusCode}]: ${resp.errorMessage ?? resp.body}',
+        );
+      }
+
+      final data = jsonDecode(resp.body) as Map<String, dynamic>;
+      collectCatalogPage(data);
+    }
+
+    // Atomik SQLite transaction: Kategoriler (FK sırası) + Ürünler + Barkodlar
+    // birlikte güncellenir (yarım kalan sync cache'i bozamaz).
+    final categoryCompanions = categoriesById.values.toList(growable: false);
+    await repository.db.transaction(() async {
+      if (categoryCompanions.isNotEmpty) {
+        await repository.upsertCategories(categoryCompanions);
+      }
+      await repository.upsertProducts(
+        productCompanions,
+        barcodes: barcodeCompanions,
+        deactivateRemovedBarcodes: true,
+      );
+    });
 
     final syncState = await repository.getSyncState(deviceId);
     if (syncState == null) {
@@ -603,19 +730,20 @@ class ClientSyncService {
     }
 
     // Yerel commit tamamlandı: Henüz sunucuya ACK gönderilmeden önce pendingSyncSessionId kaydet
+    final completedSessionId = syncSessionId;
     await (repository.db.update(repository.db.clientSyncStates)..where((s) => s.deviceId.equals(deviceId))).write(
           ClientSyncStatesCompanion(
-            pendingSyncSessionId: Value(syncSessionId),
+            pendingSyncSessionId: Value(completedSessionId),
             updatedAt: Value(effectiveNow),
           ),
         );
 
     // 2. Aşama: İstemci yerel veritabanına başarıyla yazdıktan sonra Hub'a authenticated ACK gönderir
-    if (syncSessionId != null && syncSessionId.isNotEmpty) {
+    if (completedSessionId != null && completedSessionId.isNotEmpty) {
       final ackResp = await transport.postSyncAck(
         hubUrl: hubUrl,
         token: currentToken,
-        syncSessionId: syncSessionId,
+        syncSessionId: completedSessionId,
         timeout: requestTimeout,
       );
 

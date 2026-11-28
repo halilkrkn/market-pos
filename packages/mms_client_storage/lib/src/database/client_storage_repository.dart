@@ -477,6 +477,104 @@ class ClientStorageRepository {
     });
   }
 
+  /// Hub'dan gelen kategori listesini hiyerarşik `parentId` sırasını koruyarak
+  /// atomik olarak yerel `LocalCategories` tablosuna işler.
+  /// Echo prevention: İndirilen kategoriler asla Outbox'a yazılmaz; yerel
+  /// senkronize edilmemiş `CATEGORY_UPSERT` değişiklikleri korunur.
+  Future<void> upsertCategories(List<LocalCategoriesCompanion> categories) async {
+    if (categories.isEmpty) return;
+
+    await db.transaction(() async {
+      final pendingCatOps = await (db.select(db.outboxOperations)
+            ..where((o) =>
+                o.status.isIn(_unsyncedOutboxStatuses) &
+                o.operationType.equals('CATEGORY_UPSERT')))
+          .get();
+      final protectedCategoryIds = <String>{};
+      for (final op in pendingCatOps) {
+        try {
+          final decoded = jsonDecode(op.payload);
+          if (decoded is Map<String, dynamic>) {
+            final cat = decoded['category'];
+            if (cat is Map<String, dynamic> && cat['id'] is String) {
+              protectedCategoryIds.add(cat['id'] as String);
+            }
+          }
+        } catch (_) {
+          // Bozuk outbox kaydı senkronizasyonu kesmez.
+        }
+      }
+
+      final existingRows = await db.select(db.localCategories).get();
+      final knownIds = <String>{for (final c in existingRows) c.id};
+
+      final remaining = <LocalCategoriesCompanion>[
+        for (final c in categories)
+          if (c.id.present &&
+              c.id.value.isNotEmpty &&
+              !protectedCategoryIds.contains(c.id.value))
+            c,
+      ];
+
+      while (remaining.isNotEmpty) {
+        final ready = <LocalCategoriesCompanion>[];
+        final nextRemaining = <LocalCategoriesCompanion>[];
+
+        for (final cat in remaining) {
+          final parentId = cat.parentId.present ? cat.parentId.value : null;
+          if (parentId == null ||
+              parentId.isEmpty ||
+              knownIds.contains(parentId)) {
+            ready.add(cat);
+          } else {
+            nextRemaining.add(cat);
+          }
+        }
+
+        if (ready.isEmpty) {
+          // Eksik veya döngüsel ebeveyn referansı varsa önce parentId olmadan ekle,
+          // ardından bilinen ebeveynleri güncelle.
+          for (final cat in nextRemaining) {
+            final safeRow = cat.copyWith(parentId: const Value(null));
+            await db.into(db.localCategories).insert(
+                  safeRow,
+                  onConflict: DoUpdate((_) => safeRow),
+                );
+            knownIds.add(cat.id.value);
+          }
+          for (final cat in nextRemaining) {
+            final parentId = cat.parentId.present ? cat.parentId.value : null;
+            if (parentId != null &&
+                parentId.isNotEmpty &&
+                parentId != cat.id.value &&
+                knownIds.contains(parentId)) {
+              await (db.update(db.localCategories)
+                    ..where((c) => c.id.equals(cat.id.value)))
+                  .write(LocalCategoriesCompanion(parentId: Value(parentId)));
+            }
+          }
+          break;
+        }
+
+        await db.batch((b) {
+          for (final cat in ready) {
+            b.insert(
+              db.localCategories,
+              cat,
+              onConflict: DoUpdate((_) => cat),
+            );
+          }
+        });
+        for (final cat in ready) {
+          knownIds.add(cat.id.value);
+        }
+        remaining
+          ..clear()
+          ..addAll(nextRemaining);
+      }
+    });
+  }
+
   /// Sunucudan gelen ürün listesini ve ilişkili barkodları atomik olarak günceller
   Future<void> upsertProducts(
     List<LocalProductsCompanion> products, {
@@ -2221,25 +2319,40 @@ class ClientStorageRepository {
   Future<LocalCategory> createCategory({
     required String name,
     String? parentId,
+    String? deviceId,
   }) async {
     final trimName = name.trim();
     if (trimName.isEmpty) {
       throw ArgumentError('Kategori adı boş olamaz.');
     }
+    final cleanParentId =
+        (parentId != null && parentId.trim().isNotEmpty) ? parentId.trim() : null;
     final now = DateTime.now();
     final catId = 'cat_${now.microsecondsSinceEpoch}_${_nextUniqueToken()}';
 
-    final category = LocalCategoriesCompanion(
-      id: Value(catId),
-      name: Value(trimName),
-      parentId: Value(parentId),
-      isActive: const Value(true),
-      createdAt: Value(now),
-      updatedAt: Value(now),
-    );
+    return db.transaction(() async {
+      final category = LocalCategoriesCompanion(
+        id: Value(catId),
+        name: Value(trimName),
+        parentId: Value(cleanParentId),
+        isActive: const Value(true),
+        createdAt: Value(now),
+        updatedAt: Value(now),
+      );
 
-    await db.into(db.localCategories).insert(category);
-    return (await getCategoryById(catId))!;
+      await db.into(db.localCategories).insert(category);
+      final saved = (await getCategoryById(catId))!;
+
+      final cleanDeviceId = deviceId?.trim();
+      if (cleanDeviceId != null && cleanDeviceId.isNotEmpty) {
+        await _enqueueCategoryUpsertOutbox(
+          category: saved,
+          deviceId: cleanDeviceId,
+          occurredAt: now,
+        );
+      }
+      return saved;
+    });
   }
 
   Future<void> updateCategory({
@@ -2247,30 +2360,106 @@ class ClientStorageRepository {
     required String name,
     String? parentId,
     bool? isActive,
+    String? deviceId,
   }) async {
     final trimName = name.trim();
     if (trimName.isEmpty) {
       throw ArgumentError('Kategori adı boş olamaz.');
     }
+    final cleanParentId =
+        (parentId != null && parentId.trim().isNotEmpty) ? parentId.trim() : null;
     final now = DateTime.now();
-    await (db.update(db.localCategories)..where((c) => c.id.equals(id))).write(
-      LocalCategoriesCompanion(
-        name: Value(trimName),
-        parentId: Value(parentId),
-        isActive: isActive != null ? Value(isActive) : const Value.absent(),
-        updatedAt: Value(now),
-      ),
-    );
+    await db.transaction(() async {
+      await (db.update(db.localCategories)..where((c) => c.id.equals(id)))
+          .write(
+        LocalCategoriesCompanion(
+          name: Value(trimName),
+          parentId: Value(cleanParentId),
+          isActive: isActive != null ? Value(isActive) : const Value.absent(),
+          updatedAt: Value(now),
+        ),
+      );
+
+      final cleanDeviceId = deviceId?.trim();
+      if (cleanDeviceId != null && cleanDeviceId.isNotEmpty) {
+        final updated = await getCategoryById(id);
+        if (updated != null) {
+          await _enqueueCategoryUpsertOutbox(
+            category: updated,
+            deviceId: cleanDeviceId,
+            occurredAt: now,
+          );
+        }
+      }
+    });
   }
 
-  Future<void> deactivateCategory(String id) async {
+  Future<void> deactivateCategory(String id, {String? deviceId}) async {
     // BR-PROD-14: Kategoriler fiziksel silinmez, pasife alınır
-    await (db.update(db.localCategories)..where((c) => c.id.equals(id))).write(
-      LocalCategoriesCompanion(
-        isActive: const Value(false),
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+    final now = DateTime.now();
+    await db.transaction(() async {
+      await (db.update(db.localCategories)..where((c) => c.id.equals(id)))
+          .write(
+        LocalCategoriesCompanion(
+          isActive: const Value(false),
+          updatedAt: Value(now),
+        ),
+      );
+
+      final cleanDeviceId = deviceId?.trim();
+      if (cleanDeviceId != null && cleanDeviceId.isNotEmpty) {
+        final updated = await getCategoryById(id);
+        if (updated != null) {
+          await _enqueueCategoryUpsertOutbox(
+            category: updated,
+            deviceId: cleanDeviceId,
+            occurredAt: now,
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> _enqueueCategoryUpsertOutbox({
+    required LocalCategory category,
+    required String deviceId,
+    required DateTime occurredAt,
+  }) async {
+    final nextSeq =
+        await _allocateNextClientSeq(deviceId, occurredAt: occurredAt);
+    final uniqueToken = _nextUniqueToken();
+    final operationId =
+        'op_cat_${category.id}_${occurredAt.microsecondsSinceEpoch}_${nextSeq}_$uniqueToken';
+
+    final outboxPayload = {
+      'client_seq': nextSeq,
+      'operation_id': operationId,
+      'operation_type': 'CATEGORY_UPSERT',
+      'category': {
+        'id': category.id,
+        'name': category.name,
+        'parent_id': category.parentId,
+        'is_active': category.isActive,
+      },
+    };
+
+    final payloadStr = jsonEncode(outboxPayload);
+    final payloadHash = sha256.convert(utf8.encode(payloadStr)).toString();
+
+    await db.into(db.outboxOperations).insert(
+          OutboxOperationsCompanion(
+            operationId: Value(operationId),
+            deviceId: Value(deviceId),
+            clientSeq: Value(nextSeq),
+            operationType: const Value('CATEGORY_UPSERT'),
+            payload: Value(payloadStr),
+            payloadHash: Value(payloadHash),
+            occurredAt: Value(occurredAt),
+            status: const Value('PENDING'),
+            attemptCount: const Value(0),
+            createdAt: Value(occurredAt),
+          ),
+        );
   }
 
   // --- Ürün İşlemleri ---

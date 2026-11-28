@@ -24,7 +24,12 @@ class LocalCatalogRepository implements CatalogRepository {
   Future<LocalCategory> createCategory({
     required String name,
     String? parentId,
-  }) => _repo.createCategory(name: name, parentId: parentId);
+    String? deviceId,
+  }) => _repo.createCategory(
+    name: name,
+    parentId: parentId,
+    deviceId: deviceId,
+  );
 
   @override
   Future<void> updateCategory({
@@ -32,15 +37,18 @@ class LocalCatalogRepository implements CatalogRepository {
     required String name,
     String? parentId,
     bool? isActive,
+    String? deviceId,
   }) => _repo.updateCategory(
     id: id,
     name: name,
     parentId: parentId,
     isActive: isActive,
+    deviceId: deviceId,
   );
 
   @override
-  Future<void> deactivateCategory(String id) => _repo.deactivateCategory(id);
+  Future<void> deactivateCategory(String id, {String? deviceId}) =>
+      _repo.deactivateCategory(id, deviceId: deviceId);
 
   @override
   Future<List<LocalProduct>> getProducts({

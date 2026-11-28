@@ -762,12 +762,21 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
       _service.runOperation(() => _delegate.getCategoryById(id));
 
   @override
+  Future<void> upsertCategories(List<LocalCategoriesCompanion> categories) =>
+      _service.runOperation(() => _delegate.upsertCategories(categories));
+
+  @override
   Future<LocalCategory> createCategory({
     required String name,
     String? parentId,
+    String? deviceId,
   }) =>
       _service.runOperation(
-        () => _delegate.createCategory(name: name, parentId: parentId),
+        () => _delegate.createCategory(
+          name: name,
+          parentId: parentId,
+          deviceId: deviceId,
+        ),
       );
 
   @override
@@ -776,6 +785,7 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
     required String name,
     String? parentId,
     bool? isActive,
+    String? deviceId,
   }) =>
       _service.runOperation(
         () => _delegate.updateCategory(
@@ -783,12 +793,15 @@ class _TrackedClientStorageRepository extends ClientStorageRepository {
           name: name,
           parentId: parentId,
           isActive: isActive,
+          deviceId: deviceId,
         ),
       );
 
   @override
-  Future<void> deactivateCategory(String id) =>
-      _service.runOperation(() => _delegate.deactivateCategory(id));
+  Future<void> deactivateCategory(String id, {String? deviceId}) =>
+      _service.runOperation(
+        () => _delegate.deactivateCategory(id, deviceId: deviceId),
+      );
 
   @override
   Future<List<LocalProduct>> getProducts({

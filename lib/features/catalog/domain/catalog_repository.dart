@@ -4,14 +4,19 @@ import 'package:mms_client_storage/mms_client_storage.dart';
 abstract interface class CatalogRepository {
   Future<List<LocalCategory>> getCategories({bool includeInactive = false});
   Future<LocalCategory?> getCategoryById(String id);
-  Future<LocalCategory> createCategory({required String name, String? parentId});
+  Future<LocalCategory> createCategory({
+    required String name,
+    String? parentId,
+    String? deviceId,
+  });
   Future<void> updateCategory({
     required String id,
     required String name,
     String? parentId,
     bool? isActive,
+    String? deviceId,
   });
-  Future<void> deactivateCategory(String id);
+  Future<void> deactivateCategory(String id, {String? deviceId});
 
   Future<List<LocalProduct>> getProducts({
     String? searchQuery,

@@ -72,7 +72,30 @@ abstract interface class PostRestoreSyncTransport {
   });
 }
 
-class HttpSyncTransport implements SyncTransport, PostRestoreSyncTransport {
+/// MMS-001 & MMS-005: Kategori senkronizasyonu ve sayfalı ürün kataloğu çekimi
+/// için opsiyonel taşıma arayüzü (mevcut `SyncTransport` test sahtelerini kırmaz).
+abstract interface class CatalogExtendedSyncTransport {
+  Future<SyncResponse> postCategoryUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  });
+
+  Future<SyncResponse> getProductsPage({
+    required String hubUrl,
+    required String token,
+    required int limit,
+    required int offset,
+    Duration timeout = const Duration(seconds: 30),
+  });
+}
+
+class HttpSyncTransport
+    implements
+        SyncTransport,
+        PostRestoreSyncTransport,
+        CatalogExtendedSyncTransport {
   final http.Client _client;
 
   /// Pilot tek-tenant/tek-store kimliği. Hub, mağaza verisi rotalarında
@@ -189,6 +212,30 @@ class HttpSyncTransport implements SyncTransport, PostRestoreSyncTransport {
     Duration timeout = const Duration(seconds: 10),
   }) =>
       _get(hubUrl, '/api/v1/products', token, timeout);
+
+  @override
+  Future<SyncResponse> postCategoryUpsert({
+    required String hubUrl,
+    required String token,
+    required String payload,
+    Duration timeout = const Duration(seconds: 10),
+  }) =>
+      _postJson(hubUrl, '/api/v1/categories/upsert', token, payload, timeout);
+
+  @override
+  Future<SyncResponse> getProductsPage({
+    required String hubUrl,
+    required String token,
+    required int limit,
+    required int offset,
+    Duration timeout = const Duration(seconds: 30),
+  }) =>
+      _get(
+        hubUrl,
+        '/api/v1/products?limit=$limit&offset=$offset',
+        token,
+        timeout,
+      );
 
   @override
   Future<SyncResponse> postSyncAck({

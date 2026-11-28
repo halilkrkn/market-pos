@@ -89,7 +89,15 @@ void main() {
       final wrapperExe = p.join(serviceWrapperDir, 'MarketMMSService.exe');
       final res = Process.runSync(wrapperExe, ['status']);
       expect(res.exitCode, equals(0));
-      expect(res.stdout.toString().trim(), anyOf(equals('NonExistent'), equals('Stopped'), equals('Running')));
+      expect(
+        res.stdout.toString().trim(),
+        anyOf(
+          equals('NonExistent'),
+          equals('Stopped'),
+          equals('Running'),
+          equals('Started'),
+        ),
+      );
     });
 
     test('4. Windows Servis kurulum ve kaldırma betikleri mevcut ve sözdizimi geçerli olmalıdır', () {

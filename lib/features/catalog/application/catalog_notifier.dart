@@ -90,9 +90,14 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
   // --- Kategori İşlemleri ---
   Future<bool> createCategory({required String name, String? parentId}) async {
     try {
-      await _repository.createCategory(name: name, parentId: parentId);
+      await _repository.createCategory(
+        name: name,
+        parentId: parentId,
+        deviceId: _deviceId,
+      );
       await loadCategories();
       if (!mounted) return false;
+      onProductChanged?.call();
       state = state.copyWith(successMessage: 'Kategori başarıyla oluşturuldu.');
       return true;
     } catch (e) {
@@ -119,9 +124,11 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
         name: name,
         parentId: parentId,
         isActive: isActive,
+        deviceId: _deviceId,
       );
       await loadCategories();
       if (!mounted) return false;
+      onProductChanged?.call();
       state = state.copyWith(successMessage: 'Kategori başarıyla güncellendi.');
       return true;
     } catch (e) {
@@ -138,9 +145,10 @@ class CatalogNotifier extends StateNotifier<CatalogState> {
 
   Future<bool> deactivateCategory(String id) async {
     try {
-      await _repository.deactivateCategory(id);
+      await _repository.deactivateCategory(id, deviceId: _deviceId);
       await loadCategories();
       if (!mounted) return false;
+      onProductChanged?.call();
       state = state.copyWith(successMessage: 'Kategori pasife alındı.');
       return true;
     } catch (e) {

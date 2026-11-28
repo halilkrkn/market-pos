@@ -289,10 +289,10 @@ void main() {
           await db.close();
         }
 
-        // v1 -> v2 -> v3 -> v4 zinciri: user_version = 4, v3 sütunları ve v4 product_barcodes eklenmiş olmalı
+        // v1 -> v2 -> v3 -> v4 -> v5 zinciri: user_version = 5, v3 sütunları ve v4 product_barcodes eklenmiş olmalı
         final rawCheck = sqlite.sqlite3.open(dbFile.path);
         try {
-          expect(rawCheck.select('PRAGMA user_version;').first.values.first, equals(4));
+          expect(rawCheck.select('PRAGMA user_version;').first.values.first, equals(5));
           final movementCols = rawCheck
               .select("PRAGMA table_info('stock_movements');")
               .map((r) => r['name'])
