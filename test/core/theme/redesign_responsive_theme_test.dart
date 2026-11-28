@@ -106,9 +106,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Kasa ve Finansal Raporlar'), findsOneWidget);
 
-      await tester.tap(find.text('Sistem & Tanı'));
+      await tester.tap(find.text('Ayarlar ve Sistem').first);
       await tester.pumpAndSettle();
-      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsAtLeastNWidgets(1));
 
       final darkThemeChip = find.byKey(const Key('theme_mode_dark'));
       await tester.scrollUntilVisible(
@@ -143,8 +143,8 @@ void main() {
 
       expect(find.byType(NavigationRail), findsOneWidget);
 
-      for (final tab in ['Dashboard', 'Ürünler', 'Stok', 'Raporlar', 'Sistem & Tanı']) {
-        await tester.tap(find.text(tab));
+      for (final tab in ['Dashboard', 'Ürünler', 'Stok', 'Raporlar', 'Ayarlar ve Sistem']) {
+        await tester.tap(find.text(tab).first);
         await tester.pumpAndSettle();
       }
       expect(tester.takeException(), isNull);

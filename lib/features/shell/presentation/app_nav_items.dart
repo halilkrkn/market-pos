@@ -37,8 +37,8 @@ const List<AppNavItem> kAppNavItems = [
     selectedIcon: Icons.bar_chart_rounded,
   ),
   AppNavItem(
-    label: 'Sistem & Tanı',
-    shortLabel: 'Sistem',
+    label: 'Ayarlar ve Sistem',
+    shortLabel: 'Ayarlar',
     icon: Icons.settings_suggest_outlined,
     selectedIcon: Icons.settings_suggest_rounded,
   ),

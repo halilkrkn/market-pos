@@ -12,6 +12,7 @@ import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart'
 import '../../../setup/setup_providers.dart';
 import '../../../sync/application/hub_connection_notifier.dart';
 import '../../data/hub_pairing_admin_client.dart';
+import '../../data/windows_zero_touch_bootstrapper.dart';
 
 /// Hub yönetim uçları yalnızca loopback'ten kabul edilir: aktif Hub adresinin portu
 /// korunarak host 127.0.0.1'e çevrilir.
@@ -25,7 +26,11 @@ final hubPairingAdminClientProvider = Provider<HubPairingAdminClient>((ref) {
       ? MmsPinnedTlsClientFactory.createClient(pinned)
       : http.Client();
   ref.onDispose(client.close);
-  return HubPairingAdminClient(hubBaseUrl: base, httpClient: client);
+  return HubPairingAdminClient(
+    hubBaseUrl: base,
+    httpClient: client,
+    readBearerToken: () => ref.read(effectiveDeviceTokenProvider),
+  );
 });
 
 /// İlk OWNER kurulumunun tamamlanıp tamamlanmadığını okur.
@@ -148,6 +153,58 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
     return 'İlk bilgisayar kurulumu (${res.deviceId}) tamamlandı ve mühürlendi.';
   }
 
+  Future<void> _connectZeroTouch() async {
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final result = await ref.read(windowsZeroTouchRunnerProvider)();
+      HubReadinessSummary? readiness;
+      if (result.isReady) {
+        try {
+          readiness = await ref
+              .read(hubPairingAdminClientProvider)
+              .fetchHubReadiness();
+        } catch (e) {
+          ref.read(redactingLoggerProvider).warning(
+                'pairing',
+                'Zero-touch sonrası Hub sağlık özeti yenilenemedi: ${e.runtimeType}',
+              );
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        if (readiness != null) _readiness = readiness;
+        switch (result.status) {
+          case WindowsZeroTouchStatus.bootstrapped:
+          case WindowsZeroTouchStatus.alreadyConfigured:
+            _tone = AppBadgeTone.success;
+            _message = result.message ??
+                'Ana bilgisayar bağlantısı hazır. QR kod oluşturabilirsiniz.';
+          case WindowsZeroTouchStatus.caPinnedOwnerAlreadyExists:
+            _tone = AppBadgeTone.warning;
+            _message = result.message ??
+                'Hub daha önce mühürlenmiş. Mevcut OWNER cihazı veya Gelişmiş / Manuel Kurtarma kullanın.';
+          case WindowsZeroTouchStatus.hubUnreachable:
+            _tone = AppBadgeTone.warning;
+            _message = result.message ??
+                'Yerel Master Hub henüz erişilebilir değil. Servis açılınca tekrar deneyin.';
+          case WindowsZeroTouchStatus.skippedNotEligible:
+            _tone = AppBadgeTone.info;
+            _message =
+                'Otomatik bağlantı yalnızca Windows ana bilgisayarda (127.0.0.1) çalışır.';
+          case WindowsZeroTouchStatus.failed:
+            _tone = AppBadgeTone.danger;
+            _message =
+                result.message ?? 'Otomatik ana bilgisayar bağlantısı başarısız oldu.';
+        }
+      });
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = context.mmsColors;
@@ -163,19 +220,6 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
         compact: true,
       ),
       children: [
-        if (!bootstrapCompleted) ...[
-          TextField(
-            key: const Key('pairing_admin_secret_field'),
-            controller: _secretController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Yönetici anahtarı',
-              helperText: 'Kaydedilmez; ekran kapanınca bellekten silinir.',
-              border: OutlineInputBorder(),
-            ),
-          ),
-          const SizedBox(height: MmsSpacing.sm),
-        ],
         Wrap(
           spacing: MmsSpacing.sm,
           runSpacing: MmsSpacing.sm,
@@ -184,10 +228,10 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
               SizedBox(
                 height: 48,
                 child: FilledButton.icon(
-                  key: const Key('owner_bootstrap_button'),
-                  onPressed: _busy ? null : () => _run(_bootstrapOwner),
-                  icon: const Icon(Icons.admin_panel_settings_rounded),
-                  label: const Text('İlk Kurulumu Tamamla'),
+                  key: const Key('zero_touch_connect_button'),
+                  onPressed: _busy ? null : _connectZeroTouch,
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text('Ana Bilgisayarı Otomatik Bağla'),
                 ),
               ),
             SizedBox(
@@ -350,6 +394,60 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
               ],
             ),
           ),
+        const SizedBox(height: MmsSpacing.sm),
+        Material(
+          type: MaterialType.transparency,
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              key: const Key('pairing_manual_recovery_tile'),
+              initiallyExpanded: false,
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: const EdgeInsets.only(top: MmsSpacing.xs),
+              leading: Icon(
+                Icons.admin_panel_settings_outlined,
+                size: 20,
+                color: colors.textSecondary,
+              ),
+              title: Text(
+                'Gelişmiş / Manuel Kurtarma',
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: colors.textSecondary,
+                ),
+              ),
+              children: [
+                TextField(
+                  key: const Key('pairing_admin_secret_field'),
+                  controller: _secretController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Yönetici anahtarı',
+                    helperText:
+                        'Yalnızca kurtarma içindir; kaydedilmez ve ekran kapanınca bellekten silinir.',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (!bootstrapCompleted) ...[
+                  const SizedBox(height: MmsSpacing.sm),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      height: 48,
+                      child: OutlinedButton.icon(
+                        key: const Key('owner_bootstrap_button'),
+                        onPressed: _busy ? null : () => _run(_bootstrapOwner),
+                        icon: const Icon(Icons.admin_panel_settings_rounded),
+                        label: const Text('İlk Kurulumu Tamamla'),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       ],
     );
   }

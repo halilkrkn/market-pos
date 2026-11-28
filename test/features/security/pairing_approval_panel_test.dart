@@ -10,6 +10,7 @@ import 'package:market_pos/core/security/device_role_resolver.dart';
 import 'package:market_pos/core/security/security_providers.dart';
 import 'package:market_pos/core/theme/app_theme.dart';
 import 'package:market_pos/features/security/data/hub_pairing_admin_client.dart';
+import 'package:market_pos/features/security/data/windows_zero_touch_bootstrapper.dart';
 import 'package:market_pos/features/security/presentation/widgets/pairing_approval_panel.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
@@ -42,18 +43,27 @@ void main() {
       child: MaterialApp(theme: AppTheme.lightTheme, home: const Scaffold(body: SingleChildScrollView(child: PairingApprovalPanel()))),
     ));
 
+    // Ana ekranda admin secret alanı görünmez; Gelişmiş / Manuel Kurtarma altındadır
+    expect(find.byKey(const Key('pairing_admin_secret_field')), findsNothing);
+    await tester.ensureVisible(find.byKey(const Key('pairing_manual_recovery_tile')));
+    await tester.tap(find.byKey(const Key('pairing_manual_recovery_tile')));
+    await tester.pumpAndSettle();
+
     // Yanlış anahtar → anlaşılır hata, liste boş
     await tester.enterText(find.byKey(const Key('pairing_admin_secret_field')), 'yanlis');
+    await tester.ensureVisible(find.byKey(const Key('pairing_refresh_button')));
     await tester.tap(find.byKey(const Key('pairing_refresh_button')));
     await tester.pumpAndSettle();
     expect(find.text('Yönetici anahtarı hatalı.'), findsOneWidget);
     expect(find.byKey(const Key('pairing_approve_s1')), findsNothing);
 
     await tester.enterText(find.byKey(const Key('pairing_admin_secret_field')), 'dogru_anahtar');
+    await tester.ensureVisible(find.byKey(const Key('pairing_refresh_button')));
     await tester.tap(find.byKey(const Key('pairing_refresh_button')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Kasa Telefon'), findsOneWidget);
 
+    await tester.ensureVisible(find.byKey(const Key('pairing_approve_s1')));
     await tester.tap(find.byKey(const Key('pairing_approve_s1')));
     await tester.pumpAndSettle();
     expect(approved, ['s1']);
@@ -95,7 +105,11 @@ void main() {
       ),
     ));
 
+    await tester.ensureVisible(find.byKey(const Key('pairing_manual_recovery_tile')));
+    await tester.tap(find.byKey(const Key('pairing_manual_recovery_tile')));
+    await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('pairing_admin_secret_field')), 'dogru_anahtar');
+    await tester.ensureVisible(find.byKey(const Key('pairing_create_session_button')));
     await tester.tap(find.byKey(const Key('pairing_create_session_button')));
     await tester.pumpAndSettle();
 
@@ -148,9 +162,94 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('pairing_admin_secret_field')), findsNothing);
+    expect(find.byKey(const Key('zero_touch_connect_button')), findsNothing);
     expect(find.byKey(const Key('owner_bootstrap_button')), findsNothing);
     expect(find.byKey(const Key('pairing_create_session_button')), findsOneWidget);
     expect(find.text('QR Kod Oluştur'), findsOneWidget);
     expect(find.byKey(const Key('pairing_refresh_button')), findsOneWidget);
+  });
+
+  testWidgets('Zero-Touch UI: Ana ekranda admin secret yok, OWNER Bearer ile sıfır anahtar QR Kod Oluştur çalışır',
+      (tester) async {
+    String? seenAuthHeader;
+    final client = HubPairingAdminClient(
+      hubBaseUrl: 'https://127.0.0.1:8945',
+      readBearerToken: () => 'tok_owner_zt_1',
+      httpClient: MockClient((req) async {
+        seenAuthHeader = req.headers['authorization'];
+        if (req.url.path.endsWith('/pairing/session')) {
+          return http.Response(
+            jsonEncode({
+              'session_id': 'sess_zt_1',
+              'pairing_secret': 'sec_zt_1',
+              'hub_url': 'https://192.168.1.50:8945',
+              'ca_fingerprint': 'AA:BB',
+              'expires_at': 1893456000,
+            }),
+            201,
+          );
+        }
+        return http.Response('{}', 404);
+      }),
+    );
+
+    await tester.pumpWidget(ProviderScope(
+      overrides: [hubPairingAdminClientProvider.overrideWithValue(client)],
+      child: MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const Scaffold(
+          body: SingleChildScrollView(child: PairingApprovalPanel()),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('pairing_admin_secret_field')), findsNothing);
+    expect(find.byKey(const Key('zero_touch_connect_button')), findsOneWidget);
+    expect(find.text('Ana Bilgisayarı Otomatik Bağla'), findsOneWidget);
+    expect(find.text('Gelişmiş / Manuel Kurtarma'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('pairing_create_session_button')));
+    await tester.pumpAndSettle();
+    expect(seenAuthHeader, equals('Bearer tok_owner_zt_1'));
+    expect(find.byKey(const Key('pairing_qr_image')), findsOneWidget);
+  });
+
+  testWidgets('PairingApprovalPanel "Ana Bilgisayarı Otomatik Bağla" butonu sıfır anahtar akışını çalıştırır', (tester) async {
+    var runnerCalled = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          windowsZeroTouchRunnerProvider.overrideWithValue(() async {
+            runnerCalled++;
+            return const WindowsZeroTouchResult(
+              status: WindowsZeroTouchStatus.bootstrapped,
+              caPinnedNow: true,
+              deviceId: 'POS-WIN-UI',
+              message: 'Ana bilgisayar bağlantısı otomatik olarak tamamlandı.',
+            );
+          }),
+        ],
+        child: MaterialApp(
+          theme: AppTheme.lightTheme,
+          home: const Scaffold(
+            body: SingleChildScrollView(child: PairingApprovalPanel()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('pairing_admin_secret_field')), findsNothing);
+    final btn = find.byKey(const Key('zero_touch_connect_button'));
+    expect(btn, findsOneWidget);
+    await tester.tap(btn);
+    await tester.pumpAndSettle();
+
+    expect(runnerCalled, equals(1));
+    expect(
+      find.text('Ana bilgisayar bağlantısı otomatik olarak tamamlandı.'),
+      findsOneWidget,
+    );
   });
 }

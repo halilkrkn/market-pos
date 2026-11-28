@@ -121,9 +121,17 @@ void main() {
           ),
         );
 
+        await tester.ensureVisible(
+          find.byKey(const Key('pairing_manual_recovery_tile')),
+        );
+        await tester.tap(find.byKey(const Key('pairing_manual_recovery_tile')));
+        await tester.pumpAndSettle();
         await tester.enterText(
           find.byKey(const Key('pairing_admin_secret_field')),
           'dogru_anahtar',
+        );
+        await tester.ensureVisible(
+          find.byKey(const Key('pairing_refresh_button')),
         );
         await tester.tap(find.byKey(const Key('pairing_refresh_button')));
         await tester.pumpAndSettle();

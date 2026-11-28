@@ -88,19 +88,36 @@ class HubPairingAdminClient {
   final String hubBaseUrl;
   final http.Client httpClient;
   final Duration timeout;
+  final String? Function()? readBearerToken;
 
   HubPairingAdminClient({
     required this.hubBaseUrl,
     required this.httpClient,
     this.timeout = const Duration(seconds: 8),
+    this.readBearerToken,
   });
 
-  Map<String, String> _headers(String adminSecret) {
+  Map<String, String> _headers(
+    String adminSecret, {
+    bool allowBearer = true,
+  }) {
     final clean = adminSecret.trim();
-    if (clean.isEmpty) {
-      throw const HubPairingAdminException('ERR_ADMIN_SECRET_REQUIRED', 'Hub yönetici anahtarını (admin secret) girin.');
+    if (clean.isNotEmpty) {
+      return {'content-type': 'application/json', 'x-mms-admin-secret': clean};
     }
-    return {'content-type': 'application/json', 'x-mms-admin-secret': clean};
+    if (allowBearer) {
+      final bearer = readBearerToken?.call()?.trim() ?? '';
+      if (bearer.isNotEmpty) {
+        return {
+          'content-type': 'application/json',
+          'authorization': 'Bearer $bearer',
+        };
+      }
+    }
+    throw const HubPairingAdminException(
+      'ERR_ADMIN_SECRET_REQUIRED',
+      'Önce "Ana Bilgisayarı Otomatik Bağla" ile bağlanın veya Gelişmiş / Manuel Kurtarma altından yönetici anahtarını girin.',
+    );
   }
 
   Uri _uri(String path) => Uri.parse('${hubBaseUrl.replaceAll(RegExp(r'/+$'), '')}$path');
@@ -124,8 +141,9 @@ class HubPairingAdminClient {
     if (resp.statusCode >= 200 && resp.statusCode < 300) return body;
     final code = body['code'] as String? ?? body['error'] as String? ?? 'HTTP_${resp.statusCode}';
     final message = switch (resp.statusCode) {
-      401 => 'Yönetici anahtarı gerekli.',
+      401 => 'Yönetici anahtarı veya cihaz yetkisi gerekli.',
       403 when code == 'ERR_LOOPBACK_REQUIRED' => 'Bu işlem yalnızca Hub bilgisayarından yapılabilir.',
+      403 when code == 'ERR_OWNER_ROLE_REQUIRED' => 'Bu işlem için ana bilgisayar (OWNER) yetkisi gereklidir.',
       403 => 'Yönetici anahtarı hatalı.',
       503 => 'Hub yönetici işlemleri yapılandırılmamış (admin secret dosyası yok).',
       _ => body['message'] as String? ?? 'Hub isteği başarısız (HTTP ${resp.statusCode}).',
@@ -186,7 +204,7 @@ class HubPairingAdminClient {
     String deviceName = 'Windows Master Hub (OWNER)',
     bool registerIfMissing = true,
   }) async {
-    final headers = _headers(adminSecret);
+    final headers = _headers(adminSecret, allowBearer: false);
     final body = await _send(
       () => httpClient.post(
         _uri('/api/v1/admin/owner/bootstrap'),

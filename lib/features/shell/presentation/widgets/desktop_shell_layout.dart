@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/constants/app_constants.dart';
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/theme/theme_provider.dart';
@@ -201,7 +202,7 @@ class DesktopShellLayout extends ConsumerWidget {
               ],
             ),
             Text(
-              'MARKET MMS v1.0.0 • On-Premises Local Master Hub Mimarisi',
+              'MARKET MMS v${AppConstants.appVersion} • On-Premises Local Master Hub Mimarisi',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(

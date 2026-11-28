@@ -351,10 +351,10 @@ void main() {
             'Ürünler',
             'Stok',
             'Raporlar',
-            'Sistem & Tanı',
+            'Ayarlar ve Sistem',
             'Kasa (Satış)',
           ]) {
-            await tester.tap(find.text(tab));
+            await tester.tap(find.text(tab).first);
             await tester.pumpAndSettle();
             expect(tester.takeException(), isNull, reason: 'Tablet $tab $size');
           }

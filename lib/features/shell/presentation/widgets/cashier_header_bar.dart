@@ -177,11 +177,11 @@ class CashierHeaderBar extends ConsumerWidget {
                   },
                 ),
 
-                // Mobilde Sistem & Tanı ekranına hızlı erişim (>= 48dp hedef)
+                // Mobilde Ayarlar ve Sistem ekranına hızlı erişim (>= 48dp hedef)
                 if (isCompact && onOpenDiagnostics != null)
                   AppIconButton(
                     key: const Key('header_diagnostics_button'),
-                    tooltip: 'Sistem & Tanı',
+                    tooltip: 'Ayarlar ve Sistem',
                     icon: Icons.tune_rounded,
                     size: iconButtonSize,
                     color: isDiagnosticsSelected ? colors.emerald : null,

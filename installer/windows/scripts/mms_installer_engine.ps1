@@ -16,6 +16,8 @@ param(
     [string]$PurgeUserDataValue = "0",
     [string]$ConfirmPurgeToken = "",
     [string]$AllowDeferredTlsStart = "1",
+    [switch]$AutoGenerateTlsCerts,
+    [switch]$ForceDotNetTlsGenerator,
     [string]$HealthCheckUrl = "",
     [switch]$TestSandboxMode,
     [switch]$MsiManaged,
@@ -3277,6 +3279,515 @@ function Resolve-HealthCaCertPath {
     return $defaultCa
 }
 
+function Test-IsDisqualifiedLanIpv4 {
+    param([string]$Ip)
+    if ([string]::IsNullOrWhiteSpace($Ip)) { return $true }
+    $parts = $Ip.Trim().Split('.')
+    if ($parts.Count -ne 4) { return $true }
+    $octets = New-Object int[] 4
+    for ($i = 0; $i -lt 4; $i++) {
+        $v = 0
+        if (-not [int]::TryParse($parts[$i], [ref]$v) -or $v -lt 0 -or $v -gt 255) {
+            return $true
+        }
+        $octets[$i] = $v
+    }
+    $o0 = $octets[0]
+    $o1 = $octets[1]
+    if ($o0 -eq 127 -or $o0 -eq 0) { return $true }
+    if ($o0 -eq 169 -and $o1 -eq 254) { return $true }
+    if ($o0 -ge 224) { return $true }
+    if ($o0 -eq 100 -and $o1 -ge 64 -and $o1 -le 127) { return $true }
+    if ($o0 -eq 192 -and $o1 -eq 168 -and $octets[2] -eq 56) { return $true }
+    return $false
+}
+
+function Test-IsExcludedAdapterName {
+    param([string]$Text)
+    if ([string]::IsNullOrWhiteSpace($Text)) { return $false }
+    $lower = $Text.ToLowerInvariant()
+    $excluded = @(
+        "wireguard", "wintun", "tap-windows", "openvpn", "zerotier", "tailscale",
+        "nordlynx", "wsl", "default switch", "docker", "virtualbox", "vbox",
+        "vmware", "vmnet", "pseudo", "teredo", "6to4", "ip-https", "loopback",
+        "vethernet", "hyper-v", "host-only", "bluetooth"
+    )
+    foreach ($kw in $excluded) {
+        if ($lower.Contains($kw)) { return $true }
+    }
+    return $false
+}
+
+function Resolve-PrimaryPhysicalLanIpv4 {
+    try {
+        if (Get-Command Get-NetRoute -ErrorAction SilentlyContinue) {
+            $routes = Get-NetRoute -AddressFamily IPv4 -DestinationPrefix "0.0.0.0/0" -ErrorAction SilentlyContinue |
+                Sort-Object -Property RouteMetric, InterfaceMetric
+            foreach ($r in $routes) {
+                if ([string]::IsNullOrWhiteSpace($r.NextHop) -or $r.NextHop -eq "0.0.0.0") {
+                    continue
+                }
+                $adapter = Get-NetAdapter -InterfaceIndex $r.InterfaceIndex -ErrorAction SilentlyContinue
+                if ($null -eq $adapter -or $adapter.Status -ne "Up") { continue }
+                if ($adapter.Virtual) { continue }
+                $adapterDesc = "{0} {1} {2}" -f $adapter.Name, $adapter.InterfaceDescription, $adapter.DriverDescription
+                if (Test-IsExcludedAdapterName $adapterDesc) { continue }
+                if ($adapter.InterfaceType -ne 6 -and $adapter.InterfaceType -ne 71) { continue }
+
+                $ips = Get-NetIPAddress -InterfaceIndex $r.InterfaceIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+                    Where-Object { $_.AddressState -eq "Preferred" }
+                foreach ($ipObj in $ips) {
+                    if (-not (Test-IsDisqualifiedLanIpv4 $ipObj.IPAddress)) {
+                        return $ipObj.IPAddress.Trim()
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        # Fall back to .NET NetworkInterface inspection below.
+    }
+
+    try {
+        $nics = [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()
+        foreach ($nic in $nics) {
+            if ($nic.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) { continue }
+            $type = $nic.NetworkInterfaceType
+            if ($type -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Ethernet -and
+                $type -ne [System.Net.NetworkInformation.NetworkInterfaceType]::Wireless80211 -and
+                $type -ne [System.Net.NetworkInformation.NetworkInterfaceType]::GigabitEthernet) {
+                continue
+            }
+            $desc = "{0} {1}" -f $nic.Name, $nic.Description
+            if (Test-IsExcludedAdapterName $desc) { continue }
+            $ipProps = $nic.GetIPProperties()
+            $hasGw = $false
+            foreach ($gw in $ipProps.GatewayAddresses) {
+                if ($gw.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and
+                    -not $gw.Address.Equals([System.Net.IPAddress]::Any)) {
+                    $hasGw = $true
+                    break
+                }
+            }
+            if (-not $hasGw) { continue }
+            foreach ($ua in $ipProps.UnicastAddresses) {
+                if ($ua.Address.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+                    $candidate = $ua.Address.ToString()
+                    if (-not (Test-IsDisqualifiedLanIpv4 $candidate)) {
+                        return $candidate
+                    }
+                }
+            }
+        }
+    }
+    catch {
+        return $null
+    }
+    return $null
+}
+
+function Find-OpenSsl3Executable {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    if (-not [string]::IsNullOrWhiteSpace($env:OPENSSL_PATH)) {
+        $candidates.Add($env:OPENSSL_PATH.Trim())
+    }
+    $candidates.Add("C:\Program Files\Git\usr\bin\openssl.exe")
+    $candidates.Add("C:\Program Files\OpenSSL-Win64\bin\openssl.exe")
+    try {
+        $cmd = Get-Command openssl -ErrorAction SilentlyContinue
+        if ($null -ne $cmd -and -not [string]::IsNullOrWhiteSpace($cmd.Source)) {
+            $candidates.Add($cmd.Source)
+        }
+    }
+    catch {}
+
+    foreach ($cand in $candidates) {
+        if ([string]::IsNullOrWhiteSpace($cand) -or -not (Test-Path -LiteralPath $cand -PathType Leaf)) {
+            continue
+        }
+        $prevEap = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "Continue"
+            $verOut = & $cand version 2>&1
+            if ($LASTEXITCODE -eq 0 -and ("$verOut" -match 'OpenSSL\s+([3-9]|\d{2,})\.')) {
+                return $cand
+            }
+        }
+        catch {}
+        finally {
+            $ErrorActionPreference = $prevEap
+        }
+    }
+    return $null
+}
+
+function Invoke-GenerateLocalTlsWithOpenSsl {
+    param(
+        [string]$OpenSslExe,
+        [string]$CertsDir,
+        [string]$LanIp
+    )
+
+    $tempProvisionDir = Join-Path ([System.IO.Path]::GetTempPath()) ("mms_tls_prov_" + [guid]::NewGuid().ToString("N"))
+    [MmsSafeDiagnosticLogWriter]::CreateDirectoryWithStrictSecurity($tempProvisionDir, [bool]$TestSandboxMode)
+    $caKeyTemp = Join-Path $tempProvisionDir "ca.key"
+    $caCrtTemp = Join-Path $tempProvisionDir "ca.crt"
+    $caSerialTemp = Join-Path $tempProvisionDir "ca.srl"
+    $srvKeyTemp = Join-Path $tempProvisionDir "server.key"
+    $srvCsrTemp = Join-Path $tempProvisionDir "server.csr"
+    $srvCrtTemp = Join-Path $tempProvisionDir "server.crt"
+    $extTemp = Join-Path $tempProvisionDir "server_ext.cnf"
+
+    $prevEap = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $caArgs = @(
+            "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", $caKeyTemp,
+            "-out", $caCrtTemp,
+            "-days", "3650",
+            "-subj", "/CN=Market MMS Local Root CA",
+            "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign"
+        )
+        $caOut = & $OpenSslExe @caArgs 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $caCrtTemp) -or -not (Test-Path -LiteralPath $caKeyTemp)) {
+            throw "OpenSSL Root CA olusturulamadi: $caOut"
+        }
+
+        $sanItems = New-Object System.Collections.Generic.List[string]
+        $sanItems.Add("IP:127.0.0.1")
+        if (-not [string]::IsNullOrWhiteSpace($LanIp)) {
+            $sanItems.Add("IP:$LanIp")
+        }
+        $sanItems.Add("DNS:localhost")
+        $extContent = @(
+            "basicConstraints=critical,CA:FALSE",
+            "keyUsage=critical,digitalSignature,keyEncipherment",
+            "extendedKeyUsage=serverAuth",
+            ("subjectAltName=" + ($sanItems -join ","))
+        ) -join "`n"
+        [System.IO.File]::WriteAllText($extTemp, $extContent, (New-Object System.Text.UTF8Encoding($false)))
+
+        $csrArgs = @(
+            "req", "-new", "-newkey", "rsa:2048", "-nodes",
+            "-keyout", $srvKeyTemp,
+            "-out", $srvCsrTemp,
+            "-subj", "/CN=localhost"
+        )
+        $csrOut = & $OpenSslExe @csrArgs 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $srvKeyTemp) -or -not (Test-Path -LiteralPath $srvCsrTemp)) {
+            throw "OpenSSL sunucu CSR olusturulamadi: $csrOut"
+        }
+
+        $signArgs = @(
+            "x509", "-req",
+            "-in", $srvCsrTemp,
+            "-CA", $caCrtTemp,
+            "-CAkey", $caKeyTemp,
+            "-CAcreateserial",
+            "-CAserial", $caSerialTemp,
+            "-out", $srvCrtTemp,
+            "-days", "365",
+            "-sha256",
+            "-extfile", $extTemp
+        )
+        $signOut = & $OpenSslExe @signArgs 2>&1
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $srvCrtTemp)) {
+            throw "OpenSSL sunucu sertifikasi imzalanamadi: $signOut"
+        }
+
+        Copy-Item -LiteralPath $caCrtTemp -Destination (Join-Path $CertsDir "ca.crt") -Force
+        Copy-Item -LiteralPath $srvCrtTemp -Destination (Join-Path $CertsDir "server.crt") -Force
+        Copy-Item -LiteralPath $srvKeyTemp -Destination (Join-Path $CertsDir "server.key") -Force
+    }
+    finally {
+        $ErrorActionPreference = $prevEap
+        foreach ($secretTemp in @($caKeyTemp, $srvKeyTemp)) {
+            if (Test-Path -LiteralPath $secretTemp) {
+                try {
+                    $len = (Get-Item -LiteralPath $secretTemp).Length
+                    if ($len -gt 0) {
+                        [System.IO.File]::WriteAllBytes($secretTemp, (New-Object byte[] $len))
+                    }
+                }
+                catch {}
+            }
+        }
+        if (Test-Path -LiteralPath $tempProvisionDir) {
+            Remove-Item -LiteralPath $tempProvisionDir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+if (-not ("MmsLocalTlsCertGenerator" -as [type])) {
+    Add-Type -Language CSharp -ReferencedAssemblies @("System.dll", "System.Core.dll") -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
+
+public static class MmsLocalTlsCertGenerator
+{
+    private static byte[] TrimLeadingZeros(byte[] data)
+    {
+        if (data == null || data.Length == 0) return new byte[] { 0 };
+        int i = 0;
+        while (i < data.Length - 1 && data[i] == 0) i++;
+        if (i == 0) return data;
+        byte[] res = new byte[data.Length - i];
+        Buffer.BlockCopy(data, i, res, 0, res.Length);
+        return res;
+    }
+
+    private static byte[] EncodeDerLength(int len)
+    {
+        if (len < 128) return new byte[] { (byte)len };
+        if (len <= 0xFF) return new byte[] { 0x81, (byte)len };
+        if (len <= 0xFFFF) return new byte[] { 0x82, (byte)(len >> 8), (byte)(len & 0xFF) };
+        return new byte[] { 0x83, (byte)(len >> 16), (byte)((len >> 8) & 0xFF), (byte)(len & 0xFF) };
+    }
+
+    private static byte[] EncodeDerInteger(byte[] unsignedBigEndian)
+    {
+        byte[] trimmed = TrimLeadingZeros(unsignedBigEndian);
+        bool needZeroPrefix = (trimmed[0] & 0x80) != 0;
+        int contentLen = trimmed.Length + (needZeroPrefix ? 1 : 0);
+        byte[] lenBytes = EncodeDerLength(contentLen);
+        byte[] res = new byte[1 + lenBytes.Length + contentLen];
+        res[0] = 0x02;
+        Buffer.BlockCopy(lenBytes, 0, res, 1, lenBytes.Length);
+        int pos = 1 + lenBytes.Length;
+        if (needZeroPrefix) res[pos++] = 0x00;
+        Buffer.BlockCopy(trimmed, 0, res, pos, trimmed.Length);
+        return res;
+    }
+
+    private static byte[] EncodePkcs1PrivateKeyDer(RSAParameters p)
+    {
+        List<byte[]> fields = new List<byte[]>
+        {
+            EncodeDerInteger(new byte[] { 0 }),
+            EncodeDerInteger(p.Modulus),
+            EncodeDerInteger(p.Exponent),
+            EncodeDerInteger(p.D),
+            EncodeDerInteger(p.P),
+            EncodeDerInteger(p.Q),
+            EncodeDerInteger(p.DP),
+            EncodeDerInteger(p.DQ),
+            EncodeDerInteger(p.InverseQ)
+        };
+        int totalContent = 0;
+        foreach (byte[] f in fields) totalContent += f.Length;
+        byte[] lenBytes = EncodeDerLength(totalContent);
+        byte[] der = new byte[1 + lenBytes.Length + totalContent];
+        der[0] = 0x30;
+        Buffer.BlockCopy(lenBytes, 0, der, 1, lenBytes.Length);
+        int offset = 1 + lenBytes.Length;
+        foreach (byte[] f in fields)
+        {
+            Buffer.BlockCopy(f, 0, der, offset, f.Length);
+            offset += f.Length;
+        }
+        return der;
+    }
+
+    private static string ToPem(string label, byte[] der)
+    {
+        string b64 = Convert.ToBase64String(der);
+        StringBuilder sb = new StringBuilder();
+        sb.Append("-----BEGIN ").Append(label).Append("-----\n");
+        for (int i = 0; i < b64.Length; i += 64)
+        {
+            int count = Math.Min(64, b64.Length - i);
+            sb.Append(b64, i, count).Append('\n');
+        }
+        sb.Append("-----END ").Append(label).Append("-----\n");
+        return sb.ToString();
+    }
+
+    public static void Generate(string caCertPath, string serverCertPath, string serverKeyPath, string lanIp)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset caStart = now.AddMinutes(-5);
+        DateTimeOffset caEnd = now.AddDays(3650);
+        DateTimeOffset leafStart = now.AddMinutes(-5);
+        DateTimeOffset leafEnd = now.AddDays(365);
+
+        using (RSA caRsa = RSA.Create(2048))
+        using (RSA leafRsa = RSA.Create(2048))
+        {
+            CertificateRequest caReq = new CertificateRequest(
+                "CN=Market MMS Local Root CA",
+                caRsa,
+                HashAlgorithmName.SHA256,
+                RSASignaturePadding.Pkcs1);
+            caReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+            caReq.CertificateExtensions.Add(new X509KeyUsageExtension(
+                X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
+                true));
+
+            using (X509Certificate2 caCert = caReq.CreateSelfSigned(caStart, caEnd))
+            {
+                CertificateRequest leafReq = new CertificateRequest(
+                    "CN=localhost",
+                    leafRsa,
+                    HashAlgorithmName.SHA256,
+                    RSASignaturePadding.Pkcs1);
+                leafReq.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+                leafReq.CertificateExtensions.Add(new X509KeyUsageExtension(
+                    X509KeyUsageFlags.DigitalSignature | X509KeyUsageFlags.KeyEncipherment,
+                    true));
+                OidCollection ekuOids = new OidCollection();
+                ekuOids.Add(new Oid("1.3.6.1.5.5.7.3.1"));
+                leafReq.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(ekuOids, false));
+
+                SubjectAlternativeNameBuilder sanBuilder = new SubjectAlternativeNameBuilder();
+                sanBuilder.AddIpAddress(IPAddress.Loopback);
+                if (!string.IsNullOrWhiteSpace(lanIp))
+                {
+                    IPAddress parsedLan;
+                    if (IPAddress.TryParse(lanIp.Trim(), out parsedLan))
+                    {
+                        sanBuilder.AddIpAddress(parsedLan);
+                    }
+                }
+                sanBuilder.AddDnsName("localhost");
+                leafReq.CertificateExtensions.Add(sanBuilder.Build(false));
+
+                byte[] serial = new byte[16];
+                using (RandomNumberGenerator rng = RandomNumberGenerator.Create())
+                {
+                    rng.GetBytes(serial);
+                }
+                serial[0] = (byte)(serial[0] & 0x7F);
+                if (serial[0] == 0) serial[0] = 0x01;
+
+                using (X509Certificate2 leafCert = leafReq.Create(caCert, leafStart, leafEnd, serial))
+                {
+                    Encoding asciiNoBom = new ASCIIEncoding();
+                    File.WriteAllText(caCertPath, ToPem("CERTIFICATE", caCert.RawData), asciiNoBom);
+                    File.WriteAllText(serverCertPath, ToPem("CERTIFICATE", leafCert.RawData), asciiNoBom);
+                    byte[] pkcs1Der = EncodePkcs1PrivateKeyDer(leafRsa.ExportParameters(true));
+                    try
+                    {
+                        File.WriteAllText(serverKeyPath, ToPem("RSA PRIVATE KEY", pkcs1Der), asciiNoBom);
+                    }
+                    finally
+                    {
+                        Array.Clear(pkcs1Der, 0, pkcs1Der.Length);
+                    }
+                }
+            }
+        }
+    }
+}
+"@
+}
+
+function Invoke-GenerateLocalTlsWithDotNet {
+    param(
+        [string]$CertsDir,
+        [string]$LanIp
+    )
+
+    $caCrtPath = Join-Path $CertsDir "ca.crt"
+    $srvCrtPath = Join-Path $CertsDir "server.crt"
+    $srvKeyPath = Join-Path $CertsDir "server.key"
+    [MmsLocalTlsCertGenerator]::Generate($caCrtPath, $srvCrtPath, $srvKeyPath, $LanIp)
+}
+
+function Update-HubConfigAfterTlsProvision {
+    param(
+        [string]$ConfigPath,
+        [string]$LanIp
+    )
+
+    if (-not (Test-Path -LiteralPath $ConfigPath)) {
+        return
+    }
+    $rawJson = Get-Content -LiteralPath $ConfigPath -Raw
+    $cfgObj = $rawJson | ConvertFrom-Json
+    $tlsObj = [ordered]@{
+        enabled = $true
+        cert    = "../certs/server.crt"
+        key     = "../certs/server.key"
+        ca_cert = "../certs/ca.crt"
+    }
+    $cfgObj | Add-Member -NotePropertyName "tls" -NotePropertyValue ([pscustomobject]$tlsObj) -Force
+    if (-not [string]::IsNullOrWhiteSpace($LanIp)) {
+        $cfgObj | Add-Member -NotePropertyName "advertise_host" -NotePropertyValue $LanIp -Force
+    }
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($ConfigPath, ($cfgObj | ConvertTo-Json -Depth 8), $utf8NoBom)
+}
+
+function Ensure-LocalHubTlsCertificates {
+    param(
+        [string]$DataRoot,
+        [string]$ConfigPath
+    )
+
+    $certsDir = Join-Path $DataRoot "certs"
+    if (-not (Test-Path -LiteralPath $certsDir)) {
+        New-Item -ItemType Directory -Path $certsDir -Force | Out-Null
+    }
+
+    $caCrtPath = Join-Path $certsDir "ca.crt"
+    $srvCrtPath = Join-Path $certsDir "server.crt"
+    $srvKeyPath = Join-Path $certsDir "server.key"
+
+    $alreadyPresent = (Test-Path -LiteralPath $caCrtPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $srvCrtPath -PathType Leaf) -and
+        (Test-Path -LiteralPath $srvKeyPath -PathType Leaf) -and
+        ((Get-Item -LiteralPath $caCrtPath).Length -gt 0) -and
+        ((Get-Item -LiteralPath $srvCrtPath).Length -gt 0) -and
+        ((Get-Item -LiteralPath $srvKeyPath).Length -gt 0)
+
+    if ($alreadyPresent) {
+        return $true
+    }
+
+    $existedCa = Test-Path -LiteralPath $caCrtPath
+    $existedSrvCrt = Test-Path -LiteralPath $srvCrtPath
+    $existedSrvKey = Test-Path -LiteralPath $srvKeyPath
+
+    try {
+        $lanIp = Resolve-PrimaryPhysicalLanIpv4
+        $openSslExe = if ($ForceDotNetTlsGenerator) { $null } else { Find-OpenSsl3Executable }
+        if (-not [string]::IsNullOrWhiteSpace($openSslExe)) {
+            Invoke-GenerateLocalTlsWithOpenSsl -OpenSslExe $openSslExe -CertsDir $certsDir -LanIp $lanIp
+        }
+        else {
+            Invoke-GenerateLocalTlsWithDotNet -CertsDir $certsDir -LanIp $lanIp
+        }
+
+        $caKeyLeak = Get-ChildItem -LiteralPath $DataRoot -Filter "ca.key" -Recurse -Force -ErrorAction SilentlyContinue
+        if ($caKeyLeak -and $caKeyLeak.Count -gt 0) {
+            throw "KRITIK GUVENLIK HATASI: ca.key ProgramData altinda tespit edildi!"
+        }
+
+        Update-HubConfigAfterTlsProvision -ConfigPath $ConfigPath -LanIp $lanIp
+        return $true
+    }
+    catch {
+        if (-not $existedCa -and (Test-Path -LiteralPath $caCrtPath)) {
+            Remove-Item -LiteralPath $caCrtPath -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $existedSrvCrt -and (Test-Path -LiteralPath $srvCrtPath)) {
+            Remove-Item -LiteralPath $srvCrtPath -Force -ErrorAction SilentlyContinue
+        }
+        if (-not $existedSrvKey -and (Test-Path -LiteralPath $srvKeyPath)) {
+            Remove-Item -LiteralPath $srvKeyPath -Force -ErrorAction SilentlyContinue
+        }
+        Write-InstallerDiagnosticLog -DataRoot $DataRoot -ExitCode 0 -Code "WARN_AUTO_TLS_GENERATION_FAILED" -Message ("Otomatik TLS sertifika uretimi basarisiz oldu: " + $_.Exception.Message) -ErrorRecord $_ -Stage "AutoTlsProvisioning"
+        return $false
+    }
+}
+
 function Invoke-HealthVerification {
     param(
         [string]$Url,
@@ -4293,6 +4804,13 @@ try {
                 throw "[ERR_ADMIN_SECRET_ACL_FAILED] admin_secret.txt on-kilit ACL atamasi basarisiz oldu ($LASTEXITCODE)."
             }
         }
+    }
+
+    # 3b. Zero-Touch Otomatik Yerel TLS Sertifikasi Uretimi (ca.key ProgramData disinda tutulur/imha edilir)
+    $script:CurrentInstallerStage = "AutoTlsProvisioning"
+    $shouldAutoGenerateTls = (-not $TestSandboxMode) -or [bool]$AutoGenerateTlsCerts
+    if ($shouldAutoGenerateTls) {
+        $null = Ensure-LocalHubTlsCertificates -DataRoot $ProgramDataRoot -ConfigPath $configFile
     }
 
     # 4. Istemci ve Hub ikililerinin kopyalanmasi

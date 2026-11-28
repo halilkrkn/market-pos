@@ -10,6 +10,7 @@ import '../../../diagnostics/application/system_status_notifier.dart';
 import '../../../diagnostics/presentation/screens/diagnostics_view.dart';
 import '../../../pos/presentation/screens/pos_screen.dart';
 import '../../../sales/presentation/screens/sales_history_screen.dart';
+import '../../../security/data/windows_zero_touch_bootstrapper.dart';
 import '../../../setup/presentation/widgets/first_setup_wizard_dialog.dart';
 import '../../../setup/setup_providers.dart';
 import '../../../stock/presentation/screens/stock_screen.dart';
@@ -49,6 +50,9 @@ class MainShellScreen extends ConsumerWidget {
         if (!context.mounted) return;
         ref.read(windowsTrayControllerProvider.notifier).pushStatus(traySnapshot);
       });
+    }
+    if (ref.watch(windowsZeroTouchAutoBootstrapEnabledProvider)) {
+      ref.watch(windowsZeroTouchStartupProvider);
     }
     final selectedDestination = ref.watch(activeDestinationProvider);
     final windowClass = context.windowClass;

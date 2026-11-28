@@ -17,6 +17,7 @@ import 'core/utils/user_friendly_error_mapper.dart';
 import 'features/backup/backup_providers.dart';
 import 'features/diagnostics/application/system_status_notifier.dart';
 import 'features/security/data/device_pairing_client.dart';
+import 'features/security/data/windows_zero_touch_bootstrapper.dart';
 import 'features/setup/data/local_setup_config_store.dart';
 import 'features/setup/setup_providers.dart';
 import 'features/shell/presentation/windows/windows_tray_providers.dart';
@@ -141,6 +142,8 @@ Future<void> main() async {
             .overrideWithValue(autoDiscoveryEnabled),
         backupAutoScheduleLifecycleEnabledProvider.overrideWithValue(true),
         windowsTrayLifecycleEnabledProvider
+            .overrideWithValue(Platform.isWindows),
+        windowsZeroTouchAutoBootstrapEnabledProvider
             .overrideWithValue(Platform.isWindows),
         themePreferenceStoreProvider.overrideWithValue(themeStore),
         initialThemeModeProvider.overrideWithValue(initialThemeMode),

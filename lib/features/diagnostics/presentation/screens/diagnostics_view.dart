@@ -7,6 +7,7 @@ import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/theme/theme_provider.dart';
 import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../backup/presentation/widgets/hub_central_backup_card.dart';
+import '../../../security/data/windows_zero_touch_bootstrapper.dart';
 import '../../../security/presentation/widgets/device_security_card.dart';
 import '../../../security/presentation/widgets/pairing_approval_panel.dart';
 import '../../../setup/presentation/widgets/store_setup_card.dart';
@@ -30,6 +31,17 @@ import '../widgets/status_badge.dart';
 class DiagnosticsView extends ConsumerWidget {
   const DiagnosticsView({super.key});
 
+  Future<void> _handleRefresh(WidgetRef ref) async {
+    if (ref.read(windowsZeroTouchAutoBootstrapEnabledProvider)) {
+      try {
+        await ref.read(windowsZeroTouchRunnerProvider)();
+      } catch (_) {
+        // Bağlantı hatasında durum yenileme yine çalışmaya devam eder.
+      }
+    }
+    await ref.read(systemStatusProvider.notifier).refreshStatus();
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final status = ref.watch(systemStatusProvider);
@@ -40,7 +52,7 @@ class DiagnosticsView extends ConsumerWidget {
     final isCompact = context.windowClass == MmsWindowClass.compact;
 
     return RefreshIndicator(
-      onRefresh: () => ref.read(systemStatusProvider.notifier).refreshStatus(),
+      onRefresh: () => _handleRefresh(ref),
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         padding: EdgeInsets.all(isCompact ? MmsSpacing.md : MmsSpacing.xl),
@@ -60,7 +72,7 @@ class DiagnosticsView extends ConsumerWidget {
                   variant: AppButtonVariant.primary,
                   minHeight: 48,
                   onPressed: () {
-                    ref.read(systemStatusProvider.notifier).refreshStatus();
+                    _handleRefresh(ref);
                   },
                 ),
               ],

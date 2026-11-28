@@ -772,16 +772,25 @@ class SpikeServer {
       adminSecret ??
       (allowAdminEnvFallback ? (_environment ?? Platform.environment)['ADMIN_SECRET'] : null);
 
-  Response? _denyIfNotLoopback(Request req, {required String actionName}) {
+  Response? _denyIfNotLoopback(
+    Request req, {
+    required String actionName,
+    String errorCode = 'ERR_LOOPBACK_REQUIRED',
+    Map<String, String>? extraHeaders,
+  }) {
+    final headers = <String, String>{
+      'content-type': 'application/json',
+      if (extraHeaders != null) ...extraHeaders,
+    };
     final connectionInfo = req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
     if (connectionInfo == null) {
       return Response.forbidden(
         jsonEncode({
           'error': 'FORBIDDEN',
-          'code': 'ERR_LOOPBACK_REQUIRED',
+          'code': errorCode,
           'message': '$actionName için bağlantı bilgisi doğrulanamadı. Yalnızca yerel makineden (loopback) erişilebilir.',
         }),
-        headers: {'content-type': 'application/json'},
+        headers: headers,
       );
     }
 
@@ -795,13 +804,103 @@ class SpikeServer {
       return Response.forbidden(
         jsonEncode({
           'error': 'FORBIDDEN',
-          'code': 'ERR_LOOPBACK_REQUIRED',
+          'code': errorCode,
           'message': '$actionName için yalnızca yerel makineden (loopback) erişilebilir.',
         }),
-        headers: {'content-type': 'application/json'},
+        headers: headers,
       );
     }
     return null;
+  }
+
+  /// Loopback kısıtını koruyarak OWNER cihaz token'ı VEYA loopback + admin secret kabul eder.
+  Future<Response?> _verifyLoopbackOwnerOrAdmin(
+    Request req, {
+    String actionName = 'Bu işlem',
+  }) async {
+    final loopbackDenied = _denyIfNotLoopback(req, actionName: actionName);
+    if (loopbackDenied != null) return loopbackDenied;
+
+    final hasExplicitAdminHeader =
+        (req.headers['x-admin-secret']?.trim().isNotEmpty ?? false) ||
+        (req.headers['x-mms-admin-secret']?.trim().isNotEmpty ?? false);
+    final authHeader = req.headers['authorization'];
+    if (!hasExplicitAdminHeader &&
+        authHeader != null &&
+        authHeader.startsWith('Bearer ')) {
+      final token = authHeader.substring(7).trim();
+      if (token.isNotEmpty) {
+        final activePepper = pepperManager.pepper;
+        final allDevices = await db.select(db.devices).get();
+        Device? matched;
+        for (final d in allDevices) {
+          if (TokenManager.verifyToken(
+            rawToken: token,
+            salt: d.salt,
+            expectedHash: d.tokenHash,
+            pepper: activePepper,
+          )) {
+            matched = d;
+            break;
+          }
+        }
+        if (matched != null) {
+          if (!matched.isActive) {
+            return Response(
+              403,
+              body: jsonEncode({
+                'error': 'DEVICE_REVOKED',
+                'message':
+                    'Bu cihazın Master Hub erişim yetkisi işletme sahibi tarafından iptal edilmiştir.',
+                'device_id': matched.deviceId,
+              }),
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (!matched.isConfirmed) {
+            return Response(
+              403,
+              body: jsonEncode({
+                'error': 'DEVICE_NOT_CONFIRMED',
+                'code': 'ERR_DEVICE_NOT_CONFIRMED',
+                'message':
+                    'Cihazın eşleştirme ACK teyidi henüz tamamlanmamıştır.',
+                'device_id': matched.deviceId,
+              }),
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (matched.expiresAt != null &&
+              DateTime.now().isAfter(matched.expiresAt!)) {
+            return Response(
+              401,
+              body: jsonEncode({
+                'error': 'TOKEN_EXPIRED',
+                'message': 'Cihaz token süresi dolmuştur.',
+                'device_id': matched.deviceId,
+              }),
+              headers: {'content-type': 'application/json'},
+            );
+          }
+          if (matched.role.trim().toUpperCase() == 'OWNER') {
+            return null;
+          }
+          return Response(
+            403,
+            body: jsonEncode({
+              'error': 'FORBIDDEN',
+              'code': 'ERR_OWNER_ROLE_REQUIRED',
+              'message': '$actionName için OWNER rolü gereklidir.',
+              'device_id': matched.deviceId,
+              'role': matched.role,
+            }),
+            headers: {'content-type': 'application/json'},
+          );
+        }
+      }
+    }
+
+    return _verifyLoopbackAndAdmin(req, actionName: actionName);
   }
 
   /// Hub yönetimi için Loopback ve Admin Secret yetkilendirmesi denetler (Fail-Closed)
@@ -1190,9 +1289,9 @@ class SpikeServer {
     // S-4: GÜVENLİ CİHAZ EŞLEŞTİRME (PAIRING) PROTOKOLÜ (v1.6)
     // -------------------------------------------------------------
 
-    // 1. Yeni Eşleştirme Oturumu Başlat (Hub Admin / Loopback)
+    // 1. Yeni Eşleştirme Oturumu Başlat (Loopback OWNER veya Hub Admin)
     _router.post('/api/v1/pairing/session', (Request req) async {
-      final authError = _verifyLoopbackAndAdmin(req, actionName: 'Eşleştirme oturumu oluşturma');
+      final authError = await _verifyLoopbackOwnerOrAdmin(req, actionName: 'Eşleştirme oturumu oluşturma');
       if (authError != null) return authError;
 
       final scheme = requireTls ? 'https' : (req.requestedUri.scheme);
@@ -1402,9 +1501,9 @@ class SpikeServer {
       }
     });
 
-    // 4. Onay Bekleyen Talepleri Listele (Hub Admin / Loopback)
+    // 4. Onay Bekleyen Talepleri Listele (Loopback OWNER veya Hub Admin)
     _router.get('/api/v1/pairing/requests', (Request req) async {
-      final authError = _verifyLoopbackAndAdmin(req, actionName: 'Eşleştirme taleplerini listeleme');
+      final authError = await _verifyLoopbackOwnerOrAdmin(req, actionName: 'Eşleştirme taleplerini listeleme');
       if (authError != null) return authError;
 
       final requests = pairingManager.getPendingRequests();
@@ -1415,9 +1514,9 @@ class SpikeServer {
     });
 
 
-    // 5. Talebi Onayla (Hub Admin / Loopback)
+    // 5. Talebi Onayla (Loopback OWNER veya Hub Admin)
     _router.post('/api/v1/pairing/approve', (Request req) async {
-      final authError = _verifyLoopbackAndAdmin(req, actionName: 'Eşleştirme onaylama');
+      final authError = await _verifyLoopbackOwnerOrAdmin(req, actionName: 'Eşleştirme onaylama');
       if (authError != null) return authError;
 
       try {
@@ -1458,9 +1557,9 @@ class SpikeServer {
       }
     });
 
-    // 6. Talebi Reddet (Hub Admin / Loopback)
+    // 6. Talebi Reddet (Loopback OWNER veya Hub Admin)
     _router.post('/api/v1/pairing/reject', (Request req) async {
-      final authError = _verifyLoopbackAndAdmin(req, actionName: 'Eşleştirme reddetme');
+      final authError = await _verifyLoopbackOwnerOrAdmin(req, actionName: 'Eşleştirme reddetme');
       if (authError != null) return authError;
 
       final String sessionId;
@@ -1996,6 +2095,184 @@ class SpikeServer {
           e.statusCode,
           body: jsonEncode({'error': e.code, 'code': e.code, 'message': e.message}),
           headers: {'content-type': 'application/json', 'cache-control': 'no-store'},
+        );
+      }
+    });
+
+    // 4.0a-bis. Zero-Touch: Tek Seferlik Loopback Auto-Bootstrap (Admin Secret Gerektirmez)
+    _router.post('/api/v1/local/auto-bootstrap', (Request req) async {
+      final loopbackDenied = _denyIfNotLoopback(
+        req,
+        actionName: 'Yerel otomatik OWNER kurulumu',
+        errorCode: 'ERR_LOOPBACK_ONLY',
+        extraHeaders: const {'cache-control': 'no-store'},
+      );
+      if (loopbackDenied != null) return loopbackDenied;
+
+      if (requireTls && req.requestedUri.scheme != 'https') {
+        return Response(
+          426,
+          body: jsonEncode({
+            'error': 'UPGRADE_REQUIRED',
+            'code': 'ERR_TLS_REQUIRED',
+            'message':
+                'Yerel otomatik OWNER kurulumu yalnızca TLS 1.3 / HTTPS üzerinden kabul edilir.',
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          },
+        );
+      }
+
+      final body = await _decodeJsonBodyOrEmpty(req);
+      final targetDeviceId = (body['device_id'] as String?)?.trim() ?? '';
+      final rawName = (body['name'] as String?)?.trim();
+      final deviceName = (rawName != null && rawName.isNotEmpty)
+          ? rawName
+          : 'Windows Ana Bilgisayar';
+      if (targetDeviceId.isEmpty) {
+        return Response(
+          400,
+          body: jsonEncode({
+            'error': 'INVALID_REQUEST',
+            'code': 'ERR_DEVICE_ID_REQUIRED',
+            'message': 'device_id zorunludur.',
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          },
+        );
+      }
+
+      try {
+        late final String issuedToken;
+        await writeQueue.enqueue(() async {
+          await db.transaction(() async {
+            final sealed = await (db.select(db.hubMetadata)
+                  ..where((m) => m.key.equals('owner_bootstrap_completed')))
+                .getSingleOrNull();
+            if (sealed != null && sealed.value == 'true') {
+              throw _ValidationException(
+                409,
+                'ERR_OWNER_ALREADY_BOOTSTRAPPED',
+                'Tek seferlik OWNER kurulumu daha önce tamamlanmıştır; tekrar kullanılamaz.',
+              );
+            }
+
+            final activeDevices = await (db.select(db.devices)
+                  ..where((d) => d.isActive.equals(true)))
+                .get();
+            final hasActiveOwner = activeDevices.any(
+              (d) => d.role.trim().toUpperCase() == 'OWNER',
+            );
+            if (hasActiveOwner) {
+              throw _ValidationException(
+                409,
+                'ERR_OWNER_ALREADY_BOOTSTRAPPED',
+                'Hub üzerinde zaten aktif bir OWNER cihazı kayıtlıdır.',
+              );
+            }
+
+            final existing = await (db.select(db.devices)
+                  ..where((d) => d.deviceId.equals(targetDeviceId)))
+                .getSingleOrNull();
+            if (existing != null && !existing.isActive) {
+              throw _ValidationException(
+                409,
+                'ERR_DEVICE_REVOKED',
+                'İptal edilmiş cihaz otomatik OWNER kurulumunda kullanılamaz.',
+              );
+            }
+
+            final rawTok = TokenManager.generateToken();
+            final salt = TokenManager.generateSalt();
+            final tokHash = TokenManager.hashToken(
+              rawToken: rawTok,
+              salt: salt,
+              pepper: pepperManager.pepper,
+            );
+            issuedToken = rawTok;
+
+            if (existing == null) {
+              await db.into(db.devices).insert(
+                    DevicesCompanion(
+                      deviceId: Value(targetDeviceId),
+                      name: Value(deviceName),
+                      tokenHash: Value(tokHash),
+                      salt: Value(salt),
+                      isActive: const Value(true),
+                      isConfirmed: const Value(true),
+                      role: const Value('OWNER'),
+                    ),
+                  );
+            } else {
+              await (db.update(db.devices)
+                    ..where((d) => d.deviceId.equals(targetDeviceId)))
+                  .write(
+                DevicesCompanion(
+                  name: Value(deviceName),
+                  tokenHash: Value(tokHash),
+                  salt: Value(salt),
+                  isActive: const Value(true),
+                  isConfirmed: const Value(true),
+                  role: const Value('OWNER'),
+                ),
+              );
+            }
+
+            final now = DateTime.now().toUtc();
+            await db.into(db.hubMetadata).insertOnConflictUpdate(
+                  HubMetadataCompanion(
+                    key: const Value('owner_bootstrap_completed'),
+                    value: const Value('true'),
+                    updatedAt: Value(now),
+                  ),
+                );
+            await db.into(db.hubMetadata).insertOnConflictUpdate(
+                  HubMetadataCompanion(
+                    key: const Value('owner_bootstrap_device_id'),
+                    value: Value(targetDeviceId),
+                    updatedAt: Value(now),
+                  ),
+                );
+            await db.into(db.deviceAuditLogs).insert(
+                  DeviceAuditLogsCompanion(
+                    deviceId: Value(targetDeviceId),
+                    action: const Value('LOCAL_AUTO_BOOTSTRAP'),
+                    details: const Value(
+                      'Loopback zero-touch Hub OWNER bootstrap sealed',
+                    ),
+                  ),
+                );
+          });
+        });
+
+        return Response.ok(
+          jsonEncode({
+            'device_id': targetDeviceId,
+            'device_token': issuedToken,
+            'role': 'OWNER',
+            'owner_bootstrap_completed': true,
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          },
+        );
+      } on _ValidationException catch (e) {
+        return Response(
+          e.statusCode,
+          body: jsonEncode({
+            'error': e.code,
+            'code': e.code,
+            'message': e.message,
+          }),
+          headers: {
+            'content-type': 'application/json',
+            'cache-control': 'no-store',
+          },
         );
       }
     });
@@ -6265,6 +6542,7 @@ class SpikeServer {
           requireTenantStoreHeaders: requireTenantStoreHeaders,
           publicPaths: [
             '/health',
+            '/api/v1/local/auto-bootstrap',
             '/api/v1/backup/snapshot', // SEC-SNAP: cihaz token'ı yerine loopback + admin secret
             '/api/v1/admin/shutdown',
             '/api/v1/admin/backup',

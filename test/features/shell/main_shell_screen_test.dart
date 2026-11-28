@@ -80,7 +80,7 @@ void main() {
       expect(find.text('Kasa (Satış)'), findsOneWidget);
       expect(find.text('Ürünler'), findsOneWidget);
       expect(find.text('Raporlar'), findsOneWidget);
-      expect(find.text('Sistem & Tanı'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
 
       // Varsayılan açılış ekranı: Kasa (Satış) POS
       expect(find.byKey(const Key('barcode_input_field')), findsOneWidget);
@@ -92,11 +92,11 @@ void main() {
       expect(find.text('F10'), findsOneWidget);
       expect(find.text('Esc'), findsOneWidget);
 
-      // Sistem & Tanı sekmesine geçince sade Ayarlar ve Sistem ekranı render edilir
-      await tester.tap(find.text('Sistem & Tanı'));
+      // Ayarlar ve Sistem sekmesine geçince sade Ayarlar ve Sistem ekranı render edilir
+      await tester.tap(find.text('Ayarlar ve Sistem'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsAtLeastNWidgets(1));
       expect(find.text('Bağlantı & Senkronizasyon Durumu'), findsOneWidget);
       expect(find.text('Gelişmiş ve Teknik Destek'), findsOneWidget);
     });
@@ -132,7 +132,7 @@ void main() {
       expect(find.byKey(const Key('barcode_input_field')), findsOneWidget);
     });
 
-    testWidgets('3. Yenileme Butonu: Sistem & Tanı sekmesinde sağlık kontrolü tetiklenir',
+    testWidgets('3. Yenileme Butonu: Ayarlar ve Sistem sekmesinde sağlık kontrolü tetiklenir',
         (WidgetTester tester) async {
       tester.view.physicalSize = const Size(1280, 720);
       tester.view.devicePixelRatio = 1.0;
@@ -141,7 +141,7 @@ void main() {
       await tester.pumpWidget(createTestApp());
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Sistem & Tanı'));
+      await tester.tap(find.text('Ayarlar ve Sistem'));
       await tester.pumpAndSettle();
 
       // Durumu Yenile butonuna tıkla

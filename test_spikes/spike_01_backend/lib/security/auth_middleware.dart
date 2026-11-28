@@ -29,7 +29,8 @@ Middleware createAuthMiddleware({
     '/api/v1/sync/',
     '/api/v1/stock/',
   ],
-  List<String> publicPaths = const ['/health'],
+  List<String> publicPaths = const ['/health', '/api/v1/local/auto-bootstrap'],
+  List<String> tlsRequiredPublicPaths = const ['/api/v1/local/auto-bootstrap'],
   List<String> bearerOrAdminPaths = const [],
 }) {
   if (db == null && dbProvider == null) {
@@ -50,10 +51,29 @@ Middleware createAuthMiddleware({
         );
       }
 
-      // 2. Açık / Public yollar (Health check vb.)
+      // 2. Açık / Public yollar (Health check, auto-bootstrap vb.)
       final reqPath = request.url.path;
       final normalizedPath = reqPath.startsWith('/') ? reqPath : '/$reqPath';
       if (publicPaths.contains(reqPath) || publicPaths.contains(normalizedPath)) {
+        final requiresTlsOnPublic = tlsRequiredPublicPaths.contains(reqPath) ||
+            tlsRequiredPublicPaths.contains(normalizedPath);
+        if (requiresTlsOnPublic &&
+            requireTls &&
+            request.requestedUri.scheme != 'https') {
+          return Response(
+            426,
+            body: jsonEncode({
+              'error': 'UPGRADE_REQUIRED',
+              'code': 'ERR_TLS_REQUIRED',
+              'message':
+                  'Hassas API ve kimlik doğrulama işlemleri yalnızca TLS 1.3 / HTTPS üzerinden kabul edilir.',
+            }),
+            headers: {
+              'content-type': 'application/json',
+              'cache-control': 'no-store',
+            },
+          );
+        }
         return innerHandler(request);
       }
 

@@ -306,6 +306,77 @@ class DevicePairingClient {
     }
   }
 
+  /// Zero-Touch (Yalnızca Windows Loopback TOFU):
+  ///
+  /// `Platform.isWindows` ve hedef adres `https://127.0.0.1:<port>` veya
+  /// `https://localhost:<port>` iken, `/api/v1/pairing/ca-cert` üzerinden Kök CA'yı
+  /// indirir, `MmsX509PreValidator.validateRootCaDer` ve sıkı CA-sabitli `/health`
+  /// el sıkışması ile doğrulayarak kanonik sertifikayı döner.
+  /// Android veya uzak LAN IP adreslerinde ASLA çalışmaz (fail-closed).
+  Future<CanonicalCertDerResult> fetchLoopbackRootCaTofu({
+    required String hubBaseUrl,
+    Duration requestTimeout = const Duration(seconds: 5),
+    bool? isWindowsOverride,
+  }) async {
+    final isWindows = isWindowsOverride ?? Platform.isWindows;
+    if (!isWindows) {
+      throw const DevicePairingException(
+        'LOOPBACK_TOFU_FORBIDDEN',
+        'Otomatik loopback CA sabitlemesi yalnızca Windows masaüstünde kullanılabilir.',
+      );
+    }
+
+    final cleanBaseUrl = hubBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final parsedUri = Uri.tryParse(cleanBaseUrl);
+    final hostLower = parsedUri?.host.toLowerCase() ?? '';
+    if (parsedUri == null ||
+        parsedUri.scheme.toLowerCase() != 'https' ||
+        (hostLower != '127.0.0.1' && hostLower != 'localhost')) {
+      throw const DevicePairingException(
+        'LOOPBACK_TOFU_FORBIDDEN',
+        'Otomatik CA sabitlemesi yalnızca https://127.0.0.1 veya https://localhost için geçerlidir.',
+      );
+    }
+
+    final canonicalCa = await _fetchAndVerifyBootstrapCaCert(
+      parsedHubBaseUri: parsedUri,
+      expectedPinHex: null,
+    );
+
+    final strictClient = _createStrictPhaseCDClient(
+      caCertBytes: canonicalCa.derBytes,
+      expectedCaSha256Hex: canonicalCa.sha256Hex,
+    );
+    try {
+      final resp = await strictClient
+          .get(Uri.parse('$cleanBaseUrl/health'))
+          .timeout(requestTimeout);
+      if (resp.statusCode != 200 && resp.statusCode != 503) {
+        throw DevicePairingException(
+          'HUB_HEALTH_FAILED',
+          'Kök CA sabitlendi ancak Hub sağlık doğrulaması HTTP ${resp.statusCode} döndürdü.',
+        );
+      }
+      return canonicalCa;
+    } on TlsPinMismatchException catch (e) {
+      throw DevicePairingException('CA_PIN_MISMATCH', e.message);
+    } on TlsCertificateValidationException catch (e) {
+      throw DevicePairingException('TLS_CERT_ERROR', e.message);
+    } on TimeoutException {
+      throw const DevicePairingException(
+        'BOOTSTRAP_TIMEOUT',
+        'Hub sıkı TLS sağlık doğrulaması zaman aşımına uğradı.',
+      );
+    } on Exception catch (e) {
+      throw DevicePairingException(
+        'TLS_VERIFICATION_FAILED',
+        'Hub sıkı TLS el sıkışması doğrulanamadı: ${e.runtimeType}',
+      );
+    } finally {
+      strictClient.close();
+    }
+  }
+
   Future<DevicePairingResult> pairDevice({
     required String hubBaseUrl,
     required String sessionId,
@@ -828,7 +899,7 @@ class DevicePairingClient {
   /// sıkıştırma/gövde/redirect/mutlak-5s duvar saati limitleri).
   Future<CanonicalCertDerResult> _fetchAndVerifyBootstrapCaCert({
     required Uri parsedHubBaseUri,
-    required String expectedPinHex,
+    String? expectedPinHex,
   }) async {
     final targetUri = parsedHubBaseUri.replace(
       path: '/api/v1/pairing/ca-cert',
@@ -1033,7 +1104,8 @@ class DevicePairingClient {
         throw DevicePairingException(e.code, e.message);
       }
 
-      if (!constantTimeEqualsAscii(canonical.sha256Hex, expectedPinHex)) {
+      if (expectedPinHex != null &&
+          !constantTimeEqualsAscii(canonical.sha256Hex, expectedPinHex)) {
         throw const DevicePairingException(
           'CA_PIN_MISMATCH',
           'İndirilen Hub Kök CA sertifikasının SHA-256 parmak izi OOB değerle uyuşmuyor.',
