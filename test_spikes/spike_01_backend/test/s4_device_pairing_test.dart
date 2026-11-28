@@ -1815,6 +1815,121 @@ void main() {
       );
       expect(unknown.statusCode, inInclusiveRange(400, 499));
     });
+
+    test('TC-35 (MMS-003): Bekleme olmadan (0 ms) approve -> poll-challenge -> poll -> ack-challenge -> ack akışı 429 vermeden tamamlanmalı', () async {
+      final sRes = await http.post(Uri.parse('$baseUrl/api/v1/pairing/session'), headers: adminHeaders);
+      expect(sRes.statusCode, equals(201));
+      final sJson = jsonDecode(sRes.body) as Map<String, dynamic>;
+      final sessionId = sJson['session_id'] as String;
+      final pairingSecret = sJson['pairing_secret'] as String;
+
+      const deviceId = 'DEV_ZERO_WAIT_01';
+      final reqRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/request'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'session_id': sessionId,
+          'pairing_secret': pairingSecret,
+          'device_id': deviceId,
+          'name': 'Zero Wait Device',
+          'platform': 'ANDROID',
+          'client_public_key': base64Encode(clientPublicKey),
+        }),
+      );
+      expect(reqRes.statusCode, equals(202));
+
+      final appRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/approve'),
+        headers: adminHeaders,
+        body: jsonEncode({'session_id': sessionId}),
+      );
+      expect(appRes.statusCode, equals(200));
+
+      // 1. Poll challenge (0 ms)
+      final pollChRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/poll-challenge'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({'session_id': sessionId, 'pairing_secret': pairingSecret}),
+      );
+      expect(pollChRes.statusCode, equals(200));
+      final pollChJson = jsonDecode(pollChRes.body) as Map<String, dynamic>;
+      final pollChallengeId = pollChJson['poll_challenge_id'] as String;
+      final pollNonce = base64Decode(pollChJson['poll_challenge_nonce'] as String);
+
+      // Aynı fazda (POLL) ardışık spam yine 429 CHALLENGE_COOLDOWN_ACTIVE dönmeli
+      final pollSpamRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/poll-challenge'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({'session_id': sessionId, 'pairing_secret': pairingSecret}),
+      );
+      expect(pollSpamRes.statusCode, equals(429));
+      expect(pollSpamRes.body, contains('CHALLENGE_COOLDOWN_ACTIVE'));
+
+      // 2. Poll ile token al
+      final pollPayload = EcdsaSignatureValidator.buildCanonicalPollPayload(
+        protocolVersion: '1',
+        pairingSessionId: sessionId,
+        publicKeyFingerprintBytes: sha256.convert(clientPublicKey).bytes,
+        challengeId: pollChallengeId,
+        challengeNonce: pollNonce,
+      );
+      final pollSig = EcdsaSignatureValidator.signPayload(
+        privateKey: clientPrivateKey,
+        canonicalPayload: pollPayload,
+      );
+      final pollRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/poll'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'session_id': sessionId,
+          'pairing_secret': pairingSecret,
+          'poll_challenge_id': pollChallengeId,
+          'signature': base64Encode(pollSig),
+        }),
+      );
+      expect(pollRes.statusCode, equals(200));
+      final deliveredToken = (jsonDecode(pollRes.body) as Map<String, dynamic>)['token'] as String;
+      final tokenSha256 = Uint8List.fromList(sha256.convert(utf8.encode(deliveredToken)).bytes);
+
+      // 3. Bekleme olmadan (0 ms) hemen ACK challenge iste -> 429 OLMAMALI, 200 dönmeli
+      final ackChRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/ack-challenge'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({'session_id': sessionId, 'pairing_secret': pairingSecret}),
+      );
+      expect(ackChRes.statusCode, equals(200));
+      final ackChJson = jsonDecode(ackChRes.body) as Map<String, dynamic>;
+      final ackChallengeId = ackChJson['ack_challenge_id'] as String;
+      final ackNonce = base64Decode(ackChJson['ack_challenge_nonce'] as String);
+
+      // 4. ACK ile eşleştirmeyi tamamla
+      final ackPayload = EcdsaSignatureValidator.buildCanonicalAckPayload(
+        protocolVersion: '1',
+        pairingSessionId: sessionId,
+        publicKeyFingerprintBytes: sha256.convert(clientPublicKey).bytes,
+        challengeId: ackChallengeId,
+        challengeNonce: ackNonce,
+        tokenHashBytes: tokenSha256,
+      );
+      final ackSig = EcdsaSignatureValidator.signPayload(
+        privateKey: clientPrivateKey,
+        canonicalPayload: ackPayload,
+      );
+      final ackRes = await http.post(
+        Uri.parse('$baseUrl/api/v1/pairing/ack'),
+        headers: {'content-type': 'application/json'},
+        body: jsonEncode({
+          'session_id': sessionId,
+          'ack_challenge_id': ackChallengeId,
+          'signature': base64Encode(ackSig),
+        }),
+      );
+      expect(ackRes.statusCode, equals(200));
+
+      final dev = await (db.select(db.devices)..where((d) => d.deviceId.equals(deviceId))).getSingle();
+      expect(dev.isConfirmed, isTrue);
+      expect(dev.isActive, isTrue);
+    });
   });
 }
 

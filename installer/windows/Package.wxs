@@ -29,7 +29,7 @@
     <Property Id="ALLOW_DEFERRED_TLS_START" Value="1" Secure="yes" />
     <Property Id="HUB_PORT" Value="8945" Secure="yes" />
     <Property Id="DISCOVERY_PORT" Value="8946" Secure="yes" />
-    <Property Id="ARPHELPLINK" Value="https://github.com/market-pos" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/halilkrkn/market-pos" />
     <Property Id="ARPCOMMENTS" Value="Market Management System (MMS) Masauastu Istemcisi ve Local Master Hub Servisi" />
 
     <StandardDirectory Id="ProgramFiles64Folder">

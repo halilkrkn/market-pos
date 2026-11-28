@@ -32,16 +32,19 @@ class HubBackupRetentionPolicy {
   final int driveDailyRetentionDays;
   final int driveMonthlyCount;
   final int localCacheRetentionDays;
+  final int? maxDriveCopies;
 
   const HubBackupRetentionPolicy({
     this.driveDailyRetentionDays = 30,
     this.driveMonthlyCount = 12,
     this.localCacheRetentionDays = 7,
+    this.maxDriveCopies,
   });
 
-  /// Drive arşivi: Son 30 gün günlük + ötesinde en fazla 12 farklı takvim ayı
-  /// (her ayın en güncel `COMPLETED_UPLOADED` yedeği) + SERT DEĞİŞMEZ:
-  /// Geçerli en az 1 `COMPLETED_UPLOADED` Drive yedeği asla silinmez.
+  /// Drive arşivi: [maxDriveCopies] tanımlı ve >= 1 ise en güncel [maxDriveCopies]
+  /// geçerli yedeği tutar, geri kalanını budar. Aksi halde son 30 gün günlük +
+  /// ötesinde en fazla 12 farklı takvim ayı (her ayın en güncel `COMPLETED_UPLOADED`
+  /// yedeği) + SERT DEĞİŞMEZ: Geçerli en az 1 `COMPLETED_UPLOADED` Drive yedeği asla silinmez.
   HubBackupRetentionPlan evaluateDriveRetention(
     List<HubBackupRetentionCandidate> candidates, {
     required DateTime nowUtc,
@@ -54,6 +57,16 @@ class HubBackupRetentionPolicy {
 
     if (valid.isEmpty) {
       return const HubBackupRetentionPlan(retainIds: [], pruneIds: []);
+    }
+
+    if (maxDriveCopies != null && maxDriveCopies! >= 1) {
+      final keepCount = maxDriveCopies!;
+      final retainIds = valid.take(keepCount).map((c) => c.backupId).toList();
+      final pruneIds = valid.skip(keepCount).map((c) => c.backupId).toList();
+      return HubBackupRetentionPlan(
+        retainIds: retainIds,
+        pruneIds: pruneIds,
+      );
     }
 
     final retained = <String>{};

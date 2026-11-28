@@ -292,5 +292,42 @@ void main() {
       expect(localPlan.pruneIds, contains('recent_12d'));
       expect(localPlan.pruneIds, contains('month_2'));
     });
+
+    test('BK-020: maxDriveCopies=2 politikası 3 geçerli yedekten yalnızca en güncel 2 yedeği korur, en eski 1 yedeği budar', () {
+      const policy = HubBackupRetentionPolicy(
+        maxDriveCopies: 2,
+        localCacheRetentionDays: 2,
+      );
+      final nowUtc = DateTime.utc(2026, 11, 28, 0, 5);
+      final candidates = [
+        HubBackupRetentionCandidate(
+          backupId: 'bak_oldest',
+          createdAtUtc: nowUtc.subtract(const Duration(days: 3)),
+          isCompletedUploaded: true,
+          driveFileId: 'drv_1',
+        ),
+        HubBackupRetentionCandidate(
+          backupId: 'bak_newest',
+          createdAtUtc: nowUtc.subtract(const Duration(minutes: 5)),
+          isCompletedUploaded: true,
+          driveFileId: 'drv_3',
+        ),
+        HubBackupRetentionCandidate(
+          backupId: 'bak_middle',
+          createdAtUtc: nowUtc.subtract(const Duration(days: 1)),
+          isCompletedUploaded: true,
+          driveFileId: 'drv_2',
+        ),
+        HubBackupRetentionCandidate(
+          backupId: 'bak_not_uploaded',
+          createdAtUtc: nowUtc,
+          isCompletedUploaded: false,
+        ),
+      ];
+
+      final plan = policy.evaluateDriveRetention(candidates, nowUtc: nowUtc);
+      expect(plan.retainIds, equals(['bak_newest', 'bak_middle']));
+      expect(plan.pruneIds, equals(['bak_oldest']));
+    });
   });
 }

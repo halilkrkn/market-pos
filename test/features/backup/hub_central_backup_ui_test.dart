@@ -157,7 +157,8 @@ void main() {
       );
       await tester.pumpAndSettle();
 
-      expect(find.text('Merkezi Hub Yedekleme (Google Drive)'), findsOneWidget);
+      expect(find.text('Google Drive Yedekleme'), findsOneWidget);
+      expect(find.text("Google Drive'a Bağlan"), findsOneWidget);
       expect(find.byKey(const Key('hub_oauth_connect_button')), findsOneWidget);
       expect(find.byKey(const Key('hub_save_recovery_key_button')), findsOneWidget);
       expect(find.byKey(const Key('hub_restore_button')), findsOneWidget);

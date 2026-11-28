@@ -5,6 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:market_pos/core/logging/redacting_logger.dart';
+import 'package:market_pos/core/security/device_role_resolver.dart';
+import 'package:market_pos/core/security/security_providers.dart';
 import 'package:market_pos/core/theme/app_theme.dart';
 import 'package:market_pos/features/security/data/hub_pairing_admin_client.dart';
 import 'package:market_pos/features/security/presentation/widgets/pairing_approval_panel.dart';
@@ -101,5 +104,53 @@ void main() {
     expect(find.byType(QrImageView), findsOneWidget);
     expect(find.byKey(const Key('pairing_copy_payload_button')), findsOneWidget);
     expect(find.textContaining('ekran görüntüsünü paylaşmayın'), findsOneWidget);
+  });
+
+  testWidgets('ownerBootstrapCompleted == true olduğunda ilk kurulum ve admin secret gizlenir, QR Kod Oluştur görünür',
+      (tester) async {
+    await tester.pumpWidget(ProviderScope(
+      overrides: [
+        deviceRoleProvider.overrideWith((ref) {
+          final notifier = DeviceRoleNotifier(
+            deviceId: 'WIN-OWNER-01',
+            tenantId: 'default-tenant',
+            storeId: 'default-store',
+            logger: RedactingLogger(),
+            readHubUrl: () => 'https://127.0.0.1:8945',
+            readDeviceToken: () => 'tok_owner',
+            httpClient: MockClient((_) async => http.Response(
+              jsonEncode({
+                'device_id': 'WIN-OWNER-01',
+                'role': 'OWNER',
+                'owner_bootstrap_completed': true,
+              }),
+              200,
+            )),
+          );
+          notifier.state = const DeviceRoleState(
+            verifiedRole: DeviceRoleState.roleOwner,
+            status: DeviceRoleVerificationStatus.verified,
+            boundDeviceId: 'WIN-OWNER-01',
+            boundHubUrl: 'https://127.0.0.1:8945',
+            boundToken: 'tok_owner',
+            ownerBootstrapCompleted: true,
+          );
+          return notifier;
+        }),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.lightTheme,
+        home: const Scaffold(
+          body: SingleChildScrollView(child: PairingApprovalPanel()),
+        ),
+      ),
+    ));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('pairing_admin_secret_field')), findsNothing);
+    expect(find.byKey(const Key('owner_bootstrap_button')), findsNothing);
+    expect(find.byKey(const Key('pairing_create_session_button')), findsOneWidget);
+    expect(find.text('QR Kod Oluştur'), findsOneWidget);
+    expect(find.byKey(const Key('pairing_refresh_button')), findsOneWidget);
   });
 }

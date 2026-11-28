@@ -92,13 +92,13 @@ void main() {
       expect(find.text('F10'), findsOneWidget);
       expect(find.text('Esc'), findsOneWidget);
 
-      // Sistem & Tanı sekmesine geçince Tanılama Kartı render edilir
+      // Sistem & Tanı sekmesine geçince sade Ayarlar ve Sistem ekranı render edilir
       await tester.tap(find.text('Sistem & Tanı'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Sistem Durumu ve Altyapı Tanılama'), findsOneWidget);
-      expect(find.text('Merkezi Shelf HTTPS/HTTP Sunucusu (Master Hub)'), findsOneWidget);
-      expect(find.text('İstemci Yerel Depolaması (client_local.db)'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
+      expect(find.text('Bağlantı & Senkronizasyon Durumu'), findsOneWidget);
+      expect(find.text('Gelişmiş ve Teknik Destek'), findsOneWidget);
     });
 
     testWidgets('2. Modül Geçişleri: Ürünler ve Raporlar MVP kapsamıyla uyumlu placeholder gösterir',

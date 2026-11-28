@@ -155,7 +155,9 @@ void main() {
           child: MaterialApp(
             theme: AppTheme.lightTheme,
             home: const Scaffold(
-              body: SingleChildScrollView(child: DeviceSecurityCard()),
+              body: SingleChildScrollView(
+                child: DeviceSecurityCard(mode: DeviceSecurityCardMode.advanced),
+              ),
             ),
           ),
         ),

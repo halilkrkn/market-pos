@@ -12,14 +12,7 @@ import '../../../sync/application/hub_connection_notifier.dart';
 import '../../backup_providers.dart';
 import '../../data/hub_backup_client.dart';
 
-/// Faz B-4 (`ADR-023`, `OV-01`, `OV-02`, `OV-04`):
-/// Merkezi Master Hub Google Drive Yedekleme ve Kurtarma Kartı.
-///
-/// - **Windows (`isDesktop`)**: Tam Hub Google Drive PKCE devri, katılımsız 12+
-///   karakter kurtarma anahtarı, 00:00 zamanlama, manuel yedek ve geri yükleme.
-/// - **Android (`isMobile`)**: Google Drive Backup OAuth akışı kesinlikle yok (`OV-02`);
-///   `OWNER` cihazı salt-okunur Hub durumu + uzaktan tetik görür; `CASHIER` açık
-///   yetki kısıtı mesajı görür.
+/// Google Drive Yedekleme ve Kurtarma Kartı (Tek Kullanıcı / Market Sahibi Modu).
 class HubCentralBackupCard extends ConsumerStatefulWidget {
   const HubCentralBackupCard({super.key});
 
@@ -49,6 +42,26 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
     super.dispose();
   }
 
+  String _friendlyJobStateLabel(HubBackupJobState state) {
+    switch (state) {
+      case HubBackupJobState.completedUploaded:
+        return 'Yedeklendi';
+      case HubBackupJobState.retryPending:
+        return 'Tekrar Denenecek';
+      case HubBackupJobState.failedAuth:
+        return 'Google Oturumu Gerekli';
+      case HubBackupJobState.failedQuota:
+        return 'Drive Alanı Dolu';
+      case HubBackupJobState.uploading:
+      case HubBackupJobState.verifying:
+        return 'Yükleniyor';
+      case HubBackupJobState.superseded:
+        return 'Yenilendi';
+      default:
+        return 'Hazırlanıyor';
+    }
+  }
+
   Future<void> _runBusy(Future<void> Function() action) async {
     setState(() {
       _isBusy = true;
@@ -66,7 +79,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       setState(() {
         _statusTone = AppBadgeTone.danger;
         _statusMessage = e.isOwnerRoleRequired
-            ? 'Bu işlem yalnızca OWNER (İşletme Sahibi) yetkisiyle yapılabilir.'
+            ? 'Bu işlem yalnızca ana bilgisayar yetkisiyle yapılabilir.'
             : e.message;
       });
     } on DriveBackupException catch (e) {
@@ -81,7 +94,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
         _statusTone = AppBadgeTone.danger;
         _statusMessage = UserFriendlyErrorMapper.map(
           e,
-          fallback: 'Merkezi Hub yedekleme işlemi tamamlanamadı.',
+          fallback: 'Google Drive yedekleme işlemi tamamlanamadı.',
         );
       });
     } finally {
@@ -94,15 +107,16 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
   Future<void> _refreshStatus() async {
     await _runBusy(() async {
       await ref.read(deviceRoleProvider.notifier).refreshRole(force: true);
-      final currentRole =
-          ref.read(hubBackupDeviceRoleProvider).trim().toUpperCase();
+      final currentRole = ref
+          .read(hubBackupDeviceRoleProvider)
+          .trim()
+          .toUpperCase();
       if (currentRole != 'OWNER') {
         if (!mounted) return;
         setState(() {
           _overview = null;
           _statusTone = AppBadgeTone.warning;
-          _statusMessage =
-              'Bu cihazda doğrulanmış OWNER yetkisi yok ($currentRole). İlk OWNER kurulumunu veya cihaz eşleştirme yetkisini doğrulayın.';
+          _statusMessage = 'Bu bilgisayarda yetki doğrulanamadı. İlk kurulumu tamamlayın veya bağlantıyı yenileyin.';
         });
         return;
       }
@@ -111,7 +125,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       setState(() {
         _overview = overview;
         _statusTone = AppBadgeTone.info;
-        _statusMessage = 'Merkezi Hub yedekleme durumu güncellendi.';
+        _statusMessage = 'Yedekleme durumu güncellendi.';
       });
     });
   }
@@ -126,7 +140,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
         _overview = overview;
         _statusTone = AppBadgeTone.success;
         _statusMessage =
-            'Master Hub Google Drive bağlantısı tamamlandı (${res.accountEmail ?? 'drive.file'}).';
+            'Google Drive bağlantısı tamamlandı (${res.accountEmail ?? 'Bağlı'}).';
       });
     });
   }
@@ -140,7 +154,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       setState(() {
         _overview = overview;
         _statusTone = AppBadgeTone.info;
-        _statusMessage = 'Master Hub Google Drive bağlantısı kesildi.';
+        _statusMessage = 'Google Drive bağlantısı kesildi.';
       });
     });
   }
@@ -151,7 +165,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       if (pass.length < MmsbakV2Crypto.minPasswordLength) {
         throw const DriveBackupException(
           'ERR_WEAK_RECOVERY_PASSWORD',
-          'Taşınabilir kurtarma parolası en az 12 karakter olmalıdır.',
+          'Kurtarma parolası en az 12 karakter olmalıdır.',
         );
       }
       final client = ref.read(hubBackupClientProvider);
@@ -162,8 +176,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       setState(() {
         _overview = overview;
         _statusTone = AppBadgeTone.success;
-        _statusMessage =
-            'Katılımsız kurtarma anahtarı Hub DPAPI kasasına kaydedildi.';
+        _statusMessage = 'Kurtarma parolası güvenli kasaya kaydedildi.';
       });
     });
   }
@@ -183,30 +196,26 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
         _overview = overview;
         _statusTone = AppBadgeTone.success;
         _statusMessage = enable
-            ? 'Günlük 00:00 merkezi Drive yedeklemesi etkinleştirildi.'
-            : 'Günlük merkezi Drive yedeklemesi devre dışı bırakıldı.';
+            ? 'Her gece 00:00 otomatik Google Drive yedeklemesi açıldı.'
+            : 'Otomatik Google Drive yedeklemesi kapatıldı.';
       });
     });
   }
 
   Future<void> _triggerManualBackup() async {
     await _runBusy(() async {
-      // S2: Kaydetme ve yedekleme ayrı işlemlerdir. Alanda kaydedilmemiş parola varken
-      // yedek başlatılmaz; aksi halde kullanıcı yedeğin hangi parolayla
-      // şifrelendiğini yanlış varsayabilir.
       if (_recoveryKeyController.text.isNotEmpty) {
         throw const DriveBackupException(
           'ERR_UNSAVED_RECOVERY_PASSWORD',
-          'Kurtarma parolası alanında kaydedilmemiş metin var. Önce "Kurtarma Anahtarını '
-              'Kaydet" ile kaydedin veya alanı temizleyin; Hub yedeği yalnızca kayıtlı '
-              'parolayla şifrelenir.',
+          'Kurtarma parolası alanında kaydedilmemiş metin var. Önce "Parolayı Kaydet" '
+              'ile kaydedin veya alanı temizleyin; yedek yalnızca kayıtlı parolayla şifrelenir.',
         );
       }
       final known = _overview;
       if (known != null && !known.hasRecoveryKey) {
         throw const DriveBackupException(
           'ERR_RECOVERY_KEY_REQUIRED',
-          'Hub\'da kayıtlı kurtarma parolası yok. Önce en az 12 karakterli parolayı '
+          'Henüz kayıtlı kurtarma parolası yok. Önce en az 12 karakterli parolayı '
               'kaydedin; yedek bu kayıtlı parolayla şifrelenir.',
         );
       }
@@ -220,7 +229,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
             ? AppBadgeTone.success
             : AppBadgeTone.warning;
         _statusMessage =
-            'Hub yedek işi (${job.backupId.substring(0, job.backupId.length > 8 ? 8 : job.backupId.length)}) durumu: ${job.state.wireName} · Hub\'da kayıtlı kurtarma parolasıyla şifrelendi.';
+            'Yedekleme sonucu: ${_friendlyJobStateLabel(job.state)} · kayıtlı kurtarma parolasıyla şifrelendi.';
       });
     });
   }
@@ -233,8 +242,8 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
         _driveBackups = list;
         _statusTone = AppBadgeTone.info;
         _statusMessage = list.isEmpty
-            ? 'Google Drive Hub klasöründe kayıtlı yedek bulunamadı.'
-            : '${list.length} Google Drive Hub yedeği listelendi.';
+            ? 'Google Drive klasöründe kayıtlı yedek bulunamadı.'
+            : '${list.length} Google Drive yedeği listelendi.';
       });
     });
   }
@@ -253,15 +262,17 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       if (pass.isEmpty) {
         throw const DriveBackupException(
           'ERR_RECOVERY_PASSWORD_REQUIRED',
-          'Geri yükleme için taşınabilir kurtarma parolasını girin.',
+          'Geri yükleme için kurtarma parolasını girin.',
         );
       }
       final backupId = _restoreBackupIdController.text.trim();
-      final driveFileId = (_selectedDriveBackupId == null ||
-              _selectedDriveBackupId == backupId)
+      final driveFileId =
+          (_selectedDriveBackupId == null || _selectedDriveBackupId == backupId)
           ? _selectedDriveFileId
           : null;
-      final res = await ref.read(hubBackupClientProvider).restoreFromBackup(
+      final res = await ref
+          .read(hubBackupClientProvider)
+          .restoreFromBackup(
             backupId: backupId.isEmpty ? null : backupId,
             driveFileId: driveFileId,
             recoveryPassword: pass,
@@ -271,7 +282,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       setState(() {
         _statusTone = AppBadgeTone.success;
         _statusMessage =
-            'Merkezi veritabanı geri yüklendi (yeni epoch: ${res['restore_epoch']}). Cihazlar yeniden doğrulamaya geçirildi.';
+            'Veritabanı geri yüklendi (${res['restore_epoch']}). Cihazlar yeniden doğrulamaya geçirildi.';
       });
     });
   }
@@ -286,10 +297,11 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
         compact: true,
       );
     }
+    final label = _friendlyJobStateLabel(latest.state);
     switch (latest.state) {
       case HubBackupJobState.completedUploaded:
-        return const AppBadge(
-          label: 'COMPLETED_UPLOADED',
+        return AppBadge(
+          label: label,
           tone: AppBadgeTone.success,
           icon: Icons.cloud_done_rounded,
           compact: true,
@@ -297,21 +309,21 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
       case HubBackupJobState.failedAuth:
       case HubBackupJobState.failedQuota:
         return AppBadge(
-          label: latest.state.wireName,
+          label: label,
           tone: AppBadgeTone.danger,
           icon: Icons.cloud_off_rounded,
           compact: true,
         );
       case HubBackupJobState.retryPending:
-        return const AppBadge(
-          label: 'RETRY_PENDING',
+        return AppBadge(
+          label: label,
           tone: AppBadgeTone.warning,
           icon: Icons.schedule_rounded,
           compact: true,
         );
       default:
         return AppBadge(
-          label: latest.state.wireName,
+          label: label,
           tone: AppBadgeTone.info,
           icon: Icons.sync_rounded,
           compact: true,
@@ -323,15 +335,16 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
     switch (err.code) {
       case 'ERR_RECOVERY_KEY_NOT_CONFIGURED':
       case 'ERR_RECOVERY_KEY_REQUIRED':
-        return 'Otomatik yedekleme bekliyor: Kurtarma Parolası henüz tanımlanmamış.';
+        return 'Otomatik yedekleme bekliyor: Kurtarma parolası henüz tanımlanmamış.';
       case 'ERR_RECOVERY_KEY_CORRUPTED':
-        return 'Otomatik yedekleme hatası: Hub Kurtarma Parolası kasası okunamadı; parolayı yeniden kaydedin.';
+        return 'Otomatik yedekleme hatası: Kurtarma parolası okunamadı; parolayı yeniden kaydedin.';
       case 'ERR_INSUFFICIENT_DISK_SPACE':
-        return 'Otomatik yedekleme duraklatıldı: Hub diskinde yeterli boş alan yok.';
+        return 'Otomatik yedekleme duraklatıldı: Diskte yeterli boş alan yok.';
       default:
         final msg = UserFriendlyErrorMapper.map(
           err.message.isNotEmpty ? err.message : err.code,
-          fallback: 'Otomatik yedekleme zamanlayıcısında geçici bir hata oluştu.',
+          fallback:
+              'Otomatik yedekleme zamanlayıcısında geçici bir hata oluştu.',
         );
         return 'Zamanlayıcı uyarısı: $msg';
     }
@@ -348,10 +361,10 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
     if (!isDesktop && !isOwner) {
       return const DiagnosticsSectionCard(
         key: Key('hub_central_backup_card'),
-        title: 'Merkezi Hub Yedekleme (Google Drive)',
-        subtitle: 'Ana pilot yedekleme kaynağı Windows Master Hub üzerindedir.',
+        title: 'Google Drive Yedekleme',
+        subtitle: 'Yedekleme ayarları ana bilgisayardan yönetilir.',
         trailing: AppBadge(
-          label: 'CASHIER SALT-OKUMA',
+          label: 'Yalnızca Bilgisayardan',
           tone: AppBadgeTone.warning,
           icon: Icons.lock_outline_rounded,
           compact: true,
@@ -360,55 +373,50 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
           DiagnosticsInlineBanner(
             key: Key('hub_backup_cashier_restricted'),
             tone: AppBadgeTone.warning,
-            message:
-                'Merkezi Hub yedekleme yönetimi yalnızca OWNER (İşletme Sahibi) yetkisiyle yapılabilir. Mobil cihazdan Google Drive OAuth bağlantısı yapılmaz.',
+            message: 'Google Drive yedekleme yönetimi yalnızca ana bilgisayardan yapılabilir.',
           ),
         ],
       );
     }
 
     final hubConn = ref.watch(hubConnectionProvider);
+    final isDriveConnected = overview?.oauthConnected ?? false;
 
     return DiagnosticsSectionCard(
       key: const Key('hub_central_backup_card'),
-      title: 'Merkezi Hub Yedekleme (Google Drive)',
+      title: 'Google Drive Yedekleme',
       subtitle: isDesktop
-          ? 'MMSBAK02 akışlı şifreleme · Windows DPAPI OAuth · Günlük 00:00 Google Drive arşivi'
-          : 'OWNER uzak yönetim · Hub Google Drive bağlantısı yalnızca Windows Master Hub üzerinden kurulur',
+          ? 'Her gece 00:00 otomatik şifreli yedekleme · En güncel 2 yedek saklanır'
+          : 'Ana bilgisayar üzerinden Google Drive yedekleme durumu',
       trailing: _buildJobBadge(overview),
       children: [
         DiagnosticsKeyValueRow(
-          label: 'Hedef Hub Durumu',
+          label: 'Ana Bilgisayar',
           value: hubConn.activeHubUrl != null
-              ? 'Hazır (${Uri.tryParse(hubConn.activeHubUrl!)?.host ?? 'Hub'})'
-              : 'Henüz hub seçilmedi',
-        ),
-        DiagnosticsKeyValueRow(
-          label: 'Cihaz Rolü',
-          value: role,
-          monospace: true,
+              ? 'Hazır (${Uri.tryParse(hubConn.activeHubUrl!)?.host ?? 'Yerel'})'
+              : 'Henüz bağlanmadı',
         ),
         if (overview != null) ...[
           DiagnosticsKeyValueRow(
-            label: 'Google Drive Durumu',
+            label: 'Google Drive',
             value: overview.oauthConnected
-                ? 'Bağlı (${overview.accountEmail ?? 'drive.file'})'
-                : (overview.needsReauth ? 'Yeniden Yetki Gerekli' : 'Bağlı Değil'),
+                ? 'Bağlı (${overview.accountEmail ?? 'Google Hesabı'})'
+                : (overview.needsReauth
+                      ? 'Yeniden Giriş Gerekli'
+                      : 'Bağlı Değil'),
           ),
           DiagnosticsKeyValueRow(
-            label: 'Katılımsız Kurtarma Anahtarı',
-            value: overview.hasRecoveryKey ? 'Tanımlı (DPAPI)' : 'Tanımsız',
+            label: 'Kurtarma Parolası',
+            value: overview.hasRecoveryKey ? 'Kayıtlı' : 'Belirlenmedi',
           ),
           DiagnosticsKeyValueRow(
-            label: 'Zamanlama (00:00)',
-            value: overview.schedule.enabled ? 'Aktif' : 'Kapalı',
+            label: 'Gece 00:00 Otomatik Yedek',
+            value: overview.schedule.enabled ? 'Açık' : 'Kapalı',
           ),
           if (overview.latestJob != null)
             DiagnosticsKeyValueRow(
-              label: 'Son Yedek İşi',
-              value:
-                  '${overview.latestJob!.state.wireName} (${overview.latestJob!.backupId})',
-              monospace: true,
+              label: 'Son Yedek Durumu',
+              value: _friendlyJobStateLabel(overview.latestJob!.state),
             ),
           if (overview.schedulerLastError != null) ...[
             const SizedBox(height: MmsSpacing.xs),
@@ -424,13 +432,23 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
           spacing: MmsSpacing.sm,
           runSpacing: MmsSpacing.sm,
           children: [
+            if (isDesktop && isOwner && !isDriveConnected)
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  key: const Key('hub_oauth_connect_button'),
+                  onPressed: _isBusy ? null : _connectHubDrive,
+                  icon: const Icon(Icons.link_rounded),
+                  label: const Text("Google Drive'a Bağlan"),
+                ),
+              ),
             SizedBox(
               height: 48,
               child: OutlinedButton.icon(
                 key: const Key('hub_backup_refresh_button'),
                 onPressed: _isBusy ? null : _refreshStatus,
                 icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Hub Durumunu Yenile'),
+                label: const Text('Durumu Yenile'),
               ),
             ),
             if (isOwner)
@@ -440,30 +458,19 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
                   key: const Key('hub_manual_backup_button'),
                   onPressed: _isBusy ? null : _triggerManualBackup,
                   icon: const Icon(Icons.cloud_upload_rounded),
-                  label: const Text('Hub Yedeği Başlat'),
+                  label: const Text('Şimdi Yedekle'),
                 ),
               ),
-            if (isDesktop && isOwner) ...[
+            if (isDesktop && isOwner && isDriveConnected)
               SizedBox(
                 height: 48,
                 child: OutlinedButton.icon(
-                  key: const Key('hub_oauth_connect_button'),
-                  onPressed: _isBusy ? null : _connectHubDrive,
-                  icon: const Icon(Icons.link_rounded),
-                  label: const Text('Google Drive Bağla (Windows PKCE)'),
+                  key: const Key('hub_oauth_disconnect_button'),
+                  onPressed: _isBusy ? null : _disconnectHubDrive,
+                  icon: const Icon(Icons.link_off_rounded),
+                  label: const Text('Drive Bağlantısını Kes'),
                 ),
               ),
-              if (overview?.oauthConnected ?? false)
-                SizedBox(
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    key: const Key('hub_oauth_disconnect_button'),
-                    onPressed: _isBusy ? null : _disconnectHubDrive,
-                    icon: const Icon(Icons.link_off_rounded),
-                    label: const Text('Drive Bağlantısını Kes'),
-                  ),
-                ),
-            ],
           ],
         ),
         if (isDesktop && !isOwner) ...[
@@ -471,8 +478,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
           const DiagnosticsInlineBanner(
             key: Key('hub_backup_owner_required_banner'),
             tone: AppBadgeTone.warning,
-            message:
-                'Merkezi Hub Google Drive yedekleme ve geri yükleme işlemleri doğrulanmış OWNER yetkisi gerektirir. Henüz yapılmadıysa aşağıdaki "İlk OWNER Kurulumu (Bootstrap)" adımını tamamlayın veya "Hub Durumunu Yenile" ile rolünüzü doğrulayın.',
+            message: 'Google Drive yedekleme ve geri yükleme için ana bilgisayar kurulumunun tamamlanmış olması gerekir. "Durumu Yenile" ile kontrol edebilirsiniz.',
           ),
         ],
         if (isDesktop && isOwner) ...[
@@ -482,8 +488,8 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
             controller: _recoveryKeyController,
             obscureText: true,
             decoration: const InputDecoration(
-              labelText: 'Taşınabilir Kurtarma Parolası (min. 12 karakter)',
-              hintText: 'Yeni bilgisayarda geri yükleme için gereklidir; Drive\'a yüklenmez',
+              labelText: 'Kurtarma Parolası (en az 12 karakter)',
+              hintText: 'Yeni bilgisayarda geri yükleme için gereklidir',
               border: OutlineInputBorder(),
             ),
           ),
@@ -498,7 +504,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
                   key: const Key('hub_save_recovery_key_button'),
                   onPressed: _isBusy ? null : _saveRecoveryKey,
                   icon: const Icon(Icons.vpn_key_rounded),
-                  label: const Text('Kurtarma Anahtarını Kaydet'),
+                  label: const Text('Parolayı Kaydet'),
                 ),
               ),
               SizedBox(
@@ -507,12 +513,14 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
                   key: const Key('hub_schedule_toggle_button'),
                   onPressed: _isBusy
                       ? null
-                      : () => _toggleSchedule(!(overview?.schedule.enabled ?? false)),
+                      : () => _toggleSchedule(
+                          !(overview?.schedule.enabled ?? false),
+                        ),
                   icon: const Icon(Icons.event_repeat_rounded),
                   label: Text(
                     (overview?.schedule.enabled ?? false)
-                        ? '00:00 Zamanlamayı Kapat'
-                        : '00:00 Zamanlamayı Aç',
+                        ? 'Gece 00:00 Yedeğini Kapat'
+                        : 'Gece 00:00 Yedeğini Aç',
                   ),
                 ),
               ),
@@ -532,7 +540,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
               }
             },
             decoration: const InputDecoration(
-              labelText: 'Geri Yüklenecek Yedek ID (Hub backups/ veya Drive)',
+              labelText: 'Geri Yüklenecek Yedek ID',
               border: OutlineInputBorder(),
             ),
           ),
@@ -566,7 +574,7 @@ class _HubCentralBackupCardState extends ConsumerState<HubCentralBackupCard> {
                   key: const Key('hub_restore_button'),
                   onPressed: _isBusy ? null : _restoreFromHubBackup,
                   icon: const Icon(Icons.restore_page_rounded),
-                  label: const Text('Merkezi Veritabanını Geri Yükle'),
+                  label: const Text('Yedekten Geri Yükle'),
                 ),
               ),
             ],

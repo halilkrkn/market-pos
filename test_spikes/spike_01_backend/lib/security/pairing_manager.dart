@@ -58,6 +58,8 @@ class PairingSession {
 
   int challengeCount;
   DateTime? lastChallengeIssuedAt;
+  DateTime? lastPollChallengeIssuedAt;
+  DateTime? lastAckChallengeIssuedAt;
 
   PairingChallenge? activePollChallenge;
   PairingChallenge? activeAckChallenge;
@@ -400,11 +402,11 @@ class PairingManager {
       );
     }
 
-    _applyRateLimitAndQuota(session);
+    _applyRateLimitAndQuota(session, operationType: 'POLL');
 
     final now = DateTime.now();
     final nonceBytes = List<int>.generate(32, (_) => _secureRandom.nextInt(256));
-    final challengeId = 'ch_poll_${Random().nextInt(1000000).toString().padLeft(6, '0')}';
+    final challengeId = 'ch_poll_${_secureRandom.nextInt(1000000).toString().padLeft(6, '0')}';
 
     final challenge = PairingChallenge(
       challengeId: challengeId,
@@ -540,11 +542,11 @@ class PairingManager {
       );
     }
 
-    _applyRateLimitAndQuota(session);
+    _applyRateLimitAndQuota(session, operationType: 'ACK');
 
     final now = DateTime.now();
     final nonceBytes = List<int>.generate(32, (_) => _secureRandom.nextInt(256));
-    final challengeId = 'ch_ack_${Random().nextInt(1000000).toString().padLeft(6, '0')}';
+    final challengeId = 'ch_ack_${_secureRandom.nextInt(1000000).toString().padLeft(6, '0')}';
 
     final challenge = PairingChallenge(
       challengeId: challengeId,
@@ -762,7 +764,10 @@ class PairingManager {
 
   // --- Rate Limiting ve Kota Kontrolü ---
 
-  void _applyRateLimitAndQuota(PairingSession session) {
+  void _applyRateLimitAndQuota(
+    PairingSession session, {
+    required String operationType,
+  }) {
     final now = DateTime.now();
 
     // 1. Oturum Başına Toplam Kota (Max 5)
@@ -775,9 +780,14 @@ class PairingManager {
       );
     }
 
-    // 2. Cooldown Kontrolü (Minimum 5 saniye)
-    if (session.lastChallengeIssuedAt != null) {
-      final elapsed = now.difference(session.lastChallengeIssuedAt!);
+    // 2. Faz Bazlı Cooldown Kontrolü (Minimum 5 saniye; POLL ve ACK ayrı izlenir)
+    final DateTime? phaseLastIssuedAt = switch (operationType) {
+      'POLL' => session.lastPollChallengeIssuedAt,
+      'ACK' => session.lastAckChallengeIssuedAt,
+      _ => session.lastChallengeIssuedAt,
+    };
+    if (phaseLastIssuedAt != null) {
+      final elapsed = now.difference(phaseLastIssuedAt);
       if (elapsed < challengeCooldown) {
         final remainingSeconds = challengeCooldown.inSeconds - elapsed.inSeconds;
         throw PairingException(
@@ -791,6 +801,11 @@ class PairingManager {
 
     session.challengeCount++;
     session.lastChallengeIssuedAt = now;
+    if (operationType == 'POLL') {
+      session.lastPollChallengeIssuedAt = now;
+    } else if (operationType == 'ACK') {
+      session.lastAckChallengeIssuedAt = now;
+    }
   }
 
   /// Test amaçlı oturumları temizler

@@ -21,18 +21,32 @@ final hubPairingAdminClientProvider = Provider<HubPairingAdminClient>((ref) {
   final pinned = ref.watch(pinnedTlsConfigProvider);
   final port = (parsed != null && parsed.hasPort) ? parsed.port : 8945;
   final base = 'https://127.0.0.1:$port';
-  final client = pinned != null ? MmsPinnedTlsClientFactory.createClient(pinned) : http.Client();
+  final client = pinned != null
+      ? MmsPinnedTlsClientFactory.createClient(pinned)
+      : http.Client();
   ref.onDispose(client.close);
   return HubPairingAdminClient(hubBaseUrl: base, httpClient: client);
 });
 
-/// Faz 7B — Windows Owner: yeni cihaz eşleştirme oturumu açma ve bekleyen talepleri
-/// onaylama/reddetme. Admin secret yalnızca bu ekranın belleğinde tutulur.
+/// İlk OWNER kurulumunun tamamlanıp tamamlanmadığını okur.
+/// Yerel veritabanı başlatılmamış izole widget testlerinde güvenli `false` döner.
+final ownerBootstrapCompletedProvider = Provider<bool>((ref) {
+  try {
+    return ref.watch(
+      deviceRoleProvider.select((s) => s.ownerBootstrapCompleted == true),
+    );
+  } on Object {
+    return false;
+  }
+});
+
+/// Windows masaüstü: telefon bağlama QR kodu üretme ve bekleyen talepleri onaylama.
 class PairingApprovalPanel extends ConsumerStatefulWidget {
   const PairingApprovalPanel({super.key});
 
   @override
-  ConsumerState<PairingApprovalPanel> createState() => _PairingApprovalPanelState();
+  ConsumerState<PairingApprovalPanel> createState() =>
+      _PairingApprovalPanelState();
 }
 
 class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
@@ -50,13 +64,18 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
     super.dispose();
   }
 
-  Future<void> _run(Future<String?> Function(HubPairingAdminClient c, String secret) action) async {
+  Future<void> _run(
+    Future<String?> Function(HubPairingAdminClient c, String secret) action,
+  ) async {
     setState(() {
       _busy = true;
       _message = null;
     });
     try {
-      final msg = await action(ref.read(hubPairingAdminClientProvider), _secretController.text);
+      final msg = await action(
+        ref.read(hubPairingAdminClientProvider),
+        _secretController.text,
+      );
       if (!mounted) return;
       setState(() {
         _tone = AppBadgeTone.success;
@@ -79,7 +98,9 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
     try {
       readiness = await c.fetchHubReadiness();
     } catch (e) {
-      ref.read(redactingLoggerProvider).warning(
+      ref
+          .read(redactingLoggerProvider)
+          .warning(
             'pairing',
             'Hub sağlık özeti yenilenemedi: ${e.runtimeType}',
           );
@@ -90,10 +111,13 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
         if (readiness != null) _readiness = readiness;
       });
     }
-    return list.isEmpty ? 'Onay bekleyen eşleştirme talebi yok.' : null;
+    return list.isEmpty ? 'Onay bekleyen telefon talebi yok.' : null;
   }
 
-  Future<String?> _bootstrapOwner(HubPairingAdminClient c, String secret) async {
+  Future<String?> _bootstrapOwner(
+    HubPairingAdminClient c,
+    String secret,
+  ) async {
     final setup = ref.read(setupConfigProvider);
     final res = await c.bootstrapOwner(
       adminSecret: secret,
@@ -102,14 +126,18 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
       registerIfMissing: true,
     );
     if (res.token != null && res.token!.isNotEmpty) {
-      await ref.read(deviceAuthProvider.notifier).setStoredToken(res.deviceId, res.token!);
+      await ref
+          .read(deviceAuthProvider.notifier)
+          .setStoredToken(res.deviceId, res.token!);
       await ref.read(deviceRoleProvider.notifier).refreshRole(force: true);
     }
     HubReadinessSummary? readiness;
     try {
       readiness = await c.fetchHubReadiness();
     } catch (e) {
-      ref.read(redactingLoggerProvider).warning(
+      ref
+          .read(redactingLoggerProvider)
+          .warning(
             'pairing',
             'Bootstrap sonrası Hub sağlık özeti yenilenemedi: ${e.runtimeType}',
           );
@@ -117,71 +145,84 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
     if (mounted && readiness != null) {
       setState(() => _readiness = readiness);
     }
-    return 'İlk OWNER kurulumu (${res.deviceId}) tamamlandı ve mühürlendi.';
+    return 'İlk bilgisayar kurulumu (${res.deviceId}) tamamlandı ve mühürlendi.';
   }
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mmsColors;
+    final bootstrapCompleted = ref.watch(ownerBootstrapCompletedProvider);
+
     return DiagnosticsSectionCard(
       key: const Key('pairing_approval_panel'),
-      title: 'Cihaz Eşleştirme Onayları (Owner)',
-      subtitle: 'Yeni Android cihazları yalnızca bu bilgisayardan onaylayın',
-      trailing: const AppBadge(label: 'Loopback + Admin', tone: AppBadgeTone.info, compact: true),
+      title: 'Telefon Bağla',
+      subtitle: 'Telefonunuzu bu bilgisayara QR kod ile bağlayın ve onaylayın',
+      trailing: AppBadge(
+        label: bootstrapCompleted ? 'Hazır' : 'İlk Kurulum',
+        tone: bootstrapCompleted ? AppBadgeTone.success : AppBadgeTone.info,
+        compact: true,
+      ),
       children: [
-        TextField(
-          key: const Key('pairing_admin_secret_field'),
-          controller: _secretController,
-          obscureText: true,
-          decoration: const InputDecoration(
-            labelText: 'Hub yönetici anahtarı (admin secret)',
-            helperText: 'Kaydedilmez; ekran kapanınca bellekten silinir.',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: MmsSpacing.sm),
-        Wrap(spacing: MmsSpacing.sm, runSpacing: MmsSpacing.sm, children: [
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              key: const Key('owner_bootstrap_button'),
-              onPressed: _busy ? null : () => _run(_bootstrapOwner),
-              icon: const Icon(Icons.admin_panel_settings_rounded),
-              label: const Text('İlk OWNER Kurulumu (Bootstrap)'),
+        if (!bootstrapCompleted) ...[
+          TextField(
+            key: const Key('pairing_admin_secret_field'),
+            controller: _secretController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: 'Yönetici anahtarı',
+              helperText: 'Kaydedilmez; ekran kapanınca bellekten silinir.',
+              border: OutlineInputBorder(),
             ),
           ),
-          SizedBox(
-            height: 48,
-            child: FilledButton.icon(
-              key: const Key('pairing_create_session_button'),
-              onPressed: _busy
-                  ? null
-                  : () => _run((c, s) async {
+          const SizedBox(height: MmsSpacing.sm),
+        ],
+        Wrap(
+          spacing: MmsSpacing.sm,
+          runSpacing: MmsSpacing.sm,
+          children: [
+            if (!bootstrapCompleted)
+              SizedBox(
+                height: 48,
+                child: FilledButton.icon(
+                  key: const Key('owner_bootstrap_button'),
+                  onPressed: _busy ? null : () => _run(_bootstrapOwner),
+                  icon: const Icon(Icons.admin_panel_settings_rounded),
+                  label: const Text('İlk Kurulumu Tamamla'),
+                ),
+              ),
+            SizedBox(
+              height: 48,
+              child: FilledButton.icon(
+                key: const Key('pairing_create_session_button'),
+                onPressed: _busy
+                    ? null
+                    : () => _run((c, s) async {
                         final session = await c.createSession(adminSecret: s);
                         if (mounted) setState(() => _session = session);
-                        return 'Eşleştirme oturumu açıldı. Kodu Android cihazdaki "Eşleştir" alanına aktarın.';
+                        return 'QR kod oluşturuldu. Telefondan "QR Kodu Okut ve Bağlan" ile tarayın.';
                       }),
-              icon: const Icon(Icons.qr_code_2_rounded),
-              label: const Text('Yeni Eşleştirme Oturumu'),
+                icon: const Icon(Icons.qr_code_2_rounded),
+                label: const Text('QR Kod Oluştur'),
+              ),
             ),
-          ),
-          SizedBox(
-            height: 48,
-            child: OutlinedButton.icon(
-              key: const Key('pairing_refresh_button'),
-              onPressed: _busy ? null : () => _run(_refresh),
-              icon: const Icon(Icons.refresh_rounded),
-              label: const Text('Bekleyen Talepler'),
+            SizedBox(
+              height: 48,
+              child: OutlinedButton.icon(
+                key: const Key('pairing_refresh_button'),
+                onPressed: _busy ? null : () => _run(_refresh),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Bekleyen Talepler'),
+              ),
             ),
-          ),
-        ]),
+          ],
+        ),
         if (_readiness != null) ...[
           const SizedBox(height: MmsSpacing.xs),
           AppBadge(
             key: const Key('hub_recovery_key_health_badge'),
             label: _readiness!.recoveryKeyConfigured
-                ? 'Kurtarma Parolası: Yapılandırıldı'
-                : 'Kurtarma Parolası: Tanımsız (Yedek Fail-Closed)',
+                ? 'Yedek Parolası: Hazır'
+                : 'Yedek Parolası: Henüz Belirlenmedi',
             tone: _readiness!.recoveryKeyConfigured
                 ? AppBadgeTone.success
                 : AppBadgeTone.warning,
@@ -220,7 +261,7 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'Tek kullanımlık eşleştirme kodu — ekran görüntüsünü paylaşmayın.',
+                      'Tek kullanımlık bağlantı kodu — ekran görüntüsünü paylaşmayın.',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,
@@ -234,65 +275,80 @@ class _PairingApprovalPanelState extends ConsumerState<PairingApprovalPanel> {
             ),
             const SizedBox(height: MmsSpacing.sm),
           ],
-          Row(children: [
-            Expanded(
-              child: Text(
-                'Oturum ${_session!.sessionId} · son geçerlilik: ${_session!.expiresAt?.toLocal() ?? '-'}',
-                style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Oturum ${_session!.sessionId} · son geçerlilik: ${_session!.expiresAt?.toLocal() ?? '-'}',
+                  style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
+                ),
               ),
-            ),
-            TextButton.icon(
-              key: const Key('pairing_copy_payload_button'),
-              onPressed: () => Clipboard.setData(ClipboardData(text: _session!.qrPayload)),
-              icon: const Icon(Icons.copy_rounded, size: 16),
-              label: const Text('Eşleştirme kodunu kopyala'),
-            ),
-          ]),
+              TextButton.icon(
+                key: const Key('pairing_copy_payload_button'),
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: _session!.qrPayload)),
+                icon: const Icon(Icons.copy_rounded, size: 16),
+                label: const Text('Bağlantı kodunu kopyala'),
+              ),
+            ],
+          ),
         ],
         if (_message != null) ...[
           const SizedBox(height: MmsSpacing.sm),
-          DiagnosticsInlineBanner(key: const Key('pairing_admin_status_banner'), tone: _tone, message: _message!),
+          DiagnosticsInlineBanner(
+            key: const Key('pairing_admin_status_banner'),
+            tone: _tone,
+            message: _message!,
+          ),
         ],
         for (final r in _pending)
           Padding(
             padding: const EdgeInsets.only(top: MmsSpacing.sm),
-            child: Row(children: [
-              Expanded(
-                child: Text(
-                  '${r.deviceName} (${r.platform}) · ${r.deviceId}\nAnahtar parmak izi: ${r.publicKeyFingerprint}',
-                  style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${r.deviceName} (${r.platform}) · ${r.deviceId}\nAnahtar parmak izi: ${r.publicKeyFingerprint}',
+                    style: TextStyle(fontSize: 12.5, color: colors.textPrimary),
+                  ),
                 ),
-              ),
-              SizedBox(
-                height: 48,
-                child: FilledButton(
-                  key: Key('pairing_approve_${r.sessionId}'),
-                  onPressed: _busy
-                      ? null
-                      : () => _run((c, s) async {
-                            await c.approve(sessionId: r.sessionId, adminSecret: s);
+                SizedBox(
+                  height: 48,
+                  child: FilledButton(
+                    key: Key('pairing_approve_${r.sessionId}'),
+                    onPressed: _busy
+                        ? null
+                        : () => _run((c, s) async {
+                            await c.approve(
+                              sessionId: r.sessionId,
+                              adminSecret: s,
+                            );
                             await _refresh(c, s);
-                            return '${r.deviceName} onaylandı. Cihaz eşleştirmeyi tamamlayacak.';
+                            return '${r.deviceName} onaylandı. Cihaz bağlantıyı tamamlayacak.';
                           }),
-                  child: const Text('Onayla'),
+                    child: const Text('Onayla'),
+                  ),
                 ),
-              ),
-              const SizedBox(width: MmsSpacing.xs),
-              SizedBox(
-                height: 48,
-                child: OutlinedButton(
-                  key: Key('pairing_reject_${r.sessionId}'),
-                  onPressed: _busy
-                      ? null
-                      : () => _run((c, s) async {
-                            await c.reject(sessionId: r.sessionId, adminSecret: s);
+                const SizedBox(width: MmsSpacing.xs),
+                SizedBox(
+                  height: 48,
+                  child: OutlinedButton(
+                    key: Key('pairing_reject_${r.sessionId}'),
+                    onPressed: _busy
+                        ? null
+                        : () => _run((c, s) async {
+                            await c.reject(
+                              sessionId: r.sessionId,
+                              adminSecret: s,
+                            );
                             await _refresh(c, s);
                             return '${r.deviceName} reddedildi.';
                           }),
-                  child: const Text('Reddet'),
+                    child: const Text('Reddet'),
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
       ],
     );

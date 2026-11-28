@@ -654,6 +654,12 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // 0. Gelişmiş ve Teknik Destek bölümünü aç (HubConnectionControls artık bu bölümde)
+      final advancedTile = find.byKey(const Key('advanced_support_expansion_tile'));
+      await tester.ensureVisible(advancedTile);
+      await tester.tap(advancedTile);
+      await tester.pumpAndSettle();
+
       // 1. Hub'ı Yeniden Ara butonuna bas -> keşif ve bağlantı kurulur
       final discoverBtn = find.byKey(const Key('diagnostics_discover_hub_button'));
       await tester.ensureVisible(discoverBtn);

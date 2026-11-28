@@ -280,6 +280,10 @@ class SpikeServer {
           readSchemaVersion: () => db.schemaVersion,
           oauthClientId: this.backupOAuthClientId,
           oauthClientSecret: this.backupOAuthClientSecret,
+          retentionPolicy: const HubBackupRetentionPolicy(
+            maxDriveCopies: 2,
+            localCacheRetentionDays: 2,
+          ),
         );
     this.replayProtectionService =
         replayProtectionService ?? ReplayProtectionService();

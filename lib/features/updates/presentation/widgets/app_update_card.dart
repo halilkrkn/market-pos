@@ -10,7 +10,7 @@ import '../../../sync/application/hub_connection_notifier.dart';
 import '../../data/app_update_checker.dart';
 import '../../domain/app_update_info.dart';
 
-/// Tanı ekranında sürüm kontrolü ve güncelleme manifest kartı.
+/// Gelişmiş bölümde uygulama sürümü ve güncelleme durumu kartı.
 class AppUpdateCard extends ConsumerStatefulWidget {
   const AppUpdateCard({super.key});
 
@@ -19,22 +19,13 @@ class AppUpdateCard extends ConsumerStatefulWidget {
 }
 
 class _AppUpdateCardState extends ConsumerState<AppUpdateCard> {
-  final _manifestController = TextEditingController();
   bool _isChecking = false;
   AppUpdateCheckResult? _lastResult;
-  String? _syncedManifestUrl;
-
-  @override
-  void dispose() {
-    _manifestController.dispose();
-    super.dispose();
-  }
 
   Future<void> _checkUpdates() async {
     setState(() => _isChecking = true);
     try {
-      var target = _manifestController.text.trim();
-      await ref.read(setupConfigProvider.notifier).updateManifestUrl(target);
+      var target = (ref.read(setupConfigProvider).updateManifestUrl ?? '').trim();
       if (target.isEmpty) {
         final hubUrl = ref.read(hubConnectionProvider).activeHubUrl;
         if (hubUrl != null && hubUrl.isNotEmpty) {
@@ -55,17 +46,10 @@ class _AppUpdateCardState extends ConsumerState<AppUpdateCard> {
 
   @override
   Widget build(BuildContext context) {
-    final setup = ref.watch(setupConfigProvider);
-    final configured = setup.updateManifestUrl ?? '';
-    if (_syncedManifestUrl != configured && _manifestController.text.isEmpty) {
-      _manifestController.text = configured;
-      _syncedManifestUrl = configured;
-    }
-
     return DiagnosticsSectionCard(
       key: const Key('diagnostics_update_card'),
-      title: 'Uygulama Sürümü ve Güncelleme Kontrolü',
-      subtitle: 'Yerel ağ / Hub dağıtım manifesti üzerinden sürüm denetimi',
+      title: 'Uygulama Sürümü ve Güncelleme',
+      subtitle: 'Yüklü sürüm ve güncelleme durumu',
       trailing: const AppBadge(
         label: 'v${AppConstants.appVersion}',
         tone: AppBadgeTone.info,
@@ -74,19 +58,9 @@ class _AppUpdateCardState extends ConsumerState<AppUpdateCard> {
       ),
       children: [
         const DiagnosticsKeyValueRow(
-          label: 'Yüklü İstemci Sürümü',
+          label: 'Yüklü Sürüm',
           value: AppConstants.appVersion,
           monospace: true,
-        ),
-        const SizedBox(height: MmsSpacing.sm),
-        TextField(
-          key: const Key('update_manifest_url_field'),
-          controller: _manifestController,
-          decoration: const InputDecoration(
-            labelText: 'Güncelleme Manifest Adresi (Opsiyonel)',
-            hintText: 'Örn: https://192.168.1.50:8945/api/v1/updates/manifest.json',
-            border: OutlineInputBorder(),
-          ),
         ),
         const SizedBox(height: MmsSpacing.sm),
         Wrap(

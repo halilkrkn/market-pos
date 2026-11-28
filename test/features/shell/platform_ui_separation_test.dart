@@ -270,7 +270,7 @@ void main() {
           tester.widget<NavigationBar>(find.byType(NavigationBar)).indicatorColor,
           Colors.transparent,
         );
-        expect(find.text('Sistem Durumu ve Altyapı Tanılama'), findsOneWidget);
+        expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
 
         await tester.tap(find.text('Kasa'));
         await tester.pumpAndSettle();

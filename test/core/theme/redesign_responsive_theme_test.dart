@@ -108,12 +108,21 @@ void main() {
 
       await tester.tap(find.text('Sistem & Tanı'));
       await tester.pumpAndSettle();
-      expect(find.text('Görünüm ve Tema Tercihi'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
+
+      final darkThemeChip = find.byKey(const Key('theme_mode_dark'));
+      await tester.scrollUntilVisible(
+        darkThemeChip,
+        300,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Görünüm'), findsOneWidget);
 
       // Dark tema geçişi
-      await tester.tap(find.byKey(const Key('theme_mode_dark')));
+      await tester.tap(darkThemeChip);
       await tester.pumpAndSettle();
-      final ctxDark = tester.element(find.text('Görünüm ve Tema Tercihi'));
+      final ctxDark = tester.element(find.text('Görünüm'));
       expect(Theme.of(ctxDark).brightness, Brightness.dark);
 
       // System tema geçişi
@@ -160,7 +169,7 @@ void main() {
       // Sistem & Tanı header ikonu üzerinden açılır
       await tester.tap(find.byKey(const Key('header_diagnostics_button')));
       await tester.pumpAndSettle();
-      expect(find.text('Görünüm ve Tema Tercihi'), findsOneWidget);
+      expect(find.text('Ayarlar ve Sistem'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
 

@@ -68,10 +68,30 @@ foreach ($req in @("ca.crt", "server.crt", "server.key")) {
 if ([string]::IsNullOrWhiteSpace($AdvertiseHost)) {
     $wifiIp = Get-NetIPAddress -InterfaceAlias "Wi-Fi" -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |
         Select-Object -First 1 -ExpandProperty IPAddress
-    if ([string]::IsNullOrWhiteSpace($wifiIp)) {
-        throw "Aktif Preferred Wi-Fi IPv4 adresi bulunamadi. -AdvertiseHost parametresi ile acikca belirtin."
+    if (-not [string]::IsNullOrWhiteSpace($wifiIp)) {
+        $AdvertiseHost = $wifiIp.Trim()
+    } else {
+        $defaultRoutes = Get-NetRoute -DestinationPrefix "0.0.0.0/0" -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object { $_.NextHop -and $_.NextHop -ne "0.0.0.0" } |
+            Sort-Object -Property RouteMetric, InterfaceMetric
+        foreach ($route in $defaultRoutes) {
+            $adapter = Get-NetAdapter -InterfaceIndex $route.InterfaceIndex -ErrorAction SilentlyContinue
+            if (-not $adapter -or $adapter.Status -ne "Up") { continue }
+            $desc = ($adapter.InterfaceDescription + " " + $adapter.Name)
+            if ($desc -match "(?i)(VirtualBox|Hyper-V|VMware|vEthernet|Virtual|Loopback|TAP|TUN|WSL|Docker)") {
+                continue
+            }
+            $candidateIp = Get-NetIPAddress -InterfaceIndex $route.InterfaceIndex -AddressFamily IPv4 -AddressState Preferred -ErrorAction SilentlyContinue |
+                Select-Object -First 1 -ExpandProperty IPAddress
+            if (-not [string]::IsNullOrWhiteSpace($candidateIp)) {
+                $AdvertiseHost = $candidateIp.Trim()
+                break
+            }
+        }
     }
-    $AdvertiseHost = $wifiIp.Trim()
+    if ([string]::IsNullOrWhiteSpace($AdvertiseHost)) {
+        throw "Aktif Preferred Wi-Fi veya varsayilan ag gecidine sahip LAN IPv4 adresi bulunamadi. -AdvertiseHost parametresi ile acikca belirtin."
+    }
 }
 Write-Host ("TARGET_LAN_IP=" + $AdvertiseHost) -ForegroundColor Cyan
 
@@ -114,7 +134,7 @@ $cfg | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $configPath -Encoding
 Write-Host "[OK] hub_config.json advertise_host=$AdvertiseHost olarak guncellendi." -ForegroundColor Green
 
 # 6. ACL & Firewall & Servis baslatma / yeniden baslatma dogrulamasi
-& $aclScript -ProgramDataRoot $ProgramDataRoot -ServiceName $ServiceName
+& $aclScript -BaseDir $ProgramDataRoot -ServiceName $ServiceName
 if ($LASTEXITCODE -ne 0) { throw "setup_service_acls.ps1 basarisiz oldu ($LASTEXITCODE)." }
 
 $hubPort = if ($cfg.port) { [int]$cfg.port } else { 8945 }
@@ -154,13 +174,14 @@ $curlExe = "$env:SystemRoot\System32\curl.exe"
 if (-not (Test-Path -LiteralPath $curlExe)) { $curlExe = "curl.exe" }
 
 Write-Host "--- HEALTH CHECK 1: https://127.0.0.1:$hubPort/health ---" -ForegroundColor Cyan
-$h1 = & $curlExe --fail --show-error --silent --cacert $deployedCa "https://127.0.0.1:$hubPort/health" 2>&1
+$h1 = & $curlExe --fail --show-error --silent --ssl-no-revoke --cacert $deployedCa "https://127.0.0.1:$hubPort/health" 2>&1
 if ($LASTEXITCODE -ne 0) { throw "Localhost HTTPS health basarisiz: $h1" }
 Write-Host $h1
 
 Write-Host "--- HEALTH CHECK 2: https://${AdvertiseHost}:$hubPort/health ---" -ForegroundColor Cyan
-$h2 = & $curlExe --fail --show-error --silent --cacert $deployedCa "https://${AdvertiseHost}:$hubPort/health" 2>&1
+$h2 = & $curlExe --fail --show-error --silent --ssl-no-revoke --cacert $deployedCa "https://${AdvertiseHost}:$hubPort/health" 2>&1
 if ($LASTEXITCODE -ne 0) { throw "LAN IP HTTPS health basarisiz: $h2" }
 Write-Host $h2
 
 Write-Host "[SUCCESS] TEST_ONLY Master Hub servisi ve HTTPS/UDP dinleyicileri dogrulandi." -ForegroundColor Green
+

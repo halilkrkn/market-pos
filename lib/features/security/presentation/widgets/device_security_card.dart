@@ -20,9 +20,22 @@ import '../../../sync/application/hub_connection_notifier.dart';
 import '../../data/device_pairing_client.dart';
 import '../../domain/pairing_qr_payload.dart';
 
-/// B-2 Sertifika Sabitleme, B-3 Güvenli Token Depolama ve S-4 Cihaz Eşleştirme Kartı.
+enum DeviceSecurityCardMode {
+  /// Ana ekranda gösterilen sade bağlantı ve QR okutma kartı.
+  simple,
+
+  /// Gelişmiş ve Teknik Destek altında gösterilen manuel TLS/CA ve QR metin alanı.
+  advanced,
+}
+
+/// Bilgisayara Bağlan (sade) ve Gelişmiş Sertifika / Manuel Eşleştirme kartı.
 class DeviceSecurityCard extends ConsumerStatefulWidget {
-  const DeviceSecurityCard({super.key});
+  final DeviceSecurityCardMode mode;
+
+  const DeviceSecurityCard({
+    super.key,
+    this.mode = DeviceSecurityCardMode.simple,
+  });
 
   @override
   ConsumerState<DeviceSecurityCard> createState() =>
@@ -105,7 +118,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       }
       if (targetUrl == null) {
         throw const FormatException(
-          'Önce Hub adresini belirleyin veya QR ile eşleştirin.',
+          'Önce bilgisayar adresini belirleyin veya QR ile bağlanın.',
         );
       }
 
@@ -126,14 +139,16 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       _pinController.text = canonical.sha256Hex;
       _syncedPinValue = canonical.sha256Hex;
 
-      await ref.read(hubConnectionProvider.notifier).connectToManualAddress(targetUrl);
+      await ref
+          .read(hubConnectionProvider.notifier)
+          .connectToManualAddress(targetUrl);
       await ref.read(systemStatusProvider.notifier).refreshStatus();
 
       if (!mounted) return;
       setState(() {
         _statusTone = AppBadgeTone.success;
         _statusMessage =
-            'Hub Kök CA sertifikası SHA-256 ve TLS el sıkışmasıyla doğrulandı ve sabitlendi.';
+            'Kök CA sertifikası doğrulandı ve güvenlik sabitlemesi tamamlandı.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -162,15 +177,15 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
     if (!mounted) return;
     setState(() {
       _statusTone = AppBadgeTone.info;
-      _statusMessage = 'TLS sertifika sabitleme devre dışı bırakıldı.';
+      _statusMessage = 'Sertifika sabitleme devre dışı bırakıldı.';
     });
   }
 
   Future<void> _scanPairingQr() async {
     final scanned = await ref.read(cameraBarcodeScannerProvider).scanBarcode(
           context,
-          title: 'Hub Eşleştirme QR Tara',
-          subtitle: 'Hub QR kodunu çerçeve içerisine yerleştirin',
+          title: 'Bilgisayar QR Kodunu Okut',
+          subtitle: 'Bilgisayar ekranındaki QR kodu çerçeveye hizalayın',
         );
     if (!mounted || !scanned.isScanned || scanned.barcode == null) return;
     _pairingInputController.text = scanned.barcode!;
@@ -189,7 +204,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       final hubUrl = qr.hubUrl ?? ref.read(hubConnectionProvider).activeHubUrl;
       if (hubUrl == null || hubUrl.trim().isEmpty) {
         throw const FormatException(
-          'Eşleştirme için QR kodunda veya Hub ayarlarında geçerli Hub adresi bulunamadı.',
+          'Bağlantı için QR kodunda veya ayarlarda geçerli bilgisayar adresi bulunamadı.',
         );
       }
 
@@ -202,11 +217,11 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       final expectedCaPin = qr.normalizedCaSha256 ??
           (manualPin.isNotEmpty ? manualPin : setup.normalizedPinSha256);
 
-      // F-5 / F-7: CA değiştiyse eski setup.pinnedCaPem yeni CA yerine enjekte edilmez.
       final isSamePinAsSetup = expectedCaPin != null &&
           setup.normalizedPinSha256 != null &&
           expectedCaPin == setup.normalizedPinSha256;
-      final initialCaPem = qr.caPem ?? (isSamePinAsSetup ? setup.pinnedCaPem : null);
+      final initialCaPem =
+          qr.caPem ?? (isSamePinAsSetup ? setup.pinnedCaPem : null);
 
       final result = await pairingClient.pairDevice(
         hubBaseUrl: hubUrl,
@@ -224,10 +239,10 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
           final confirmed = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: const Text('Kök CA Değişikliği Onayı'),
+              title: const Text('Güvenlik Sertifikası Değişikliği'),
               content: Text(
-                'Bu cihaz daha önce farklı bir Hub Kök CA sertifikasına ($oldSha) sabitlenmiş. '
-                'Yeni Kök CA ($newSha) ile yeniden eşleştirmeye devam edilsin mi?',
+                'Bu cihaz daha önce farklı bir bilgisayar sertifikasına ($oldSha) bağlanmış. '
+                'Yeni sertifika ($newSha) ile devam edilsin mi?',
               ),
               actions: [
                 TextButton(
@@ -251,13 +266,14 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
               );
         },
         onPromoteHubUrl: (url) async {
-          await ref.read(hubConnectionProvider.notifier).connectToManualAddress(url);
+          await ref
+              .read(hubConnectionProvider.notifier)
+              .connectToManualAddress(url);
         },
       );
 
       await ref.read(deviceAuthProvider.notifier).loadForDevice(setup.deviceId);
       await ref.read(deviceRoleProvider.notifier).refreshRole(force: true);
-      // Not: P1..P4 başarılıysa pin + Hub URL zaten terfi edilmiştir; backward compatibility için güvenli sync:
       if (result.caSha256 != null && result.caSha256!.isNotEmpty) {
         _pinController.text = result.caSha256!;
         _syncedPinValue = result.caSha256!;
@@ -266,8 +282,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       if (!mounted) return;
       setState(() {
         _statusTone = AppBadgeTone.success;
-        _statusMessage =
-            'Cihaz eşleştirildi ve token güvenli depoya (${ref.read(deviceAuthProvider).backendLabel}) yazıldı.';
+        _statusMessage = 'Bilgisayara güvenli bağlantı tamamlandı.';
       });
     } catch (e) {
       if (!mounted) return;
@@ -281,7 +296,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
                 ? e.message
                 : UserFriendlyErrorMapper.map(
                     e,
-                    fallback: 'Cihaz eşleştirme tamamlanamadı.',
+                    fallback: 'Bilgisayara bağlanma işlemi tamamlanamadı.',
                   ));
       });
     } finally {
@@ -302,12 +317,57 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       _syncedPinValue = targetPin;
     }
 
+    if (widget.mode == DeviceSecurityCardMode.simple) {
+      final isPaired = auth.hasStoredToken;
+      return DiagnosticsSectionCard(
+        key: const Key('diagnostics_security_card'),
+        title: 'Bilgisayara Bağlan',
+        subtitle: 'Bilgisayar ekranındaki QR kodu okutarak telefonunuzu bağlayın',
+        trailing: AppBadge(
+          label: isPaired ? 'Bağlı' : 'Bağlı Değil',
+          tone: isPaired ? AppBadgeTone.success : AppBadgeTone.warning,
+          icon: isPaired ? Icons.verified_user_rounded : Icons.link_off_rounded,
+          compact: true,
+        ),
+        children: [
+          DiagnosticsKeyValueRow(
+            label: 'Bağlantı Durumu',
+            value: isPaired
+                ? 'Bilgisayar ile eşleştirildi'
+                : 'Henüz eşleştirilmedi',
+          ),
+          const SizedBox(height: MmsSpacing.sm),
+          SizedBox(
+            height: 48,
+            child: FilledButton.icon(
+              key: const Key('pairing_scan_qr_button'),
+              onPressed: (_isPairing || !uiProfile.supportsCameraBarcodeScanning)
+                  ? null
+                  : _scanPairingQr,
+              icon: const Icon(Icons.qr_code_scanner_rounded),
+              label: Text(
+                _isPairing ? 'Bağlanıyor...' : 'QR Kodu Okut ve Bağlan',
+              ),
+            ),
+          ),
+          if (_statusMessage != null) ...[
+            const SizedBox(height: MmsSpacing.sm),
+            DiagnosticsInlineBanner(
+              key: const Key('security_status_banner'),
+              tone: _statusTone,
+              message: _statusMessage!,
+            ),
+          ],
+        ],
+      );
+    }
+
     return DiagnosticsSectionCard(
-      key: const Key('diagnostics_security_card'),
-      title: 'Cihaz Güvenliği, TLS Pinning (B-2) ve Token Deposu (B-3)',
-      subtitle: 'S-4 ECDSA P-256 eşleştirme ve OS/Donanım korumalı token depolama',
+      key: const Key('diagnostics_security_advanced_card'),
+      title: 'Güvenlik Sertifikası ve Manuel Eşleştirme',
+      subtitle: 'Sertifika sabitleme ve metin tabanlı manuel cihaz eşleştirme',
       trailing: AppBadge(
-        label: setup.hasPinnedCertificate ? 'TLS Pin Aktif' : 'Standart',
+        label: setup.hasPinnedCertificate ? 'Sertifika Sabit' : 'Standart',
         tone: setup.hasPinnedCertificate
             ? AppBadgeTone.success
             : AppBadgeTone.info,
@@ -316,22 +376,20 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
       ),
       children: [
         DiagnosticsKeyValueRow(
-          label: 'Token Güvenli Deposu',
+          label: 'Güvenli Depo',
           value: auth.backendLabel,
         ),
         DiagnosticsKeyValueRow(
-          label: 'Kayıtlı Cihaz Token Durumu',
-          value: auth.hasStoredToken
-              ? 'Güvenli depoda mevcut (Maskeli)'
-              : 'Henüz eşleştirilmedi (Varsayılan / Bekleniyor)',
+          label: 'Cihaz Anahtarı',
+          value: auth.hasStoredToken ? 'Kayıtlı' : 'Henüz eşleştirilmedi',
         ),
         const SizedBox(height: MmsSpacing.sm),
         TextField(
           key: const Key('tls_pin_sha256_field'),
           controller: _pinController,
           decoration: const InputDecoration(
-            labelText: 'Sabitlenmiş CA / Sertifika SHA-256 (64 hex)',
-            hintText: 'Örn: A1B2C3... (HTTPS TLS sabitlemesi için)',
+            labelText: 'Sabitlenmiş Sertifika SHA-256 (64 hex)',
+            hintText: 'Örn: A1B2C3... (HTTPS sertifika sabitlemesi için)',
             border: OutlineInputBorder(),
           ),
         ),
@@ -374,7 +432,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
           key: const Key('pairing_payload_field'),
           controller: _pairingInputController,
           decoration: const InputDecoration(
-            labelText: 'Hub Eşleştirme Kodu (JSON veya marketmms://pair)',
+            labelText: 'Manuel Eşleştirme Kodu (JSON veya marketmms://pair)',
             border: OutlineInputBorder(),
           ),
         ),
@@ -383,16 +441,6 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
           spacing: MmsSpacing.sm,
           runSpacing: MmsSpacing.sm,
           children: [
-            if (uiProfile.supportsCameraBarcodeScanning)
-              SizedBox(
-                height: 48,
-                child: OutlinedButton.icon(
-                  key: const Key('pairing_scan_qr_button'),
-                  onPressed: _isPairing ? null : _scanPairingQr,
-                  icon: const Icon(Icons.qr_code_scanner_rounded),
-                  label: const Text('QR ile Eşleştir'),
-                ),
-              ),
             SizedBox(
               height: 48,
               child: FilledButton.icon(

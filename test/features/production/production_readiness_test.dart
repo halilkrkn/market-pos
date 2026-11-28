@@ -678,6 +678,17 @@ void main() {
 
         expect(find.textContaining('store-besiktas'), findsOneWidget);
 
+        final advancedTile = find.byKey(
+          const Key('advanced_support_expansion_tile'),
+        );
+        await tester.scrollUntilVisible(
+          advancedTile,
+          300,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.tap(advancedTile);
+        await tester.pumpAndSettle();
+
         final exportBtn = find.byKey(const Key('diagnostics_export_logs_button'));
         await tester.scrollUntilVisible(
           exportBtn,
@@ -699,7 +710,7 @@ void main() {
     );
 
     testWidgets(
-      'Android Mobil (390x844): Tüm Faz 7 üretim ve güvenlik kartları taşmasız görünür',
+      'Android Mobil (390x844): Sade 3 ana kart ve kapalı Gelişmiş ve Teknik Destek bölümü taşmasız görünür',
       (WidgetTester tester) async {
         tester.view.physicalSize = const Size(390, 844);
         tester.view.devicePixelRatio = 1.0;
@@ -710,6 +721,36 @@ void main() {
         );
         await tester.pumpAndSettle();
 
+        // Android ana görünümünde mağaza kurulumu, legacy yedek ve merkezi yedek gösterilmez
+        expect(
+          find.byKey(const Key('diagnostics_store_setup_card')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('diagnostics_backup_card')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('hub_central_backup_card')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const Key('diagnostics_security_card')),
+          findsOneWidget,
+        );
+
+        // Gelişmiş ve Teknik Destek bölümü açıldığında teknik araçlar taşmasız görünür
+        final advancedTile = find.byKey(
+          const Key('advanced_support_expansion_tile'),
+        );
+        await tester.scrollUntilVisible(
+          advancedTile,
+          350,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.tap(advancedTile);
+        await tester.pumpAndSettle();
+
         final exportBtn = find.byKey(const Key('diagnostics_export_logs_button'));
         await tester.scrollUntilVisible(
           exportBtn,
@@ -718,18 +759,6 @@ void main() {
         );
         await tester.pumpAndSettle();
 
-        expect(
-          find.byKey(const Key('diagnostics_store_setup_card')),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(const Key('diagnostics_backup_card')),
-          findsOneWidget,
-        );
-        expect(
-          find.byKey(const Key('diagnostics_security_card')),
-          findsOneWidget,
-        );
         expect(
           find.byKey(const Key('diagnostics_update_card')),
           findsOneWidget,
