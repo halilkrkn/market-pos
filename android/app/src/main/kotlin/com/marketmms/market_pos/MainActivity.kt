@@ -8,5 +8,6 @@ class MainActivity : FlutterActivity() {
         super.configureFlutterEngine(flutterEngine)
         MmsSecureStorageChannelHandler(applicationContext).registerWith(flutterEngine)
         MmsBackgroundBackupChannelHandler(applicationContext).registerWith(flutterEngine)
+        MmsAppUpdaterChannelHandler(applicationContext).registerWith(flutterEngine)
     }
 }

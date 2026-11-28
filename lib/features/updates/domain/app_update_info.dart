@@ -6,6 +6,7 @@ class AppUpdateManifest {
   final String? sha256Checksum;
   final String? releaseNotes;
   final bool mandatory;
+  final String? assetFileName;
 
   const AppUpdateManifest({
     required this.latestVersion,
@@ -14,6 +15,7 @@ class AppUpdateManifest {
     this.sha256Checksum,
     this.releaseNotes,
     this.mandatory = false,
+    this.assetFileName,
   });
 
   factory AppUpdateManifest.fromJson(Map<String, dynamic> json) {
@@ -25,6 +27,7 @@ class AppUpdateManifest {
     }
     final rawUrl = (json['download_url'] as String?)?.trim();
     final rawSha = (json['sha256'] as String?)?.trim().toLowerCase();
+    final rawAssetName = (json['asset_file_name'] as String?)?.trim();
     return AppUpdateManifest(
       latestVersion: latest,
       minSupportedVersion: minSupported,
@@ -32,6 +35,9 @@ class AppUpdateManifest {
       sha256Checksum: (rawSha == null || rawSha.isEmpty) ? null : rawSha,
       releaseNotes: (json['release_notes'] as String?)?.trim(),
       mandatory: json['mandatory'] as bool? ?? false,
+      assetFileName: (rawAssetName == null || rawAssetName.isEmpty)
+          ? null
+          : rawAssetName,
     );
   }
 
@@ -70,16 +76,32 @@ class AppUpdateCheckResult {
   });
 }
 
-/// SemVer (`major.minor.patch`) karşılaştırma yardımcısı.
+/// SemVer (`major.minor.patch`, opsiyonel `v` öneki ve `+N` / `-bN` derleme numarası)
+/// karşılaştırma yardımcısı.
 class SemanticVersion implements Comparable<SemanticVersion> {
   final int major;
   final int minor;
   final int patch;
+  final int? buildNumber;
 
-  const SemanticVersion(this.major, this.minor, this.patch);
+  const SemanticVersion(
+    this.major,
+    this.minor,
+    this.patch, {
+    this.buildNumber,
+  });
+
+  static final RegExp _buildSuffixPattern = RegExp(
+    r'(?:\+(\d+)|-b(\d+)(?:$|[+.]))',
+    caseSensitive: false,
+  );
 
   static SemanticVersion parse(String raw) {
-    final core = raw.trim().split('+').first.split('-').first;
+    final trimmed = raw.trim().replaceFirst(RegExp(r'^[vV]'), '');
+    if (trimmed.isEmpty) {
+      throw FormatException('Geçersiz SemVer sürümü: $raw');
+    }
+    final core = trimmed.split('+').first.split('-').first;
     final parts = core.split('.');
     if (parts.isEmpty) {
       throw FormatException('Geçersiz SemVer sürümü: $raw');
@@ -87,14 +109,33 @@ class SemanticVersion implements Comparable<SemanticVersion> {
     final major = int.parse(parts[0]);
     final minor = parts.length > 1 ? int.parse(parts[1]) : 0;
     final patch = parts.length > 2 ? int.parse(parts[2]) : 0;
-    return SemanticVersion(major, minor, patch);
+
+    int? buildNumber;
+    final buildMatch = _buildSuffixPattern.firstMatch(trimmed);
+    if (buildMatch != null) {
+      final digits = buildMatch.group(1) ?? buildMatch.group(2);
+      if (digits != null) {
+        buildNumber = int.parse(digits);
+      }
+    }
+
+    return SemanticVersion(
+      major,
+      minor,
+      patch,
+      buildNumber: buildNumber,
+    );
   }
 
   @override
   int compareTo(SemanticVersion other) {
     if (major != other.major) return major.compareTo(other.major);
     if (minor != other.minor) return minor.compareTo(other.minor);
-    return patch.compareTo(other.patch);
+    if (patch != other.patch) return patch.compareTo(other.patch);
+    if (buildNumber != null && other.buildNumber != null) {
+      return buildNumber!.compareTo(other.buildNumber!);
+    }
+    return 0;
   }
 
   bool operator <(SemanticVersion other) => compareTo(other) < 0;
@@ -107,8 +148,9 @@ class SemanticVersion implements Comparable<SemanticVersion> {
       other is SemanticVersion &&
       major == other.major &&
       minor == other.minor &&
-      patch == other.patch;
+      patch == other.patch &&
+      buildNumber == other.buildNumber;
 
   @override
-  int get hashCode => Object.hash(major, minor, patch);
+  int get hashCode => Object.hash(major, minor, patch, buildNumber);
 }

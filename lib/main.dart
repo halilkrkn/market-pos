@@ -24,6 +24,7 @@ import 'features/shell/presentation/windows/windows_tray_providers.dart';
 import 'features/sync/application/hub_connection_notifier.dart';
 import 'features/sync/data/drive_authorized_registry_store.dart';
 import 'features/sync/sync_providers.dart';
+import 'features/updates/update_providers.dart';
 
 export 'features/backup/application/background_backup_scheduler.dart'
     show mmsBackgroundBackupEntrypoint;
@@ -145,6 +146,7 @@ Future<void> main() async {
             .overrideWithValue(Platform.isWindows),
         windowsZeroTouchAutoBootstrapEnabledProvider
             .overrideWithValue(Platform.isWindows),
+        appUpdateAutoCheckEnabledProvider.overrideWithValue(true),
         themePreferenceStoreProvider.overrideWithValue(themeStore),
         initialThemeModeProvider.overrideWithValue(initialThemeMode),
         driveAuthorizedRegistryStoreProvider.overrideWithValue(registryStore),

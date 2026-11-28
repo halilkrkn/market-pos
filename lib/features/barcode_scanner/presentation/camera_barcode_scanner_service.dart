@@ -14,6 +14,14 @@ abstract interface class CameraBarcodeScannerService {
     String subtitle = 'Barkodu çerçeve içerisine yerleştirin',
   });
 
+  /// Uzun JSON/URL eşleştirme yükleri (64 karakter üstü) dahil ham QR kodunu
+  /// okur; ürün barkodu sanitizasyonunu uygulamaz.
+  Future<CameraScanResult> scanQrCode(
+    BuildContext context, {
+    String title = 'QR Kod Tara',
+    String subtitle = 'QR kodu çerçeve içerisine yerleştirin',
+  });
+
   /// Kamerayı kullanıcı kapatana kadar açık tutar; her kabul edilen barkod
   /// [onBarcode] ile işlenir (ör. sepete ekleme). Kapanış nedeni döner
   /// (`cancelled`, `permissionDenied`, `error`, `unsupportedPlatform`).
@@ -49,6 +57,29 @@ class PlatformCameraBarcodeScannerService
       MaterialPageRoute(
         fullscreenDialog: true,
         builder: (_) => MobileScannerScreen(title: title, subtitle: subtitle),
+      ),
+    );
+    return result ?? const CameraScanResult.cancelled();
+  }
+
+  @override
+  Future<CameraScanResult> scanQrCode(
+    BuildContext context, {
+    String title = 'QR Kod Tara',
+    String subtitle = 'QR kodu çerçeve içerisine yerleştirin',
+  }) async {
+    if (!isSupported) {
+      return const CameraScanResult.unsupportedPlatform();
+    }
+
+    final result = await Navigator.of(context).push<CameraScanResult>(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => MobileScannerScreen(
+          title: title,
+          subtitle: subtitle,
+          rawQrMode: true,
+        ),
       ),
     );
     return result ?? const CameraScanResult.cancelled();

@@ -182,7 +182,7 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
   }
 
   Future<void> _scanPairingQr() async {
-    final scanned = await ref.read(cameraBarcodeScannerProvider).scanBarcode(
+    final scanned = await ref.read(cameraBarcodeScannerProvider).scanQrCode(
           context,
           title: 'Bilgisayar QR Kodunu Okut',
           subtitle: 'Bilgisayar ekranındaki QR kodu çerçeveye hizalayın',

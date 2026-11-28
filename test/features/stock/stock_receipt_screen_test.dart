@@ -29,6 +29,14 @@ class _FakeScanner implements CameraBarcodeScannerService {
       CameraScanResult.scanned(barcode);
 
   @override
+  Future<CameraScanResult> scanQrCode(
+    BuildContext context, {
+    String title = '',
+    String subtitle = '',
+  }) async =>
+      CameraScanResult.scanned(barcode);
+
+  @override
   Future<CameraScanResult> scanContinuously(
     BuildContext context, {
     required Future<ScanFeedback> Function(String barcode) onBarcode,

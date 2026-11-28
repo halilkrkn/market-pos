@@ -1,7 +1,16 @@
 /// MARKET MMS - Genel İstemci Sabitleri
 class AppConstants {
   static const String appName = 'Market Management System (MMS)';
-  static const String appVersion = '1.0.3';
+  static const String appVersion = '1.0.4';
+  static const int appBuildNumber = 5;
+
+  // Uzaktan Güncelleme Kaynağı (GitHub Releases + SHA256SUMS.txt doğrulaması)
+  static const String githubReleasesApiUrl =
+      'https://api.github.com/repos/halilkrkn/market-pos/releases?per_page=5';
+  static const bool includePrereleaseUpdates = bool.fromEnvironment(
+    'MMS_INCLUDE_PRERELEASES',
+    defaultValue: true,
+  );
 
   // Varsayılan Yerel Master Hub Bağlantı Bilgileri (Port 8945 veya derleme ortam değişkeni)
   static const String defaultBackendHost =

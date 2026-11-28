@@ -55,6 +55,16 @@ class _FakeCameraBarcodeScannerService implements CameraBarcodeScannerService {
     callCount++;
     return nextResult;
   }
+
+  @override
+  Future<CameraScanResult> scanQrCode(
+    BuildContext context, {
+    String title = 'QR Kod Tara',
+    String subtitle = 'QR kodu çerçeve içerisine yerleştirin',
+  }) async {
+    callCount++;
+    return nextResult;
+  }
 }
 
 void main() {

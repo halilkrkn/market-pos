@@ -16,6 +16,7 @@ import '../../../setup/setup_providers.dart';
 import '../../../stock/presentation/screens/stock_screen.dart';
 import '../../../sync/application/hub_connection_notifier.dart';
 import '../../../sync/sync_providers.dart';
+import '../../../updates/update_providers.dart';
 import '../../domain/app_destination.dart';
 import '../../shell_providers.dart';
 import '../widgets/desktop_shell_layout.dart';
@@ -54,12 +55,21 @@ class MainShellScreen extends ConsumerWidget {
     if (ref.watch(windowsZeroTouchAutoBootstrapEnabledProvider)) {
       ref.watch(windowsZeroTouchStartupProvider);
     }
+    if (ref.watch(appUpdateAutoCheckEnabledProvider)) {
+      ref.watch(appUpdateStartupTriggerProvider);
+    }
     final selectedDestination = ref.watch(activeDestinationProvider);
     final windowClass = context.windowClass;
     final setupConfig = ref.watch(setupConfigProvider);
     final showSetupBanner =
         ref.watch(setupWizardBannerEnabledProvider) &&
         !setupConfig.isSetupCompleted;
+    final updateState = ref.watch(appUpdateControllerProvider);
+    final updateManifest = updateState.availableManifest;
+    final showUpdateBanner =
+        updateState.hasAvailableUpdate &&
+        updateManifest != null &&
+        !updateState.bannerDismissed;
 
     void selectDestination(AppDestination destination) {
       if (ref.read(activeDestinationProvider) == destination) return;
@@ -69,44 +79,106 @@ class MainShellScreen extends ConsumerWidget {
     final colors = context.mmsColors;
     final innerContent = _buildContent(selectedDestination, selectDestination);
 
-    final content = showSetupBanner
-        ? Column(
-            children: [
-              Material(
-                color: colors.infoBg,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: MmsSpacing.md,
-                    vertical: MmsSpacing.xs,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(
-                        Icons.storefront_rounded,
-                        size: 18,
-                        color: colors.infoText,
-                      ),
-                      const SizedBox(width: MmsSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          'İlk mağaza/cihaz kurulumu henüz tamamlanmadı.',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: colors.infoText,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        key: const Key('shell_setup_wizard_cta'),
-                        onPressed: () => FirstSetupWizardDialog.show(context),
-                        child: const Text('Kurulumu Tamamla'),
-                      ),
-                    ],
+    final topBanners = <Widget>[
+      if (showUpdateBanner)
+        Material(
+          key: const Key('shell_update_banner'),
+          color: colors.infoBg,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: MmsSpacing.md,
+              vertical: MmsSpacing.xs,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.system_update_rounded,
+                  size: 18,
+                  color: colors.infoText,
+                ),
+                const SizedBox(width: MmsSpacing.sm),
+                Expanded(
+                  child: Text(
+                    updateState.isDownloading
+                        ? 'Güncelleme indiriliyor... %${((updateState.downloadProgress ?? 0) * 100).round()}'
+                        : 'Yeni sürüm hazır: v${updateManifest.latestVersion}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: colors.infoText,
+                    ),
                   ),
                 ),
-              ),
+                TextButton(
+                  key: const Key('shell_update_cta'),
+                  onPressed: updateState.isDownloading
+                      ? null
+                      : () => ref
+                            .read(appUpdateControllerProvider.notifier)
+                            .downloadAndInstall(),
+                  child: Text(
+                    updateState.isDownloading ? 'İndiriliyor...' : 'Güncelle',
+                  ),
+                ),
+                IconButton(
+                  key: const Key('shell_update_dismiss'),
+                  tooltip: 'Kapat',
+                  onPressed: () => ref
+                      .read(appUpdateControllerProvider.notifier)
+                      .dismissBanner(),
+                  icon: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: colors.infoText,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      if (showSetupBanner)
+        Material(
+          color: colors.infoBg,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: MmsSpacing.md,
+              vertical: MmsSpacing.xs,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.storefront_rounded,
+                  size: 18,
+                  color: colors.infoText,
+                ),
+                const SizedBox(width: MmsSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'İlk mağaza/cihaz kurulumu henüz tamamlanmadı.',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      color: colors.infoText,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  key: const Key('shell_setup_wizard_cta'),
+                  onPressed: () => FirstSetupWizardDialog.show(context),
+                  child: const Text('Kurulumu Tamamla'),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ];
+
+    final content = topBanners.isNotEmpty
+        ? Column(
+            children: [
+              ...topBanners,
               Expanded(child: innerContent),
             ],
           )

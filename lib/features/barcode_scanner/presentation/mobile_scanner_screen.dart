@@ -21,11 +21,30 @@ class MobileScannerScreen extends StatefulWidget {
   /// edilen barkod bu geri çağırımla işlenir ve sonucu ekranda gösterilir.
   final Future<ScanFeedback> Function(String barcode)? onContinuousBarcode;
 
+  /// `true` olduğunda yalnızca QR kodları taranır ve ürün barkodu sanitizasyonu
+  /// (64 karakter sınırı) uygulanmaz; cihaz eşleştirme JSON/URL yükleri desteklenir.
+  final bool rawQrMode;
+
+  static const int maxRawQrPayloadLength = 4096;
+
+  /// Ham QR kod değerini sanitizasyon olmadan yalnızca boşluk kırpıp
+  /// uzunluk üst sınırıyla ([maxRawQrPayloadLength]) doğrular.
+  @visibleForTesting
+  static String? extractRawQrPayload(String? rawValue) {
+    if (rawValue == null) return null;
+    final trimmed = rawValue.trim();
+    if (trimmed.isEmpty || trimmed.length > maxRawQrPayloadLength) {
+      return null;
+    }
+    return trimmed;
+  }
+
   const MobileScannerScreen({
     super.key,
     this.title = 'Kamera ile Barkod Tara',
     this.subtitle = 'Barkodu çerçeve içerisine yerleştirin',
     this.onContinuousBarcode,
+    this.rawQrMode = false,
   });
 
   @override
@@ -52,6 +71,9 @@ class _MobileScannerScreenState extends State<MobileScannerScreen> {
         detectionSpeed: DetectionSpeed.normal,
         detectionTimeoutMs: 250,
         facing: CameraFacing.back,
+        formats: widget.rawQrMode
+            ? const [BarcodeFormat.qrCode]
+            : const <BarcodeFormat>[],
       );
     }
     final onBarcode = widget.onContinuousBarcode;
@@ -81,6 +103,17 @@ class _MobileScannerScreenState extends State<MobileScannerScreen> {
 
   void _handleCapture(BarcodeCapture capture) {
     if (_hasCompleted) return;
+    if (widget.rawQrMode) {
+      for (final barcode in capture.barcodes) {
+        final candidate = barcode.rawValue ?? barcode.displayValue;
+        final payload = MobileScannerScreen.extractRawQrPayload(candidate);
+        if (payload != null) {
+          _complete(CameraScanResult.scanned(payload));
+          return;
+        }
+      }
+      return;
+    }
     final session = _session;
     if (session != null) {
       unawaited(_handleContinuousCapture(session, capture));
@@ -214,8 +247,8 @@ class _MobileScannerScreenState extends State<MobileScannerScreen> {
           IgnorePointer(
             child: Center(
               child: Container(
-                width: 260,
-                height: 160,
+                width: widget.rawQrMode ? 240 : 260,
+                height: widget.rawQrMode ? 240 : 160,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(MmsRadius.lg),
                   border: Border.all(color: colors.limeAccent, width: 2.5),

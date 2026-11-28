@@ -121,6 +121,10 @@ class DiagnosticsView extends ConsumerWidget {
               const SizedBox(height: MmsSpacing.md),
             ],
 
+            // Her iki platformda doğrudan erişilebilir sürüm ve güncelleme kartı
+            const AppUpdateCard(),
+            const SizedBox(height: MmsSpacing.md),
+
             // Her iki platformda en altta varsayılanı kapalı teknik destek bölümü
             _buildAdvancedSupportSection(context, status),
           ],
@@ -231,7 +235,7 @@ class DiagnosticsView extends ConsumerWidget {
               ),
             ),
             subtitle: Text(
-              'Yerel veritabanı, manuel adres, sertifika sabitleme, sürüm ve destek raporu',
+              'Yerel veritabanı, manuel adres, sertifika sabitleme ve destek raporu',
               style: TextStyle(fontSize: 12.5, color: colors.textSecondary),
             ),
             children: [
@@ -240,8 +244,6 @@ class DiagnosticsView extends ConsumerWidget {
               const HubConnectionControls(),
               const SizedBox(height: MmsSpacing.md),
               const DeviceSecurityCard(mode: DeviceSecurityCardMode.advanced),
-              const SizedBox(height: MmsSpacing.md),
-              const AppUpdateCard(),
               const SizedBox(height: MmsSpacing.md),
               const DiagnosticsExportCard(),
             ],
