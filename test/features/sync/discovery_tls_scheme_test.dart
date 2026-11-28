@@ -67,15 +67,15 @@ void main() {
     expect(urls.every((u) => u.startsWith('https://')), isTrue, reason: 'HTTP aday (downgrade) üretilmemeli: $urls');
   });
 
-  test('2. Pin yoksa (geliştirme / TLS\'siz yerel Hub) davranış değişmez: http://', () {
+  test('2. Pin henüz yoksa dahi keşif HTTPS şeması üretir (HTTP üretilmez)', () {
     final container = ProviderContainer(overrides: [pinnedTlsConfigProvider.overrideWithValue(null)]);
     addTearDown(container.dispose);
 
     final client = container.read(hubDiscoveryClientProvider) as UdpHubDiscoveryClient;
-    expect(client.effectiveScheme, 'http');
+    expect(client.effectiveScheme, 'https');
   });
 
-  test('2b. Pin sonradan (eşleştirme) değişince keşif sağlayıcısı yeniden kurulmaz; şema güncel pini izler', () {
+  test('2b. Pin sonradan (eşleştirme) değişince keşif sağlayıcısı yeniden kurulmaz ve HTTPS şeması korunur', () {
     final pinState = StateProvider<PinnedTlsConfig?>((ref) => null);
     final container = ProviderContainer(overrides: [
       pinnedTlsConfigProvider.overrideWith((ref) => ref.watch(pinState)),
@@ -83,7 +83,7 @@ void main() {
     addTearDown(container.dispose);
 
     final before = container.read(hubDiscoveryClientProvider) as UdpHubDiscoveryClient;
-    expect(before.effectiveScheme, 'http');
+    expect(before.effectiveScheme, 'https');
     container.read(pinState.notifier).state = pin; // cihaz eşleştirildi
     final after = container.read(hubDiscoveryClientProvider) as UdpHubDiscoveryClient;
     expect(identical(before, after), isTrue, reason: 'hubConnectionProvider durumunu sıfırlamamalı');

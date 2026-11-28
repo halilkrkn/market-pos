@@ -334,6 +334,7 @@ void main() {
               httpPort: 8945,
               responderIp: '192.168.1.50',
               serverIps: <String>['192.168.1.50', '10.0.0.22'],
+              scheme: 'http',
             ),
           ]);
 
@@ -345,6 +346,7 @@ void main() {
               httpPort: deadPort,
               responderIp: '192.168.1.250',
               serverIps: const <String>['192.168.1.250'],
+              scheme: 'http',
             ),
             ...discovery.onDiscover(),
           ]);
@@ -447,6 +449,7 @@ void main() {
         bindAddress: InternetAddress.loopbackIPv4,
         overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
         settleAfterFirstMatch: const Duration(milliseconds: 100),
+        defaultScheme: 'http',
       );
 
       final container = ProviderContainer(
@@ -590,6 +593,7 @@ void main() {
         bindAddress: InternetAddress.loopbackIPv4,
         overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
         settleAfterFirstMatch: const Duration(milliseconds: 100),
+        defaultScheme: 'http',
       );
 
       final apiClient = MmsApiClient(allowLoopback: true);
@@ -653,6 +657,7 @@ void main() {
         bindAddress: InternetAddress.loopbackIPv4,
         overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
         settleAfterFirstMatch: const Duration(milliseconds: 100),
+        defaultScheme: 'http',
       );
 
       final apiClient = MmsApiClient(allowLoopback: true);
@@ -726,6 +731,7 @@ void main() {
           bindAddress: InternetAddress.loopbackIPv4,
           overrideTargets: <InternetAddress>[InternetAddress.loopbackIPv4],
           settleAfterFirstMatch: const Duration(milliseconds: 100),
+          defaultScheme: 'http',
         ),
         allowLoopback: true,
         enableAutoLifecycle: false,

@@ -411,6 +411,7 @@ class HubLanAddressResolver {
     'loopback',
     'vethernet (internal)',
     'vethernet (private)',
+    'host-only',
   ];
 
   final NetworkAdapterInspector inspector;
@@ -580,5 +581,104 @@ class HubLanAddressResolver {
       'Birden fazla aktif LAN IP adresi server.crt SAN listesiyle eşleşiyor: '
       '${distinctIps.join(', ')}. hub_config.json içinde advertise_host belirtin.',
     );
+  }
+
+  /// UDP Discovery yanıtı için aktif, doğrulanmış fiziksel/yerel LAN IPv4
+  /// adreslerini öncelik sırasıyla çözer; VirtualBox Host-Only, Hyper-V
+  /// Default Switch, VPN, tunnel, loopback ve APIPA arayüzlerini dışlar.
+  Future<List<String>> resolveDiscoveryLanIps({
+    String? advertiseHost,
+    Set<String>? serverCertSanIpv4s,
+  }) async {
+    final adapters = await inspector.inspectAdapters();
+    return selectDiscoveryLanIpsFromCandidates(
+      adapters,
+      advertiseHost: advertiseHost,
+      serverCertSanIpv4s: serverCertSanIpv4s,
+    );
+  }
+
+  /// Saf deterministik keşif IPv4 seçimi (birim testleri ve Windows denetleyicisi paylaşır).
+  static List<String> selectDiscoveryLanIpsFromCandidates(
+    List<LanInterfaceCandidate> adapters, {
+    String? advertiseHost,
+    Set<String>? serverCertSanIpv4s,
+  }) {
+    final lanSanIps = serverCertSanIpv4s
+            ?.where((ip) => !isDisqualifiedIpv4(ip))
+            .toSet() ??
+        const <String>{};
+    final result = <String>[];
+    void addUnique(String ip) {
+      if (!result.contains(ip)) {
+        result.add(ip);
+      }
+    }
+
+    if (advertiseHost != null && advertiseHost.trim().isNotEmpty) {
+      final hostIp = advertiseHost.trim();
+      final isValidSan = lanSanIps.isEmpty || lanSanIps.contains(hostIp);
+      if (!isDisqualifiedIpv4(hostIp) && isValidSan) {
+        final ownedLocally = adapters.any(
+          (c) =>
+              c.operStatus == operStatusUp &&
+              c.ifType != 24 &&
+              c.tunnelType == 0 &&
+              !_hasExcludedKeyword(c) &&
+              c.ipv4Addresses.any(
+                (u) => u.dadState == dadStatePreferred && u.ip == hostIp,
+              ),
+        );
+        if (ownedLocally) {
+          addUnique(hostIp);
+        }
+      }
+    }
+
+    final tier1Gateway = <String>[];
+    final tier1NoGateway = <String>[];
+    final tier2Bridged = <String>[];
+
+    for (final c in adapters) {
+      if (c.operStatus != operStatusUp) continue;
+      if (!allowedLanIfTypes.contains(c.ifType)) continue;
+      if (c.tunnelType != 0) continue;
+      if (_hasExcludedKeyword(c)) continue;
+
+      for (final u in c.ipv4Addresses) {
+        if (u.dadState != dadStatePreferred) continue;
+        if (isDisqualifiedIpv4(u.ip)) continue;
+        if (c.hardwareInterface) {
+          if (c.hasGateway) {
+            tier1Gateway.add(u.ip);
+          } else {
+            tier1NoGateway.add(u.ip);
+          }
+        } else if (c.ifType == 6 &&
+            c.hasGateway &&
+            isRfc1918PrivateLan(u.ip)) {
+          tier2Bridged.add(u.ip);
+        }
+      }
+    }
+
+    List<String> orderBySan(List<String> ips) {
+      if (lanSanIps.isEmpty) return ips;
+      final inSan = ips.where(lanSanIps.contains);
+      final notInSan = ips.where((ip) => !lanSanIps.contains(ip));
+      return <String>[...inSan, ...notInSan];
+    }
+
+    for (final bucket in <List<String>>[
+      orderBySan(tier1Gateway),
+      orderBySan(tier1NoGateway),
+      orderBySan(tier2Bridged),
+    ]) {
+      for (final ip in bucket) {
+        addUnique(ip);
+      }
+    }
+
+    return List<String>.unmodifiable(result);
   }
 }

@@ -1,7 +1,7 @@
 /// MARKET MMS - Genel İstemci Sabitleri
 class AppConstants {
   static const String appName = 'Market Management System (MMS)';
-  static const String appVersion = '1.0.0';
+  static const String appVersion = '1.0.1';
 
   // Varsayılan Yerel Master Hub Bağlantı Bilgileri (Port 8945 veya derleme ortam değişkeni)
   static const String defaultBackendHost =
@@ -10,7 +10,7 @@ class AppConstants {
       int.fromEnvironment('MMS_HUB_PORT', defaultValue: 8945);
   static const String defaultBackendBaseUrl = String.fromEnvironment(
     'MMS_HUB_URL',
-    defaultValue: 'http://127.0.0.1:8945',
+    defaultValue: 'https://127.0.0.1:8945',
   );
 
   /// Derleme zamanında açıkça tanımlanmış `MMS_HUB_URL` ortam değişkeni;
@@ -22,7 +22,7 @@ class AppConstants {
 
   /// Yalnızca masaüstü/Windows istemcisinde kullanılan yerel loopback fallback adresi.
   static String get windowsLocalhostFallbackUrl =>
-      'http://$defaultBackendHost:$defaultBackendPort';
+      'https://$defaultBackendHost:$defaultBackendPort';
 
   // Cihaz Kimliği ve Yetkilendirme Belirteci
   static const String defaultDeviceId = String.fromEnvironment(

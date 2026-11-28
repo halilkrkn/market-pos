@@ -596,7 +596,8 @@ void main() {
       final mockHttp = MockClient((request) async {
         final origin = '${request.url.scheme}://${request.url.host}:${request.url.port}';
         requestedOrigins.add(origin);
-        if (origin == 'http://192.168.1.250:8945') {
+        if (origin == 'https://192.168.1.250:8945' ||
+            origin == 'http://192.168.1.250:8945') {
           throw const HttpException('Unreachable test host');
         }
         return http.Response(
@@ -660,7 +661,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(stubDiscovery.calls, 1);
-      expect(find.text('http://192.168.1.90:8945'), findsOneWidget);
+      expect(find.text('https://192.168.1.90:8945'), findsOneWidget);
       expect(find.text('Kaynak: Otomatik Keşif'), findsOneWidget);
       expect(find.text('hub-udp-90'), findsOneWidget);
 
@@ -678,20 +679,20 @@ void main() {
 
       expect(requestedOrigins.length, callsBeforeLoopback);
       expect(find.byKey(const Key('diagnostics_hub_action_feedback')), findsOneWidget);
-      expect(find.text('http://192.168.1.90:8945'), findsOneWidget);
+      expect(find.text('https://192.168.1.90:8945'), findsOneWidget);
 
-      // 3. Geçerli yalın IP ('192.168.1.95') normalize edilir, doğrulanır ve Manuel olarak kaydedilir
+      // 3. Geçerli yalın IP ('192.168.1.95') HTTPS olarak normalize edilir, doğrulanır ve Manuel kaydedilir
       await tester.enterText(inputFinder, '192.168.1.95');
       await tester.ensureVisible(saveBtn);
       await tester.tap(saveBtn);
       await tester.pumpAndSettle();
 
-      expect(find.text('http://192.168.1.95:8945'), findsOneWidget);
+      expect(find.text('https://192.168.1.95:8945'), findsOneWidget);
       expect(find.text('Kaynak: Manuel'), findsOneWidget);
 
       final persistedValid =
           await localDb.repository.getStoredHubConnection(allowLoopback: false);
-      expect(persistedValid?.hubUrl, 'http://192.168.1.95:8945');
+      expect(persistedValid?.hubUrl, 'https://192.168.1.95:8945');
       expect(persistedValid?.source, HubUrlSource.manual);
 
       // 4. Erişilemeyen IP ('192.168.1.250') girilirse hata gösterir fakat mevcut çalışan URL korunur
@@ -701,10 +702,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('diagnostics_hub_action_feedback')), findsOneWidget);
-      expect(find.text('http://192.168.1.95:8945'), findsOneWidget);
+      expect(find.text('https://192.168.1.95:8945'), findsOneWidget);
       final persistedAfterFail =
           await localDb.repository.getStoredHubConnection(allowLoopback: false);
-      expect(persistedAfterFail?.hubUrl, 'http://192.168.1.95:8945');
+      expect(persistedAfterFail?.hubUrl, 'https://192.168.1.95:8945');
     });
   });
 }

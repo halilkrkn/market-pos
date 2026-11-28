@@ -9,7 +9,6 @@ import '../../../core/constants/app_constants.dart';
 import '../../../core/network/api_response.dart';
 import '../../../core/utils/user_friendly_error_mapper.dart';
 import '../../diagnostics/application/system_status_notifier.dart';
-import '../../setup/setup_providers.dart';
 import '../domain/hub_connection_state.dart';
 import '../domain/hub_discovery_client.dart';
 import '../infrastructure/udp_hub_discovery_client.dart';
@@ -33,6 +32,8 @@ class HubConnectionBootstrapper {
     bool? allowLoopback,
     String? configuredHubUrl,
     String? desktopFallbackUrl,
+    Duration? maxDiscoveredAge,
+    DateTime Function()? now,
   }) async {
     final effectiveAllowLoopback =
         defaultAllowLoopbackForPlatform(allowLoopback: allowLoopback);
@@ -41,14 +42,25 @@ class HubConnectionBootstrapper {
       allowLoopback: effectiveAllowLoopback,
     );
     if (stored != null) {
-      return HubConnectionState(
-        phase: HubConnectionPhase.verifying,
-        activeHubUrl: stored.hubUrl,
-        hubId: stored.hubId,
-        source: stored.source,
-        lastVerifiedAt: stored.lastVerifiedAt,
-        isInitialized: true,
-      );
+      final isExpiredDiscovered =
+          stored.source == HubUrlSource.discovered &&
+          maxDiscoveredAge != null &&
+          (now?.call() ?? DateTime.now())
+                  .toUtc()
+                  .difference((stored.lastVerifiedAt ?? stored.updatedAt).toUtc()) >
+              maxDiscoveredAge;
+      if (isExpiredDiscovered) {
+        await repository.clearStoredHubConnection();
+      } else {
+        return HubConnectionState(
+          phase: HubConnectionPhase.verifying,
+          activeHubUrl: stored.hubUrl,
+          hubId: stored.hubId,
+          source: stored.source,
+          lastVerifiedAt: stored.lastVerifiedAt,
+          isInitialized: true,
+        );
+      }
     }
 
     final normalizedConfigured = HubUrlValidator.tryNormalize(
@@ -107,10 +119,10 @@ final initialHubConnectionStateProvider = Provider<HubConnectionState?>((ref) {
 /// Pin yoksa (geliştirme Hub'ı) `http://` korunur. HTTP'ye geri düşüş yoktur.
 final Provider<HubDiscoveryClient> hubDiscoveryClientProvider =
     Provider<HubDiscoveryClient>((ref) {
-  // `watch` DEĞİL: pin değişince (eşleştirme) bağlantı yöneticisi yeniden kurulup
-  // durumunu kaybetmesin; şema her keşif turunda güncel pin'e göre okunur.
+  // Discovery sonucunda HTTP URL üretilmez; Hub yalnızca TLS (HTTPS) kabul eder.
   return UdpHubDiscoveryClient(
-    schemeResolver: () => ref.read(pinnedTlsConfigProvider) != null ? 'https' : 'http',
+    defaultScheme: 'https',
+    schemeResolver: () => 'https',
   );
 });
 

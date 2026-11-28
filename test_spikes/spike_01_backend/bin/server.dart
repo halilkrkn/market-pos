@@ -5824,6 +5824,7 @@ class SpikeServer {
   }) async {
     // P-BLOCK-2 / DEC-REV-3: TLS aktifken Loopback (`IP:127.0.0.1`) SAN zorunluluğu (Startup Fail-Fast Exit 78)
     // vs LAN SAN / advertise_host uyuşmazlığı (Hub açık kalır, tanı uyarısı loglanır).
+    Set<String>? certSanIps;
     if (requireTls && serverCertPath != null) {
       final certFile = File(serverCertPath!);
       if (!certFile.existsSync()) {
@@ -5850,6 +5851,7 @@ class SpikeServer {
           'Hub yerel POS için açık kalacak ancak /api/v1/pairing/session 503 dönecektir.',
         );
       }
+      certSanIps = sanIps;
     }
 
     _resourcesStopped = false;
@@ -5871,11 +5873,24 @@ class SpikeServer {
     // Faz 1.1: UDP Discovery dinleyicisini başlat
     if (enableDiscovery) {
       try {
+        final effectiveResolver = lanAddressResolver ??
+            (Platform.isWindows
+                ? HubLanAddressResolver(inspector: WindowsNetworkAdapterInspector())
+                : null);
         _discoveryResponder = HubDiscoveryResponder(
           httpPort: port,
           discoveryPort: discoveryPort,
           hubId: hubId,
           bindAddress: address,
+          tlsEnabled: requireTls || securityContext != null,
+          advertiseHost: advertiseHost,
+          serverCertSanIpv4s: certSanIps,
+          lanIpsProvider: effectiveResolver != null
+              ? () => effectiveResolver.resolveDiscoveryLanIps(
+                    advertiseHost: advertiseHost,
+                    serverCertSanIpv4s: certSanIps,
+                  )
+              : null,
         );
         await _discoveryResponder!.start();
       } catch (e) {
@@ -6283,6 +6298,12 @@ void main(List<String> args) async {
   } on HubStartupArgException catch (e) {
     stderr.writeln(e.message);
     exit(e.exitCode);
+  } on TlsConfigurationException catch (e) {
+    stderr.writeln('[ERR_TLS_CONFIG] ${e.message}');
+    exit(78);
+  } catch (e) {
+    stderr.writeln('[ERR_HUB_STARTUP] ${SpikeServer.redactLogText(e.toString())}');
+    exit(1);
   }
 
   await server.lifecycle.onShutdown;

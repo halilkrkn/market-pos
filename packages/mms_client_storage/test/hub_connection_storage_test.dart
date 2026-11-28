@@ -80,7 +80,7 @@ void main() {
       }
     });
 
-    test('DiscoveredHubCandidate çoklu NIC yanıtında responderIp adresini ilk sıraya koyar', () {
+    test('DiscoveredHubCandidate çoklu NIC yanıtında responderIp adresini ilk sıraya koyar ve HTTPS kullanır', () {
       final candidate = DiscoveredHubCandidate.tryFromUdpPayload(
         const <String, dynamic>{
           'service': 'market_mms_hub',
@@ -97,26 +97,26 @@ void main() {
       expect(
         candidate.candidateBaseUrls(allowLoopback: false),
         const <String>[
-          'http://192.168.1.50:8945',
-          'http://10.0.0.15:8945',
+          'https://192.168.1.50:8945',
+          'https://10.0.0.15:8945',
         ],
       );
     });
 
-    test('normalizeUserInput yalın IP, host:port ve URL girdilerini normalize eder ve Android politikasını korur', () {
+    test('normalizeUserInput şemasız yalın IP ve host:port girdilerini HTTPS olarak normalize eder ve Android politikasını korur', () {
       expect(
         HubUrlValidator.normalizeUserInput(
           ' 192.168.1.50 ',
           allowLoopback: false,
         ),
-        'http://192.168.1.50:8945',
+        'https://192.168.1.50:8945',
       );
       expect(
         HubUrlValidator.normalizeUserInput(
           '192.168.1.50:8950',
           allowLoopback: false,
         ),
-        'http://192.168.1.50:8950',
+        'https://192.168.1.50:8950',
       );
       expect(
         HubUrlValidator.normalizeUserInput(
@@ -130,7 +130,7 @@ void main() {
           '127.0.0.1',
           allowLoopback: true,
         ),
-        'http://127.0.0.1:8945',
+        'https://127.0.0.1:8945',
       );
 
       for (final blocked in const <String>[

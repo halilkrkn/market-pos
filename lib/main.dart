@@ -112,6 +112,7 @@ Future<void> main() async {
   final initialHubConnectionState =
       await HubConnectionBootstrapper.loadInitialState(
     repository: localDbService.repository,
+    maxDiscoveredAge: const Duration(hours: 24),
   );
 
   // 1.5 Kalıcı tema tercihini ve yetkili Drive cihaz kayıt defterini yükle

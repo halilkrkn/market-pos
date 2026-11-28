@@ -29,7 +29,7 @@ class UdpHubDiscoveryClient implements HubDiscoveryClient {
     this.bindAddress,
     this.overrideTargets,
     this.settleAfterFirstMatch = const Duration(milliseconds: 200),
-    this.defaultScheme = 'http',
+    this.defaultScheme = 'https',
     this.schemeResolver,
   });
 
@@ -97,6 +97,7 @@ class UdpHubDiscoveryClient implements HubDiscoveryClient {
   static bool _isIgnoredInterfaceName(String lowerName) {
     return lowerName.contains('virtual') ||
         lowerName.contains('vbox') ||
+        lowerName.contains('host-only') ||
         lowerName.contains('vmware') ||
         lowerName.contains('pseudo') ||
         lowerName.contains('vethernet') ||

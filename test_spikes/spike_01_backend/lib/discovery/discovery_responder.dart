@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import '../network/hub_lan_address_resolver.dart';
+
 /// MARKET MMS — Hub UDP Discovery Responder (Faz 1.1)
 ///
 /// Yerel ağdaki istemcilerin (Android / Windows) Master Hub sunucusunu
@@ -32,6 +34,10 @@ class HubDiscoveryResponder {
   final int discoveryPort;
   final String hubId;
   final InternetAddress? bindAddress;
+  final bool tlsEnabled;
+  final String? advertiseHost;
+  final Set<String>? serverCertSanIpv4s;
+  final Future<List<String>> Function()? lanIpsProvider;
 
   RawDatagramSocket? _socket;
   StreamSubscription<RawSocketEvent>? _subscription;
@@ -44,6 +50,10 @@ class HubDiscoveryResponder {
     this.discoveryPort = defaultDiscoveryPort,
     this.hubId = 'MMS-HUB-MASTER',
     this.bindAddress,
+    this.tlsEnabled = false,
+    this.advertiseHost,
+    this.serverCertSanIpv4s,
+    this.lanIpsProvider,
   });
 
   /// Discovery servisinin aktif çalışıp çalışmadığı
@@ -77,7 +87,12 @@ class HubDiscoveryResponder {
 
   Future<void> _refreshLanIps() async {
     try {
-      _cachedLanIps = await getLocalLanIps();
+      _cachedLanIps = lanIpsProvider != null
+          ? await lanIpsProvider!()
+          : await getLocalLanIps(
+              advertiseHost: advertiseHost,
+              serverCertSanIpv4s: serverCertSanIpv4s,
+            );
       _lastLanIpsRefresh = DateTime.now();
     } catch (_) {}
   }
@@ -137,6 +152,7 @@ class HubDiscoveryResponder {
         'protocol_version': protocolVersion,
         'hub_id': hubId,
         'http_port': httpPort,
+        'scheme': tlsEnabled ? 'https' : 'http',
         'server_time': DateTime.now().toUtc().toIso8601String(),
         'server_ips': lanIps,
       };
@@ -149,9 +165,32 @@ class HubDiscoveryResponder {
   }
 
   /// Windows makinesindeki geçerli fiziksel/yerel ağ IPv4 adreslerini listeler.
-  /// Sanal adaptörleri (VirtualBox, APIPA 169.254, loopback) filtreler.
-  static Future<List<String>> getLocalLanIps() async {
+  /// Sanal adaptörleri (VirtualBox Host-Only dahil, Hyper-V Default Switch,
+  /// VMware, VPN, APIPA, loopback) adaptör açıklaması ve gateway durumuyla eler.
+  static Future<List<String>> getLocalLanIps({
+    String? advertiseHost,
+    Set<String>? serverCertSanIpv4s,
+  }) async {
+    if (Platform.isWindows) {
+      try {
+        final resolver = HubLanAddressResolver(
+          inspector: WindowsNetworkAdapterInspector(),
+        );
+        return await resolver.resolveDiscoveryLanIps(
+          advertiseHost: advertiseHost,
+          serverCertSanIpv4s: serverCertSanIpv4s,
+        );
+      } catch (_) {
+        // FFI geçici olarak başarısız olursa aşağıdaki güvenli geri düşüşe devam et.
+      }
+    }
+
     final results = <String>[];
+    if (advertiseHost != null &&
+        advertiseHost.trim().isNotEmpty &&
+        !HubLanAddressResolver.isDisqualifiedIpv4(advertiseHost.trim())) {
+      results.add(advertiseHost.trim());
+    }
     try {
       final interfaces = await NetworkInterface.list(
         type: InternetAddressType.IPv4,
@@ -161,22 +200,18 @@ class HubDiscoveryResponder {
 
       for (final iface in interfaces) {
         final lowerName = iface.name.toLowerCase();
-        // Bilinen sanal arayüzleri eler
         if (lowerName.contains('virtual') ||
             lowerName.contains('vbox') ||
             lowerName.contains('vmware') ||
             lowerName.contains('pseudo') ||
-            lowerName.contains('vethernet')) {
+            lowerName.contains('vethernet') ||
+            lowerName.contains('host-only')) {
           continue;
         }
 
         for (final addr in iface.addresses) {
           final ip = addr.address;
-          if (ip.startsWith('127.') || ip.startsWith('169.254.')) {
-            continue;
-          }
-          // VirtualBox varsayılan host-only ağı
-          if (ip.startsWith('192.168.56.')) {
+          if (HubLanAddressResolver.isDisqualifiedIpv4(ip)) {
             continue;
           }
           if (!results.contains(ip)) {

@@ -133,13 +133,23 @@ class HubUrlValidator {
   }
 
   /// Kullanıcı tarafından manuel girilen IP, host veya tam URL metnini
-  /// (`192.168.1.50`, `192.168.1.50:8945`, `http://192.168.1.50:8945`, `https://hub.local:8443`)
-  /// normalize edip platform politikasına göre doğrular.
+  /// (`192.168.1.50`, `192.168.1.50:8945`, `https://192.168.1.50:8945`, `https://hub.local:8443`)
+  /// normalize edip platform politikasına göre doğrular. Şemasız girdiler
+  /// varsayılan olarak `https://` şemasına yükseltilir.
   static String normalizeUserInput(
     String rawInput, {
     int defaultPort = 8945,
+    String defaultScheme = 'https',
     required bool allowLoopback,
   }) {
+    final normalizedDefaultScheme = defaultScheme.trim().toLowerCase();
+    if (normalizedDefaultScheme != 'https' && normalizedDefaultScheme != 'http') {
+      throw HubUrlValidationException(
+        'Geçersiz varsayılan Hub protokolü: $defaultScheme',
+        rawUrl: rawInput,
+      );
+    }
+
     final trimmed = rawInput.trim();
     if (trimmed.isEmpty) {
       throw HubUrlValidationException(
@@ -173,7 +183,7 @@ class HubUrlValidator {
       }
       final remainder = trimmed.substring(closeIdx + 1);
       if (remainder.isEmpty) {
-        candidate = 'http://$trimmed:$defaultPort';
+        candidate = '$normalizedDefaultScheme://$trimmed:$defaultPort';
       } else if (remainder.startsWith(':')) {
         final portPart = remainder.substring(1);
         if (portPart.isEmpty || int.tryParse(portPart) == null) {
@@ -182,7 +192,7 @@ class HubUrlValidator {
             rawUrl: rawInput,
           );
         }
-        candidate = 'http://$trimmed';
+        candidate = '$normalizedDefaultScheme://$trimmed';
       } else {
         throw HubUrlValidationException(
           'Geçersiz IPv6 veya port biçimi.',
@@ -193,7 +203,7 @@ class HubUrlValidator {
       final firstColon = trimmed.indexOf(':');
       final lastColon = trimmed.lastIndexOf(':');
       if (firstColon != -1 && firstColon != lastColon) {
-        candidate = 'http://[$trimmed]:$defaultPort';
+        candidate = '$normalizedDefaultScheme://[$trimmed]:$defaultPort';
       } else if (firstColon != -1) {
         final portPart = trimmed.substring(firstColon + 1);
         if (portPart.isEmpty || int.tryParse(portPart) == null) {
@@ -202,9 +212,9 @@ class HubUrlValidator {
             rawUrl: rawInput,
           );
         }
-        candidate = 'http://$trimmed';
+        candidate = '$normalizedDefaultScheme://$trimmed';
       } else {
-        candidate = 'http://$trimmed:$defaultPort';
+        candidate = '$normalizedDefaultScheme://$trimmed:$defaultPort';
       }
     }
 

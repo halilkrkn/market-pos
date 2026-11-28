@@ -1,7 +1,10 @@
+import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mms_client_storage/mms_client_storage.dart';
 
 import '../../../../core/design_system/design_system.dart';
 import '../../../../core/platform/mms_ui_profile.dart';
@@ -10,6 +13,7 @@ import '../../../../core/security/tls_pinned_client_factory.dart';
 import '../../../../core/theme/design_tokens.dart';
 import '../../../../core/utils/user_friendly_error_mapper.dart';
 import '../../../barcode_scanner/barcode_scanner_providers.dart';
+import '../../../diagnostics/application/system_status_notifier.dart';
 import '../../../diagnostics/presentation/widgets/diagnostics_card_helpers.dart';
 import '../../../setup/setup_providers.dart';
 import '../../../sync/application/hub_connection_notifier.dart';
@@ -43,16 +47,32 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
   Future<void> _saveTlsPin() async {
     try {
       final currentSetup = ref.read(setupConfigProvider);
+      final enteredNorm = PinnedTlsConfig.normalizeHex(_pinController.text);
+      String? matchingCaPem;
+      final existingPem = currentSetup.pinnedCaPem;
+      if (existingPem != null && existingPem.trim().isNotEmpty) {
+        try {
+          final parsed = extractCanonicalSingleCertDer(
+            Uint8List.fromList(utf8.encode(existingPem)),
+          );
+          if (constantTimeEqualsAscii(parsed.sha256Hex, enteredNorm)) {
+            matchingCaPem = existingPem;
+          }
+        } on X509ValidationException {
+          matchingCaPem = null;
+        }
+      }
       await ref.read(setupConfigProvider.notifier).updateTlsPinning(
             enabled: true,
             sha256Hex: _pinController.text,
-            caCertPem: currentSetup.pinnedCaPem,
+            caCertPem: matchingCaPem,
           );
       if (!mounted) return;
       setState(() {
         _statusTone = AppBadgeTone.success;
-        _statusMessage =
-            'TLS SHA-256 sertifika sabitleme kaydedildi ve aktif edildi.';
+        _statusMessage = matchingCaPem != null
+            ? 'TLS SHA-256 ve Kök CA sertifikası doğrulandı ve aktif edildi.'
+            : 'TLS SHA-256 sertifika sabitleme kaydedildi (Kök CA PEM indirmek için "Kök CA İndir ve Sabitle" kullanabilirsiniz).';
       });
     } catch (e) {
       if (!mounted) return;
@@ -62,6 +82,76 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
             ? e.message
             : UserFriendlyErrorMapper.map(e);
       });
+    }
+  }
+
+  Future<void> _bootstrapRootCaAndPin() async {
+    setState(() {
+      _isPairing = true;
+      _statusMessage = null;
+    });
+    try {
+      final rawActive = ref.read(hubConnectionProvider).activeHubUrl;
+      String? targetUrl;
+      if (rawActive != null && rawActive.trim().isNotEmpty) {
+        final parsed = Uri.tryParse(rawActive.trim());
+        if (parsed != null && parsed.host.isNotEmpty) {
+          final port = parsed.hasPort ? parsed.port : 8945;
+          targetUrl = 'https://${parsed.host}:$port';
+        }
+      }
+      if (targetUrl == null && Platform.isWindows) {
+        targetUrl = 'https://127.0.0.1:8945';
+      }
+      if (targetUrl == null) {
+        throw const FormatException(
+          'Önce Hub adresini belirleyin veya QR ile eşleştirin.',
+        );
+      }
+
+      final pairingClient = DevicePairingClient(
+        tokenStore: ref.read(secureTokenStoreProvider),
+        logger: ref.read(redactingLoggerProvider),
+      );
+      final canonical = await pairingClient.fetchAndVerifyRootCaCert(
+        hubBaseUrl: targetUrl,
+        expectedCaSha256Hex: _pinController.text,
+      );
+
+      await ref.read(setupConfigProvider.notifier).updateTlsPinning(
+            enabled: true,
+            sha256Hex: canonical.sha256Hex,
+            caCertPem: canonical.toPem(),
+          );
+      _pinController.text = canonical.sha256Hex;
+      _syncedPinValue = canonical.sha256Hex;
+
+      await ref.read(hubConnectionProvider.notifier).connectToManualAddress(targetUrl);
+      await ref.read(systemStatusProvider.notifier).refreshStatus();
+
+      if (!mounted) return;
+      setState(() {
+        _statusTone = AppBadgeTone.success;
+        _statusMessage =
+            'Hub Kök CA sertifikası SHA-256 ve TLS el sıkışmasıyla doğrulandı ve sabitlendi.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _statusTone = AppBadgeTone.danger;
+        _statusMessage = e is DevicePairingException
+            ? e.message
+            : (e is FormatException
+                ? e.message
+                : UserFriendlyErrorMapper.map(
+                    e,
+                    fallback: 'Kök CA indirilemedi veya doğrulanamadı.',
+                  ));
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _isPairing = false);
+      }
     }
   }
 
@@ -254,9 +344,18 @@ class _DeviceSecurityCardState extends ConsumerState<DeviceSecurityCard> {
               height: 48,
               child: FilledButton.icon(
                 key: const Key('save_tls_pin_button'),
-                onPressed: _saveTlsPin,
+                onPressed: _isPairing ? null : _saveTlsPin,
                 icon: const Icon(Icons.verified_user_rounded),
                 label: const Text('TLS Pin Kaydet'),
+              ),
+            ),
+            SizedBox(
+              height: 48,
+              child: FilledButton.tonalIcon(
+                key: const Key('bootstrap_ca_pin_button'),
+                onPressed: _isPairing ? null : _bootstrapRootCaAndPin,
+                icon: const Icon(Icons.security_rounded),
+                label: const Text('Kök CA İndir ve Sabitle'),
               ),
             ),
             if (setup.tlsPinningEnabled)

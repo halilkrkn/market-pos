@@ -239,6 +239,73 @@ class DevicePairingClient {
     return generated;
   }
 
+  /// Beklenen 64-hex Kök CA SHA-256 parmak iziyle Hub'dan Kök CA sertifikasını
+  /// izole bootstrap istemcisiyle indirir, X.509v3 yapı/süre/CA:TRUE doğrulaması
+  /// ve sıkı CA-sabitli TLS `/health` el sıkışması sonrası kanonik sonucu döner.
+  Future<CanonicalCertDerResult> fetchAndVerifyRootCaCert({
+    required String hubBaseUrl,
+    required String expectedCaSha256Hex,
+    Duration requestTimeout = const Duration(seconds: 6),
+  }) async {
+    final cleanBaseUrl = hubBaseUrl.trim().replaceAll(RegExp(r'/+$'), '');
+    final normalizedPin = PinnedTlsConfig.normalizeHex(expectedCaSha256Hex);
+    if (normalizedPin == 'UNKNOWN' ||
+        !RegExp(r'^[0-9A-F]{64}$').hasMatch(normalizedPin)) {
+      throw const DevicePairingException(
+        'CA_PIN_REQUIRED',
+        'Kök CA doğrulaması için 64 karakterli SHA-256 parmak izi zorunludur.',
+      );
+    }
+
+    final parsedUri = Uri.tryParse(cleanBaseUrl);
+    if (parsedUri == null ||
+        parsedUri.scheme.toLowerCase() != 'https' ||
+        parsedUri.host.isEmpty) {
+      throw const DevicePairingException(
+        'TLS_SCHEME_REQUIRED',
+        'Kök CA bootstrap için yalnızca https:// Hub adresi kullanılabilir.',
+      );
+    }
+
+    final canonicalCa = await _fetchAndVerifyBootstrapCaCert(
+      parsedHubBaseUri: parsedUri,
+      expectedPinHex: normalizedPin,
+    );
+
+    final strictClient = _createStrictPhaseCDClient(
+      caCertBytes: canonicalCa.derBytes,
+      expectedCaSha256Hex: normalizedPin,
+    );
+    try {
+      final resp = await strictClient
+          .get(Uri.parse('$cleanBaseUrl/health'))
+          .timeout(requestTimeout);
+      if (resp.statusCode != 200 && resp.statusCode != 503) {
+        throw DevicePairingException(
+          'HUB_HEALTH_FAILED',
+          'Kök CA sabitlendi ancak Hub sağlık doğrulaması HTTP ${resp.statusCode} döndürdü.',
+        );
+      }
+      return canonicalCa;
+    } on TlsPinMismatchException catch (e) {
+      throw DevicePairingException('CA_PIN_MISMATCH', e.message);
+    } on TlsCertificateValidationException catch (e) {
+      throw DevicePairingException('TLS_CERT_ERROR', e.message);
+    } on TimeoutException {
+      throw const DevicePairingException(
+        'BOOTSTRAP_TIMEOUT',
+        'Hub sıkı TLS sağlık doğrulaması zaman aşımına uğradı.',
+      );
+    } on Exception catch (e) {
+      throw DevicePairingException(
+        'TLS_VERIFICATION_FAILED',
+        'Hub sıkı TLS el sıkışması doğrulanamadı: ${e.runtimeType}',
+      );
+    } finally {
+      strictClient.close();
+    }
+  }
+
   Future<DevicePairingResult> pairDevice({
     required String hubBaseUrl,
     required String sessionId,

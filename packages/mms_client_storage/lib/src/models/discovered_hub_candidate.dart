@@ -25,14 +25,14 @@ class DiscoveredHubCandidate {
     required this.httpPort,
     required this.serverIps,
     this.responderIp,
-    this.scheme = 'http',
+    this.scheme = 'https',
   });
 
   /// UDP Discovery JSON paketinden aday oluşturur; beklenen sözleşmeye uymazsa `null` döner.
   static DiscoveredHubCandidate? tryFromUdpPayload(
     Map<String, dynamic> json, {
     String? responderIp,
-    String scheme = 'http',
+    String scheme = 'https',
   }) {
     final service = json['service'];
     final protocolVersion = json['protocol_version'];
@@ -68,6 +68,15 @@ class DiscoveredHubCandidate {
       return null;
     }
 
+    final payloadScheme = json['scheme'] is String
+        ? (json['scheme'] as String).trim().toLowerCase()
+        : '';
+    final requestedScheme = scheme.trim().toLowerCase();
+    final effectiveScheme =
+        (requestedScheme == 'https' || payloadScheme == 'https')
+            ? 'https'
+            : 'http';
+
     return DiscoveredHubCandidate(
       service: service.trim(),
       protocolVersion: protocolVersion.trim(),
@@ -75,7 +84,7 @@ class DiscoveredHubCandidate {
       httpPort: httpPort,
       serverIps: List<String>.unmodifiable(parsedIps),
       responderIp: normalizedResponderIp,
-      scheme: scheme.trim().toLowerCase() == 'https' ? 'https' : 'http',
+      scheme: effectiveScheme,
     );
   }
 

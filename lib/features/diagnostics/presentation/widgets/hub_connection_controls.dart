@@ -153,7 +153,7 @@ class _HubConnectionControlsState extends ConsumerState<HubConnectionControls> {
                 ),
                 decoration: InputDecoration(
                   hintText:
-                      'Örn: 192.168.1.50 veya http://192.168.1.50:8945',
+                      'Örn: 192.168.1.158 veya https://192.168.1.158:8945',
                   hintStyle: TextStyle(color: colors.textSecondary),
                   filled: true,
                   fillColor: colors.surface,
