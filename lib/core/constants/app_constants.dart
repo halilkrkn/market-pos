@@ -1,7 +1,7 @@
 /// MARKET MMS - Genel İstemci Sabitleri
 class AppConstants {
   static const String appName = 'Market Management System (MMS)';
-  static const String appVersion = '1.0.1';
+  static const String appVersion = '1.0.2';
 
   // Varsayılan Yerel Master Hub Bağlantı Bilgileri (Port 8945 veya derleme ortam değişkeni)
   static const String defaultBackendHost =

@@ -56,15 +56,15 @@ void main() {
     expect(gitignore, anyOf(contains('*.jks'), contains('*.keystore')));
   });
 
-  test('Phase 1.1: pubspec.yaml sürümü 1.0.1+2, Gradle Flutter sürüm alanlarını kullanır ve paketleme betiği dinamik sürüm üretir', () {
+  test('Phase 1.1: pubspec.yaml sürümü 1.0.2+3, Gradle Flutter sürüm alanlarını kullanır ve paketleme betiği dinamik sürüm üretir', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final versionMatch = RegExp(
       r'^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\+([0-9]+)\s*$',
       multiLine: true,
     ).firstMatch(pubspec);
     expect(versionMatch, isNotNull, reason: 'pubspec.yaml geçerli X.Y.Z+N sürümü taşımalı');
-    expect(versionMatch!.group(1), '1.0.1');
-    expect(versionMatch.group(2), '2');
+    expect(versionMatch!.group(1), '1.0.2');
+    expect(versionMatch.group(2), '3');
     expect(AppConstants.appVersion, versionMatch.group(1));
 
     final g = gradle.readAsStringSync();
